@@ -2547,7 +2547,7 @@ function buildReferencePlan(mode, roleImages) {
     const styles = (roleImages.style.length ? roleImages.style : remainingGeneral).slice(0, 1);
     const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
     const images = structure
-      ? [structure, structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
+      ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
       : uniqueValues([...styles, ...generalFallback].filter(Boolean)).slice(0, 2);
     return {
       images,
@@ -3574,10 +3574,12 @@ function buildImageEditPrompt(
       "Image reference roles:",
       "- The first input image is the SCENE STRUCTURE reference. It is the dominant source. If any other reference conflicts with it, ignore the other reference.",
       "- Preserve the structure reference's camera position, lens feeling, horizon line, vanishing points, perspective, terrain or room shape, building silhouettes, architectural layout, object scale, foreground/midground/background relationship, and lighting direction.",
-      `- The next ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them only for material finish, color grading, lighting quality, weather, atmosphere, surface texture, brush or render language, and final polish.`,
+      `- The next ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them only as color, material, lighting, atmosphere, texture, and render-finish samples.`,
+      "- Treat STYLE references as non-spatial swatches, not as scene images. Their composition, camera, architecture, layout, object positions, focal subject, silhouettes, and scene geometry have zero authority.",
       "Do not copy the style reference composition, camera angle, architecture layout, scene geometry, props, silhouettes, object placement, or focal subject.",
       "The final image must be a redraw of the structure reference's scene layout, not a redraw of the style reference.",
       "Keep perspective, horizon, vanishing points, architecture positions, terrain shape, wall/floor/ceiling relationships, scale, and lighting direction stable. Do not crop, rotate, zoom, reframe, replace, or redesign the scene layout.",
+      "If the style reference is visually attractive but uses a different composition, ignore that composition completely.",
     ].join("\n");
   }
 
