@@ -591,6 +591,7 @@ imageModelSelect?.addEventListener("change", () => {
     return;
   }
   configNode.dataset.imageModel = imageModelSelect.value || "gpt-image-2-official";
+  syncImageOptionsUi();
   saveCurrentProject();
 });
 
@@ -2190,10 +2191,13 @@ function syncImageOptionsSummary() {
     style: "风格图",
     output: "输出图",
   }[imageOptions.imageRole] || "普通图片";
-  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${imageOptions.quality}`;
+  const model = normalizeImageModel(configNode?.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
+  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
 }
 
 function syncImageOptionsUi() {
+  syncImageQualityOptionLabels();
   Object.entries(imageOptions).forEach(([group, value]) => {
     const grid = imageOptionsPopover.querySelector(`[data-option-group="${group}"]`);
     grid?.querySelectorAll("button").forEach((button) => {
@@ -2205,6 +2209,20 @@ function syncImageOptionsUi() {
     updateImageRoleSelectLabel(configNode);
   }
   syncImageOptionsSummary();
+}
+
+function syncImageQualityOptionLabels() {
+  const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
+  if (!qualityGrid) return;
+  const model = configNode?.dataset.type === "image"
+    ? normalizeImageModel(configNode.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official")
+    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
+  const labels = model === "gpt-image-2"
+    ? { low: "1k", medium: "2k", high: "4k" }
+    : { low: "low", medium: "medium", high: "high" };
+  qualityGrid.querySelectorAll("[data-value]").forEach((button) => {
+    button.textContent = labels[button.dataset.value] || button.dataset.value;
+  });
 }
 
 function ensureVideoDefaults(node) {
@@ -2349,6 +2367,19 @@ function normalizeImageModel(value) {
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
+}
+
+function normalizeImageQualityForModel(quality, model) {
+  const value = String(quality || "high").trim().toLowerCase();
+  if (normalizeImageModel(model) === "gpt-image-2") {
+    if (value === "low" || value === "standard" || value === "1k") return "1k";
+    if (value === "medium" || value === "hd" || value === "2k") return "2k";
+    if (value === "high" || value === "4k") return "4k";
+    return value;
+  }
+  if (value === "medium") return "standard";
+  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
+  return "high";
 }
 
 function renderReferencePicker() {
@@ -3040,11 +3071,11 @@ async function runImageGeneration(node) {
     const payload = {
       model: selectedModel,
       prompt: enhancedPrompt,
-      imageName: uploadName,
+      imageName: safeAsciiFileName(uploadName, "image.png"),
       imageDataUrls: referenceImages,
       purpose: node.dataset.imagePurpose || imageOptions.purpose,
       referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
-      quality: node.dataset.imageQuality || imageOptions.quality,
+      quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
       size: requestedSize,
       apimartChannel: "b",
   };
@@ -3410,7 +3441,7 @@ async function uploadMediaFile(file) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      fileName: file.name,
+      fileName: safeAsciiFileName(file.name, file.type.startsWith("video/") ? "media.mp4" : "image.png"),
       imageDataUrl,
     }),
   });
@@ -3719,6 +3750,19 @@ function stripFileExtension(fileName) {
   return String(fileName || "上传图片").replace(/\.[^.]+$/, "") || "上传图片";
 }
 
+function safeAsciiFileName(name, fallback = "file") {
+  const cleaned = String(name || fallback)
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
 function moveNode(node, x, y) {
   const nextX = Math.max(-6000, Math.min(11500, x));
   const nextY = Math.max(-6000, Math.min(11500, y));
@@ -3974,7 +4018,7 @@ async function uploadDataUrlAsSharedImage(imageDataUrl, fileName) {
   const response = await fetch("/api/upload-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName, imageDataUrl }),
+    body: JSON.stringify({ fileName: safeAsciiFileName(fileName, "image.png"), imageDataUrl }),
   });
   const result = await readResponseJson(response);
   if (!response.ok || !result.url) throw new Error(formatApiError(result, `HTTP ${response.status}`));
