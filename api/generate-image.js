@@ -77,7 +77,8 @@ module.exports = async function handler(req, res) {
       output_format: "png",
     };
 
-    if (quality) submitBody.quality = String(quality);
+    const normalizedQuality = normalizeQuality(quality, submitBody.model);
+    if (normalizedQuality) submitBody.quality = normalizedQuality;
     const normalizedSize = normalizeSize(size);
     if (normalizedSize) submitBody.size = normalizedSize;
     const references = Array.isArray(imageDataUrls)
@@ -165,6 +166,20 @@ function normalizeModel(model) {
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
+}
+
+function normalizeQuality(quality, model) {
+  const value = String(quality || "").trim().toLowerCase();
+  if (!value) return "";
+  if (model === "gpt-image-2") {
+    if (value === "low" || value === "standard" || value === "1k") return "1k";
+    if (value === "medium" || value === "hd" || value === "2k") return "2k";
+    if (value === "high" || value === "4k") return "4k";
+    return value;
+  }
+  if (value === "medium") return "standard";
+  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
+  return "high";
 }
 
 function normalizeSize(size) {
