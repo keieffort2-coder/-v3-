@@ -1,10 +1,12 @@
-﻿const pages = document.querySelectorAll(".page");
+const pages = document.querySelectorAll(".page");
 const appShell = document.querySelector(".app-shell");
 const navItems = document.querySelectorAll(".nav-item[data-page]");
 const pageButtons = document.querySelectorAll("[data-page]");
 const projectGrid = document.querySelector("#projectGrid");
 const projectNameInput = document.querySelector("#projectNameInput");
+const projectCodeInput = document.querySelector("#projectCodeInput");
 const createProjectButton = document.querySelector("#createProject");
+const cloneProjectButton = document.querySelector("#cloneProject");
 const workspaceProjectName = document.querySelector("#workspaceProjectName");
 const canvas = document.querySelector(".workspace-canvas");
 const canvasContent = document.querySelector(".canvas-content");
@@ -44,6 +46,7 @@ let memoryList = document.querySelector("#memoryList");
 
 const PROJECT_LIST_KEY = "aivideobox.projects.v2";
 const PROJECT_CODE_INDEX_KEY = "aivideobox.projectCodes.v1";
+const SHARED_PROJECTS_API = "/api/shared-projects";
 const GLOBAL_MEMORY_KEY = "aivideobox.globalMemories.v1";
 const IMAGE_OPTIONS_KEY = "aivideobox.imageOptions.v1";
 const WORKSPACE_SIDE_STATE_KEY = "aivideobox.workspaceSidebarsHidden.v1";
@@ -130,6 +133,21 @@ createProjectButton?.addEventListener("click", () => {
   openProject(name);
 });
 
+cloneProjectButton?.addEventListener("click", async () => {
+  const code = normalizeProjectCode(projectCodeInput.value);
+  if (!code) {
+    markProjectCodeInput("请输入项目码");
+    return;
+  }
+  const clonedName = await cloneProjectByCode(code);
+  if (!clonedName) {
+    markProjectCodeInput("未找到项目码");
+    return;
+  }
+  projectCodeInput.value = "";
+  openProject(clonedName);
+});
+
 projectGrid?.addEventListener("click", (event) => {
   const card = event.target.closest(".project-card");
   if (!card) return;
@@ -148,6 +166,21 @@ projectGrid?.addEventListener("click", (event) => {
   if (event.target.closest(".delete-project")) {
     deleteProject(name);
     return;
+  }
+
+  const projectCodeButton = event.target.closest(".project-code");
+  if (projectCodeButton) {
+    projectCodeButton.disabled = true;
+    const oldText = projectCodeButton.textContent;
+    projectCodeButton.textContent = "正在生成...";
+    publishProjectCode(card)
+      .catch((error) => {
+        console.warn("Project code publish failed", error);
+        projectCodeButton.textContent = oldText || "生成项目码";
+      })
+      .finally(() => {
+        projectCodeButton.disabled = false;
+      });
   }
 });
 
@@ -1190,8 +1223,6 @@ function deleteProject(name) {
   const code = card?.dataset.code;
   card?.remove();
   localStorage.removeItem(projectKey(name));
-  pendingDeletedProjectNames.push(name);
-  deleteSharedProject(name);
   if (code) removeProjectCode(code);
   if (currentProject === name) {
     currentProject = "";
@@ -1201,9 +1232,48 @@ function deleteProject(name) {
   saveProjectList();
 }
 
-function publishProjectCode(card) { return ""; }
+async function publishProjectCode(card) {
+  if (!card) return "";
+  const name = card.dataset.project;
+  if (currentProject === name) saveCurrentProject();
+  const code = card.dataset.code || createUniqueProjectCode();
+  card.dataset.code = code;
+  const button = card.querySelector(".project-code");
+  if (button) button.textContent = `项目码 ${code}`;
+  const index = readProjectCodeIndex();
+  index[code] = name;
+  writeProjectCodeIndex(index);
+  saveProjectList();
 
-function cloneProjectByCode(code) { return ""; }
+  const data = readJson(projectKey(name), null);
+  if (hasProjectNodes(data)) {
+    const shareableData = await ensureSharedProjectImages(name, data);
+    await saveSharedProject(code, name, shareableData || data);
+  }
+  return code;
+}
+
+async function cloneProjectByCode(code) {
+  const normalized = normalizeProjectCode(code);
+  if (!normalized) return "";
+  const localName = findProjectNameByCode(normalized);
+  let sourceName = localName;
+  let sourceData = localName ? localStorage.getItem(projectKey(localName)) : "";
+
+  if (!sourceData) {
+    const shared = await loadSharedProjectByCode(normalized);
+    if (!shared?.data || !hasProjectNodes(shared.data)) return "";
+    sourceName = shared.name || `项目 ${normalized}`;
+    sourceData = JSON.stringify(shared.data);
+  }
+
+  const name = uniqueProjectName(`${sourceName} 副本`);
+  localStorage.setItem(projectKey(name), sourceData);
+  addProjectCard(name, new Date().toLocaleDateString("zh-CN"));
+  updateProjectGridState();
+  saveProjectList();
+  return name;
+}
 
 function findProjectNameByCode(code) {
   const normalized = normalizeProjectCode(code);
@@ -1229,7 +1299,16 @@ function normalizeProjectCode(value = "") {
   return String(value).replace(/^项目码\s*/i, "").replace(/\s+/g, "").toUpperCase();
 }
 
-function markProjectCodeInput(message) { return; }
+function markProjectCodeInput(message) {
+  if (!projectCodeInput) return;
+  projectCodeInput.value = "";
+  projectCodeInput.placeholder = message;
+  projectCodeInput.classList.add("invalid");
+  setTimeout(() => {
+    projectCodeInput.classList.remove("invalid");
+    projectCodeInput.placeholder = "输入项目码";
+  }, 1400);
+}
 
 function readProjectCodeIndex() {
   const index = readJson(PROJECT_CODE_INDEX_KEY, {});
@@ -3858,6 +3937,7 @@ async function ensureSharedProjectImages(name, data) {
       localStorage.setItem(projectKey(name), JSON.stringify(data));
     } catch {}
   }
+  return data;
 }
 
 async function makeNodeImagesShareable(node) {
@@ -3901,7 +3981,34 @@ async function uploadDataUrlAsSharedImage(imageDataUrl, fileName) {
   return result.url;
 }
 
-async function saveSharedProject(name, data) { return; }
+async function saveSharedProject(code, name, data) {
+  if (!code || !hasProjectNodes(data)) return;
+  const response = await fetch(SHARED_PROJECTS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: normalizeProjectCode(code),
+      name,
+      data: stripLocalImageKeysFromProject(data),
+    }),
+  });
+  if (!response.ok) {
+    const result = await readResponseJson(response);
+    throw new Error(formatApiError(result, `HTTP ${response.status}`));
+  }
+}
+
+async function loadSharedProjectByCode(code) {
+  try {
+    const response = await fetch(`${SHARED_PROJECTS_API}?code=${encodeURIComponent(normalizeProjectCode(code))}`, { cache: "no-store" });
+    const result = await readResponseJson(response);
+    if (!response.ok || !result?.data) return null;
+    return result;
+  } catch (error) {
+    console.warn("Project code load failed", error);
+    return null;
+  }
+}
 
 function hasProjectNodes(data) {
   return Array.isArray(data?.nodes) && data.nodes.length > 0;
