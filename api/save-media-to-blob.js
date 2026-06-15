@@ -62,8 +62,14 @@ function extensionFromContentType(contentType, mediaType) {
 }
 
 function sanitizeName(name) {
-  return String(name)
+  const cleaned = String(name)
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
     .replace(/[/\\?%*:|"<>]/g, "-")
     .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
     .slice(0, 120);
+  return cleaned || "saved-media";
 }
