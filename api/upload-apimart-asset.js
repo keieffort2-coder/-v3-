@@ -2,8 +2,12 @@ const API_BASE = "https://api.apimart.ai/v1";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
-  if (selected === "a") return process.env.APIMART_API_KEY || process.env.APIMART_TOKEN;
-  return process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
+  const key = selected === "a" ? process.env.APIMART_API_KEY || process.env.APIMART_TOKEN : process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
+  return sanitizeHeaderValue(key);
+}
+
+function sanitizeHeaderValue(value) {
+  return String(value || "").trim().replace(/[^\x20-\x7E]/g, "");
 }
 
 module.exports = async function handler(req, res) {
