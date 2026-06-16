@@ -2014,6 +2014,7 @@ function renderNodeImagePreview(node) {
         ${generated.slice(1).map((src) => `<img src="${src}" alt="">`).join("")}
       </div>
     `;
+    bindPreviewDimensionCapture(node, preview);
     refreshConnectionsAfterImages(preview);
     return;
   }
@@ -2022,8 +2023,30 @@ function renderNodeImagePreview(node) {
   const uniqueSources = uniqueValues(sources);
   if (uniqueSources.length) {
     preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`).join("");
+    bindPreviewDimensionCapture(node, preview);
     refreshConnectionsAfterImages(preview);
   }
+}
+
+function bindPreviewDimensionCapture(node, preview) {
+  preview.querySelectorAll("img").forEach((image) => {
+    const capture = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return;
+      if (node.dataset.generatedImageUrl && image.src === node.dataset.generatedImageUrl) {
+        node.dataset.generatedImageNaturalWidth = String(image.naturalWidth);
+        node.dataset.generatedImageNaturalHeight = String(image.naturalHeight);
+      } else {
+        node.dataset.imageNaturalWidth = String(image.naturalWidth);
+        node.dataset.imageNaturalHeight = String(image.naturalHeight);
+      }
+      saveCurrentProject();
+    };
+    if (image.complete) {
+      capture();
+    } else {
+      image.addEventListener("load", capture, { once: true });
+    }
+  });
 }
 
 function renderNodeVideoPreview(node) {
@@ -2444,7 +2467,7 @@ function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan)
     prompt,
     "GPT Image 2 binding rules:",
     requestedSize
-      ? `- Output canvas must use the requested canvas bucket ${requestedSize}. Keep the visible scene framing and aspect ratio aligned with the structure reference.`
+      ? `- Output canvas must use the exact requested size ${requestedSize} unless the API rejects it. Match the structure reference's pixel aspect ratio and visible framing.`
       : "- Keep the output canvas aspect ratio aligned with the structure reference whenever a structure reference is attached.",
     hasStructure
       ? "- The structure reference is the geometry authority: preserve its crop, framing, camera angle, perspective grid, major silhouettes, object placement, and scene proportions."
@@ -2569,8 +2592,9 @@ function collectRoleReferenceImages(node) {
 
   const rememberDimensions = (url, sourceNode) => {
     if (!url || !sourceNode) return;
-    const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || 0);
-    const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || 0);
+    const domDimensions = getPreviewImageDimensions(sourceNode, url);
+    const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || domDimensions?.width || 0);
+    const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || domDimensions?.height || 0);
     if (width > 0 && height > 0) imageDimensions[url] = { width, height };
   };
 
@@ -2614,6 +2638,14 @@ function inferImageRole(node) {
   if (/参考|风格|样式|画风/i.test(title)) return "style";
   if (/编辑|底图|上一版|上一张|输出|生成|结果/i.test(title)) return "editBase";
   return "general";
+}
+
+function getPreviewImageDimensions(node, url = "") {
+  if (!node) return null;
+  const images = [...node.querySelectorAll(".upload-preview img")];
+  const image = images.find((item) => !url || item.src === url || item.currentSrc === url) || images[0];
+  if (!image?.naturalWidth || !image?.naturalHeight) return null;
+  return { width: image.naturalWidth, height: image.naturalHeight };
 }
 
 function selectReferenceImagesForMode(mode, roleImages) {
@@ -3417,7 +3449,6 @@ function parseExplicitSize(prompt, model = "") {
   const width = Number(ratioMatch[1]);
   const height = Number(ratioMatch[2]);
   if (!width || !height) return "";
-  if (normalizeImageModel(model) === "gpt-image-2") return gptImage2SizeFromRatio(width, height);
   if (width === height) return "2048x2048";
   if (width > height) return "2560x1440";
   return "1440x2560";
@@ -3462,20 +3493,11 @@ function sizeFromDimensions(width, height, model = "") {
 
 function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
-  if (normalizeImageModel(model) === "gpt-image-2") return gptImage2SizeFromRatio(width, height);
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
   const nextWidth = Math.min(3840, Math.max(16, Math.round((width * scale) / 16) * 16));
   const nextHeight = Math.min(3840, Math.max(16, Math.round((height * scale) / 16) * 16));
   return `${nextWidth}x${nextHeight}`;
-}
-
-function gptImage2SizeFromRatio(width, height) {
-  const ratio = width / height;
-  if (!Number.isFinite(ratio) || ratio <= 0) return "";
-  if (ratio > 1.15) return "1536x864";
-  if (ratio < 0.87) return "864x1536";
-  return "1024x1024";
 }
 
 async function readResponseJson(response) {
