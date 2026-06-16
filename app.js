@@ -3097,7 +3097,7 @@ async function runImageGeneration(node) {
   const roleImages = collectRoleReferenceImages(node);
   const referencePlan = buildReferencePlan(referenceMode, roleImages);
   const referenceImages = referencePlan.images;
-  const requestedSize = await resolveGenerationSize(prompt, referencePlan);
+  const requestedSize = selectedModel === "gemini-3-pro-image-preview" ? "" : await resolveGenerationSize(prompt, referencePlan);
   const enhancedPrompt = sanitizeGenerationPrompt(buildImageEditPrompt(
     prompt,
     referenceMode,
