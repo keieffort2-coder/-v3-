@@ -2565,15 +2565,26 @@ function collectRoleReferenceImages(node) {
   const structureImages = [];
   const styleImages = [];
   const generalImages = [];
+  const imageDimensions = {};
+
+  const rememberDimensions = (url, sourceNode) => {
+    if (!url || !sourceNode) return;
+    const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || 0);
+    const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || 0);
+    if (width > 0 && height > 0) imageDimensions[url] = { width, height };
+  };
 
   if ((node.dataset.imageRole || "output") === "editBase" && ownImages.length) {
     editBaseImages.push(...ownImages);
+    ownImages.forEach((url) => rememberDimensions(url, node));
   } else if ((node.dataset.imageRole || "output") !== "output" && ownImages.length) {
     structureImages.push(...ownImages);
+    ownImages.forEach((url) => rememberDimensions(url, node));
   }
 
   incomingNodes.forEach((sourceNode) => {
     const images = getNodeImageSources(sourceNode).filter(isRemoteImageUrl);
+    images.forEach((url) => rememberDimensions(url, sourceNode));
     const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
     if (role === "editBase") {
       editBaseImages.push(...images);
@@ -2593,6 +2604,7 @@ function collectRoleReferenceImages(node) {
     structure: uniqueValues(structureImages.filter(isRemoteImageUrl)),
     style: uniqueValues(styleImages.filter(isRemoteImageUrl)),
     general: uniqueValues(generalImages.filter(isRemoteImageUrl)),
+    dimensions: imageDimensions,
   };
 }
 
@@ -2613,6 +2625,7 @@ function buildReferencePlan(mode, roleImages) {
   const explicitStructure = roleImages.structure[0] || "";
   const fallbackStructure = roleImages.general[0] || "";
   const structure = editBase || explicitStructure || fallbackStructure || "";
+  const structureDimensions = roleImages.dimensions?.[structure] || null;
   const remainingGeneral = structure ? roleImages.general.filter((url) => url !== structure) : roleImages.general;
 
   if (mode === "structureStyle") {
@@ -2628,6 +2641,7 @@ function buildReferencePlan(mode, roleImages) {
       hasExplicitStructure: Boolean(editBase || explicitStructure || fallbackStructure),
       styleCount: styles.length,
       generalCount: generalFallback.length,
+      structureDimensions,
     };
   }
   if (mode === "strict") {
@@ -2638,6 +2652,7 @@ function buildReferencePlan(mode, roleImages) {
       structureCount: !editBase && images.length ? 1 : 0,
       styleCount: 0,
       generalCount: 0,
+      structureDimensions: roleImages.dimensions?.[images[0]] || null,
     };
   }
 
@@ -2647,6 +2662,7 @@ function buildReferencePlan(mode, roleImages) {
     structureCount: 0,
     styleCount: styles.length,
     generalCount: 0,
+    structureDimensions: null,
   };
 }
 
@@ -2785,6 +2801,8 @@ function duplicateNode(node) {
     imageModel: node.dataset.imageModel || "gpt-image-2-official",
     apimartChannel: "b",
     fileName: node.dataset.fileName || "",
+    imageNaturalWidth: node.dataset.imageNaturalWidth || "",
+    imageNaturalHeight: node.dataset.imageNaturalHeight || "",
     imageUrls: parseJsonArray(node.dataset.imageUrls),
     imageDataUrl: node.dataset.imageDataUrl || "",
     referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
@@ -2792,6 +2810,8 @@ function duplicateNode(node) {
     referenceFileName: node.dataset.referenceFileName || "",
     generatedImageUrl: node.dataset.generatedImageUrl || "",
     generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
+    generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
+    generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
     videoUrls: parseJsonArray(node.dataset.videoUrls),
     videoDataUrl: node.dataset.videoDataUrl || "",
     referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
@@ -3178,6 +3198,12 @@ async function runImageGeneration(node) {
     }
     node.dataset.generatedImageUrl = finalResult.imageUrl;
     node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
+    getImageDimensions(finalResult.imageUrl).then((dimensions) => {
+      if (!dimensions) return;
+      node.dataset.generatedImageNaturalWidth = String(dimensions.width);
+      node.dataset.generatedImageNaturalHeight = String(dimensions.height);
+      saveCurrentProject();
+    });
     renderNodeImagePreview(node);
     status.textContent = "图片生成完成。";
   } catch (error) {
@@ -3373,6 +3399,9 @@ function getViewerSourcesForImage(image) {
 async function resolveGenerationSize(prompt, referencePlan, model = "") {
   const explicit = parseExplicitSize(prompt, model);
   if (explicit) return explicit;
+  if (referencePlan?.structureDimensions?.width && referencePlan?.structureDimensions?.height) {
+    return sizeFromDimensions(referencePlan.structureDimensions.width, referencePlan.structureDimensions.height, model);
+  }
   const structureImage = referencePlan?.images?.[0] || "";
   const dimensions = await getImageDimensions(structureImage);
   if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height, model);
@@ -3404,6 +3433,26 @@ function getImageDimensions(src) {
     image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
     image.onerror = () => resolve(null);
     image.src = src;
+  });
+}
+
+function getImageFileDimensions(file) {
+  return new Promise((resolve) => {
+    if (!file || !file.type?.startsWith("image/")) {
+      resolve(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    image.src = url;
   });
 }
 
@@ -3716,6 +3765,13 @@ function uploadFilesToImageNode(node, files) {
   if (preview) {
     preview.innerHTML = imageFiles.map((file) => `<img src="${URL.createObjectURL(file)}" alt="">`).join("");
   }
+
+  getImageFileDimensions(imageFiles[0]).then((dimensions) => {
+    if (!dimensions) return;
+    node.dataset.imageNaturalWidth = String(dimensions.width);
+    node.dataset.imageNaturalHeight = String(dimensions.height);
+    saveCurrentProject();
+  });
 
   Promise.all(imageFiles.map(uploadImageFile))
     .then((uploadedUrls) => {
@@ -4213,6 +4269,8 @@ function serializeNodes(nodes) {
       imageModel: node.dataset.imageModel || "gpt-image-2-official",
       apimartChannel: "b",
       fileName: node.dataset.fileName || "",
+      imageNaturalWidth: node.dataset.imageNaturalWidth || "",
+      imageNaturalHeight: node.dataset.imageNaturalHeight || "",
       imageUrls: parseJsonArray(node.dataset.imageUrls),
       imageDataKey,
       imageDataUrl: imageDataKey ? "" : node.dataset.imageDataUrl || "",
@@ -4222,6 +4280,8 @@ function serializeNodes(nodes) {
       referenceFileName: node.dataset.referenceFileName || "",
       generatedImageUrl: node.dataset.generatedImageUrl || "",
       generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
+      generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
+      generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
       videoUrls: parseJsonArray(node.dataset.videoUrls),
       videoDataUrl: node.dataset.videoDataUrl || "",
       referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
@@ -4328,6 +4388,8 @@ function restoreCanvasData(data) {
     node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.apimartChannel = "b";
     if (saved.fileName) node.dataset.fileName = saved.fileName;
+    if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
+    if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
     if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
     if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
     if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
@@ -4335,6 +4397,8 @@ function restoreCanvasData(data) {
     if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
     if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
     if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
+    if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
+    if (saved.generatedImageNaturalHeight) node.dataset.generatedImageNaturalHeight = saved.generatedImageNaturalHeight;
     if (Array.isArray(saved.videoUrls)) node.dataset.videoUrls = JSON.stringify(saved.videoUrls);
     if (saved.videoDataUrl) node.dataset.videoDataUrl = saved.videoDataUrl;
     if (Array.isArray(saved.referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(saved.referenceVideoUrls);
