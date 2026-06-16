@@ -2423,6 +2423,29 @@ function normalizeImageQualityForModel(quality, model) {
   return "high";
 }
 
+function shouldSendImageSize(model) {
+  const normalized = normalizeImageModel(model);
+  return normalized !== "gemini-3-pro-image-preview";
+}
+
+function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
+  const normalized = normalizeImageModel(model);
+  if (normalized !== "gpt-image-2") return prompt;
+  const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
+  return [
+    prompt,
+    "GPT Image 2 binding rules:",
+    requestedSize
+      ? `- Output canvas must use the requested canvas bucket ${requestedSize}. Keep the visible scene framing and aspect ratio aligned with the structure reference.`
+      : "- Keep the output canvas aspect ratio aligned with the structure reference whenever a structure reference is attached.",
+    hasStructure
+      ? "- The structure reference is the geometry authority: preserve its crop, framing, camera angle, perspective grid, major silhouettes, object placement, and scene proportions."
+      : "- If no structure reference is attached, follow the user's requested framing and avoid arbitrary crop changes.",
+    "- The style reference is the palette authority only: transfer its color temperature, contrast curve, saturation level, atmospheric haze, shadow tint, highlight color, material finish, and render texture.",
+    "- Do not let the style reference override the structure reference's composition, camera, crop, geometry, or scene layout.",
+  ].join("\n");
+}
+
 function renderReferencePicker() {
   const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node !== configNode);
   if (!nodes.length) {
@@ -3097,14 +3120,14 @@ async function runImageGeneration(node) {
   const roleImages = collectRoleReferenceImages(node);
   const referencePlan = buildReferencePlan(referenceMode, roleImages);
   const referenceImages = referencePlan.images;
-  const requestedSize = selectedModel === "gemini-3-pro-image-preview" ? "" : await resolveGenerationSize(prompt, referencePlan);
-  const enhancedPrompt = sanitizeGenerationPrompt(buildImageEditPrompt(
+  const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
+  const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
     prompt,
     referenceMode,
     roleImages,
     referencePlan,
     node.dataset.imagePurpose || imageOptions.purpose,
-  ));
+  ), selectedModel, requestedSize, referencePlan));
 
   node.classList.add("running");
   status.textContent = `正在准备 ApiMart ${selectedModel} 图片任务...`;
@@ -3339,24 +3362,25 @@ function getViewerSourcesForImage(image) {
   return uniqueValues([...scope.querySelectorAll("img")].map((item) => item.src).filter(Boolean));
 }
 
-async function resolveGenerationSize(prompt, referencePlan) {
-  const explicit = parseExplicitSize(prompt);
+async function resolveGenerationSize(prompt, referencePlan, model = "") {
+  const explicit = parseExplicitSize(prompt, model);
   if (explicit) return explicit;
   const structureImage = referencePlan?.images?.[0] || "";
   const dimensions = await getImageDimensions(structureImage);
-  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height);
+  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height, model);
   return "";
 }
 
-function parseExplicitSize(prompt) {
+function parseExplicitSize(prompt, model = "") {
   const text = String(prompt || "");
   const sizeMatch = text.match(/(\d{3,5})\s*(?:x|\*|×|X)\s*(\d{3,5})/);
-  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]));
+  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]), model);
   const ratioMatch = text.match(/(?:比例|画幅|aspect\s*ratio)?\s*(\d{1,2})\s*[:：]\s*(\d{1,2})/i);
   if (!ratioMatch) return "";
   const width = Number(ratioMatch[1]);
   const height = Number(ratioMatch[2]);
   if (!width || !height) return "";
+  if (normalizeImageModel(model) === "gpt-image-2") return gptImage2SizeFromRatio(width, height);
   if (width === height) return "2048x2048";
   if (width > height) return "2560x1440";
   return "1440x2560";
@@ -3375,17 +3399,26 @@ function getImageDimensions(src) {
   });
 }
 
-function sizeFromDimensions(width, height) {
-  return normalizeGenerationSize(width, height);
+function sizeFromDimensions(width, height, model = "") {
+  return normalizeGenerationSize(width, height, model);
 }
 
-function normalizeGenerationSize(width, height) {
+function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
+  if (normalizeImageModel(model) === "gpt-image-2") return gptImage2SizeFromRatio(width, height);
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
   const nextWidth = Math.min(3840, Math.max(16, Math.round((width * scale) / 16) * 16));
   const nextHeight = Math.min(3840, Math.max(16, Math.round((height * scale) / 16) * 16));
   return `${nextWidth}x${nextHeight}`;
+}
+
+function gptImage2SizeFromRatio(width, height) {
+  const ratio = width / height;
+  if (!Number.isFinite(ratio) || ratio <= 0) return "";
+  if (ratio > 1.15) return "1536x864";
+  if (ratio < 0.87) return "864x1536";
+  return "1024x1024";
 }
 
 async function readResponseJson(response) {
