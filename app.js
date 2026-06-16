@@ -2286,6 +2286,12 @@ function renderVideoSettingsPanel(node) {
   panel.innerHTML = `
     <div class="video-settings-grid">
       <label>
+        <span>生成模式</span>
+        <select data-video-setting="videoMode">
+          ${Object.entries(videoModeLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+        </select>
+      </label>
+      <label>
         <span>时长</span>
         <input data-video-setting="videoDuration" type="number" min="1" max="30" step="1" value="${escapeHtml(node.dataset.videoDuration || "5")}">
       </label>
@@ -2319,6 +2325,7 @@ function renderVideoSettingsPanel(node) {
     </div>
   `;
   imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
+  panel.querySelector('[data-video-setting="videoMode"]').value = normalizeVideoModeValue(node.dataset.videoMode);
   panel.querySelector('[data-video-setting="videoAspectRatio"]').value = node.dataset.videoAspectRatio || "16:9";
   panel.querySelector('[data-video-setting="videoResolution"]').value = node.dataset.videoResolution || "1080p";
   panel.querySelector('[data-video-setting="videoGenerateAudio"]').checked = node.dataset.videoGenerateAudio === "true";
@@ -2354,6 +2361,7 @@ function persistVideoSettingsFromPanel(node) {
     }
   });
   ensureVideoDefaults(node);
+  setVideoMode(node, normalizeVideoModeValue(node.dataset.videoMode));
   syncVideoOptionsSummary(node);
 }
 
