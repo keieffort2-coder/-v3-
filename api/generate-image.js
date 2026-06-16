@@ -79,7 +79,7 @@ module.exports = async function handler(req, res) {
 
     const normalizedQuality = normalizeQuality(quality, submitBody.model);
     if (normalizedQuality) submitBody.quality = normalizedQuality;
-    const normalizedSize = submitBody.model === "gemini-3-pro-image-preview" ? "" : normalizeSize(size);
+    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size) : "";
     if (normalizedSize) submitBody.size = normalizedSize;
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
@@ -180,6 +180,10 @@ function normalizeQuality(quality, model) {
   if (value === "medium") return "standard";
   if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
   return "high";
+}
+
+function shouldSendSize(model) {
+  return model !== "gemini-3-pro-image-preview" && model !== "gpt-image-2";
 }
 
 function normalizeSize(size) {
