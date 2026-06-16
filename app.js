@@ -14,6 +14,7 @@ const canvasToolbar = document.querySelector(".canvas-toolbar");
 const connectorSvg = document.querySelector(".connectors");
 const nodeTemplate = document.querySelector("#nodeTemplate");
 const canvasContextMenu = document.querySelector("#canvasContextMenu");
+const canvasFilePicker = document.querySelector("#canvasFilePicker");
 const nodeContextMenu = document.querySelector("#nodeContextMenu");
 const imageUploadContextMenu = document.querySelector("#imageUploadContextMenu");
 const portConnectionContextMenu = document.querySelector("#portConnectionContextMenu");
@@ -281,6 +282,16 @@ canvas?.addEventListener("contextmenu", (event) => {
 });
 
 canvasContextMenu?.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("[data-canvas-action]");
+  if (actionButton?.dataset.canvasAction === "open-files") {
+    hideMenus();
+    if (canvasFilePicker) {
+      canvasFilePicker.value = "";
+      canvasFilePicker.click();
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-create-type]");
   if (!button) return;
 
@@ -700,6 +711,36 @@ document.addEventListener("change", (event) => {
     uploadFilesToVideoNode(node, files);
     return;
   }
+});
+
+canvasFilePicker?.addEventListener("change", () => {
+  const imageFiles = [...(canvasFilePicker.files || [])].filter((file) => file.type.startsWith("image/"));
+  canvasFilePicker.value = "";
+  if (!imageFiles.length) return;
+
+  const imageRole = askCanvasUploadImageRole();
+  if (!imageRole) return;
+
+  if (imageFiles.length === 1) {
+    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
+  const mergeIntoOne = window.confirm("检测到多张图片。\n\n确定：上传到一个图片节点\n取消：每张图片分成单独节点");
+  if (mergeIntoOne) {
+    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
+  const spacingX = 310;
+  const spacingY = 290;
+  imageFiles.forEach((file, index) => {
+    const point = {
+      x: contextPoint.x + (index % 3) * spacingX,
+      y: contextPoint.y + Math.floor(index / 3) * spacingY,
+    };
+    createImageInputNodeFromFilesAtPoint([file], point, imageRole);
+  });
 });
 
 canvas?.addEventListener("dragenter", (event) => {
@@ -3673,8 +3714,27 @@ function getVideoFilesFromDataTransfer(dataTransfer) {
   return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("video/"));
 }
 
-function createImageInputNodeFromDrop(files, clientX, clientY) {
-  const point = clientPointToWorldPoint(clientX, clientY);
+function askCanvasUploadImageRole() {
+  const choices = [
+    ["general", "普通图"],
+    ["editBase", "编辑底图"],
+    ["structure", "渲染结构图"],
+    ["style", "风格参考图"],
+    ["output", "输出图"],
+  ];
+  const answer = window.prompt(
+    ["选择上传图片角色：", ...choices.map(([, label], index) => `${index + 1}. ${label}`)].join("\n"),
+    "1",
+  );
+  if (answer === null) return "";
+  const trimmed = answer.trim();
+  const index = Number(trimmed);
+  if (Number.isInteger(index) && index >= 1 && index <= choices.length) return choices[index - 1][0];
+  const found = choices.find(([value, label]) => value === trimmed || label === trimmed);
+  return found?.[0] || "general";
+}
+
+function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general") {
   const title = files.length === 1 ? stripFileExtension(files[0].name) : `${files.length} 张上传图片`;
   const node = createNode({
     type: "image",
@@ -3683,13 +3743,19 @@ function createImageInputNodeFromDrop(files, clientX, clientY) {
     x: point.x - 129,
     y: point.y - 70,
     fileName: files.length === 1 ? files[0].name : `${files.length} 张图片`,
-    imageRole: "general",
+    imageRole,
     imagePurpose: "自定义",
     referenceMode: "structureStyle",
   });
   selectNode(node);
   uploadFilesToImageNode(node, files);
   saveCurrentProject();
+  return node;
+}
+
+function createImageInputNodeFromDrop(files, clientX, clientY) {
+  const point = clientPointToWorldPoint(clientX, clientY);
+  createImageInputNodeFromFilesAtPoint(files, point);
 }
 
 function uploadFilesToVideoNode(node, files) {
