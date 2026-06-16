@@ -79,7 +79,7 @@ module.exports = async function handler(req, res) {
 
     const normalizedQuality = normalizeQuality(quality, submitBody.model);
     if (normalizedQuality) submitBody.quality = normalizedQuality;
-    const normalizedSize = normalizeSize(size);
+    const normalizedSize = submitBody.model === "gemini-3-pro-image-preview" ? "" : normalizeSize(size);
     if (normalizedSize) submitBody.size = normalizedSize;
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
