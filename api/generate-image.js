@@ -1,4 +1,4 @@
-﻿const API_BASE = "https://api.apimart.ai/v1";
+const API_BASE = "https://api.apimart.ai/v1";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -191,7 +191,6 @@ function normalizeSize(size, model = "") {
   if (match) {
     const sourceWidth = Number(match[1]);
     const sourceHeight = Number(match[2]);
-    if (model === "gpt-image-2") return gptImage2SizeFromRatio(sourceWidth, sourceHeight);
     const maxEdge = Math.max(sourceWidth, sourceHeight);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
     const width = Math.min(3840, Math.max(16, Math.round((sourceWidth * scale) / 16) * 16));
@@ -200,14 +199,6 @@ function normalizeSize(size, model = "") {
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
   return "";
-}
-
-function gptImage2SizeFromRatio(width, height) {
-  const ratio = width / height;
-  if (!Number.isFinite(ratio) || ratio <= 0) return "";
-  if (ratio > 1.15) return "1536x864";
-  if (ratio < 0.87) return "864x1536";
-  return "1024x1024";
 }
 
 async function persistResultImage(imageUrl, taskId) {
