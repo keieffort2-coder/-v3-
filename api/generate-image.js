@@ -1,4 +1,4 @@
-const API_BASE = "https://api.apimart.ai/v1";
+﻿const API_BASE = "https://api.apimart.ai/v1";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -77,7 +77,7 @@ module.exports = async function handler(req, res) {
 
     const normalizedQuality = normalizeQuality(quality, submitBody.model);
     if (normalizedQuality) submitBody.quality = normalizedQuality;
-    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size) : "";
+    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
     if (normalizedSize) submitBody.size = normalizedSize;
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
@@ -181,16 +181,17 @@ function normalizeQuality(quality, model) {
 }
 
 function shouldSendSize(model) {
-  return model !== "gemini-3-pro-image-preview" && model !== "gpt-image-2";
+  return model !== "gemini-3-pro-image-preview";
 }
 
-function normalizeSize(size) {
+function normalizeSize(size, model = "") {
   const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
   if (!value) return "";
   const match = value.match(/^(\d{3,5})x(\d{3,5})$/);
   if (match) {
     const sourceWidth = Number(match[1]);
     const sourceHeight = Number(match[2]);
+    if (model === "gpt-image-2") return gptImage2SizeFromRatio(sourceWidth, sourceHeight);
     const maxEdge = Math.max(sourceWidth, sourceHeight);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
     const width = Math.min(3840, Math.max(16, Math.round((sourceWidth * scale) / 16) * 16));
@@ -199,6 +200,14 @@ function normalizeSize(size) {
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
   return "";
+}
+
+function gptImage2SizeFromRatio(width, height) {
+  const ratio = width / height;
+  if (!Number.isFinite(ratio) || ratio <= 0) return "";
+  if (ratio > 1.15) return "1536x864";
+  if (ratio < 0.87) return "864x1536";
+  return "1024x1024";
 }
 
 async function persistResultImage(imageUrl, taskId) {
