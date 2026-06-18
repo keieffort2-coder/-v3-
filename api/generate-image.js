@@ -440,8 +440,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
         { url: `${baseUrl}/responses`, body: responsesBody },
         { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
         { url: `${baseUrl}/images/edits`, body: rayinImageBody },
-        { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/images/generations`, body: rayinImageBody },
       ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
@@ -461,6 +459,9 @@ async function submitRayinImageTask(apiKey, submitBody) {
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
     if (response.ok && (imageUrl || taskId)) {
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        payload.rayinEndpoint = attempt.url;
+      }
       return { ok: true, status: response.status, payload };
     }
     last = { ok: false, status: response.status, payload };
