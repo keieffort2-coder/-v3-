@@ -23,6 +23,7 @@ const configNodeName = document.querySelector("#configNodeName");
 const imagePromptInput = document.querySelector("#imagePromptInput");
 const submitImageConfig = document.querySelector("#submitImageConfig");
 const imageModelSelect = document.querySelector("#imageModelSelect");
+const imageProviderSelect = document.querySelector("#imageProviderSelect");
 const openImageOptions = document.querySelector("#openImageOptions");
 const imageOptionsPopover = document.querySelector("#imageOptionsPopover");
 const openReferencePicker = document.querySelector("#openReferencePicker");
@@ -572,6 +573,7 @@ submitImageConfig?.addEventListener("click", () => {
   delete configNode.dataset.imageResolution;
   configNode.dataset.imageQuality = imageOptions.quality;
   configNode.dataset.imageModel = imageModelSelect?.value || "gpt-image-2-official";
+  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || "apimart");
   configNode.dataset.apimartChannel = "b";
   saveCurrentProject();
   runImageGeneration(configNode);
@@ -603,6 +605,12 @@ imageModelSelect?.addEventListener("change", () => {
   }
   configNode.dataset.imageModel = imageModelSelect.value || "gpt-image-2-official";
   syncImageOptionsUi();
+  saveCurrentProject();
+});
+
+imageProviderSelect?.addEventListener("change", () => {
+  if (!configNode || configNode.dataset.type !== "image") return;
+  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
   saveCurrentProject();
 });
 
@@ -1539,6 +1547,7 @@ function hydrateRestoredNodeData(node, saved) {
   node.dataset.imageRole = saved.imageRole || "general";
   node.dataset.imageQuality = saved.imageQuality || "high";
   node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+  node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
   node.dataset.apimartChannel = "b";
   if (saved.fileName) node.dataset.fileName = saved.fileName;
   if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
@@ -1695,6 +1704,7 @@ function createNode({
   imageRole,
   imageQuality,
   imageModel,
+  imageProvider,
   apimartChannel,
   folderNodes,
   folderConnections,
@@ -1736,6 +1746,7 @@ function createNode({
   if (imageRole) node.dataset.imageRole = imageRole;
   if (imageQuality) node.dataset.imageQuality = imageQuality;
   if (imageModel) node.dataset.imageModel = imageModel;
+  node.dataset.imageProvider = normalizeImageProvider(imageProvider || node.dataset.imageProvider || "apimart");
   if (apimartChannel) node.dataset.apimartChannel = apimartChannel;
   if (Array.isArray(folderNodes)) node.dataset.folderNodes = JSON.stringify(folderNodes);
   if (Array.isArray(folderConnections)) node.dataset.folderConnections = JSON.stringify(folderConnections);
@@ -2198,6 +2209,7 @@ function openImageConfig(node) {
   }
   imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
   openImageOptions?.classList.toggle("video-config-hidden", isVideo);
+  imageProviderSelect?.classList.toggle("video-config-hidden", isVideo);
   removeVideoSettingsPanel();
   if (isVideo) {
     ensureVideoDefaults(node);
@@ -2219,6 +2231,9 @@ function openImageConfig(node) {
   };
   if (imageModelSelect) {
     imageModelSelect.value = node.dataset.imageModel || "gpt-image-2-official";
+  }
+  if (imageProviderSelect) {
+    imageProviderSelect.value = normalizeImageProvider(node.dataset.imageProvider || "apimart");
   }
   syncImageOptionsUi();
   renderConfigInputThumbnails(node);
@@ -2439,6 +2454,15 @@ function normalizeImageModel(value) {
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
+}
+
+function normalizeImageProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
+}
+
+function getImageProviderLabel(value) {
+  return normalizeImageProvider(value) === "rayinai" ? "RayinAI" : "ApiMart";
 }
 
 function normalizeImageQualityForModel(quality, model) {
@@ -2831,6 +2855,7 @@ function duplicateNode(node) {
     imageRole: node.dataset.imageRole || "general",
     imageQuality: node.dataset.imageQuality || "low",
     imageModel: node.dataset.imageModel || "gpt-image-2-official",
+    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
     apimartChannel: "b",
     fileName: node.dataset.fileName || "",
     imageNaturalWidth: node.dataset.imageNaturalWidth || "",
@@ -2916,6 +2941,7 @@ function ungroupFolderNode(folderNode) {
     node.dataset.imageRole = saved.imageRole || "general";
     node.dataset.imageQuality = saved.imageQuality || "high";
     node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
     node.dataset.apimartChannel = "b";
     if (saved.tone) node.dataset.tone = saved.tone;
     if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
@@ -3057,7 +3083,7 @@ function runNode(node) {
   }
   status.textContent =
     node.dataset.type === "image"
-      ? `正在提交 ApiMart ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
+      ? `正在提交 ${getImageProviderLabel(node.dataset.imageProvider || "apimart")} ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
       : node.dataset.type === "video"
         ? `正在提交 ApiMart ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || "Seedance2"} 视频项目...`
         : "正在处理文本对话...";
@@ -3177,6 +3203,7 @@ async function runImageGeneration(node) {
   const status = ensureNodeStatus(node);
   const referenceMode = node.dataset.referenceMode || "structureStyle";
   const selectedModel = normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
   const roleImages = collectRoleReferenceImages(node);
   const referencePlan = buildReferencePlan(referenceMode, roleImages);
   const referenceImages = referencePlan.images;
@@ -3190,7 +3217,7 @@ async function runImageGeneration(node) {
   ), selectedModel, requestedSize, referencePlan));
 
   node.classList.add("running");
-  status.textContent = `正在准备 ApiMart ${selectedModel} 图片任务...`;
+  status.textContent = `正在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`;
 
     const payload = {
       model: selectedModel,
@@ -3201,6 +3228,7 @@ async function runImageGeneration(node) {
       referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
       quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
       size: requestedSize,
+      provider: selectedProvider,
       apimartChannel: "b",
   };
 
@@ -3214,10 +3242,10 @@ async function runImageGeneration(node) {
     ].some((value) => value && !isRemoteImageUrl(value));
 
     status.textContent = referenceImages.length
-      ? `正在提交后端 /api/generate-image，${formatReferencePlan(referencePlan)}，尺寸 ${requestedSize || "自动"}...`
+      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，尺寸 ${requestedSize || "自动"}...`
       : hasLocalOnlyReferences
-        ? "正在提交后端 /api/generate-image，旧本地图片需重新上传后才能作为参考图..."
-      : `正在提交后端 /api/generate-image，未检测到参考图，尺寸 ${requestedSize || "自动"}...`;
+        ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
+      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${requestedSize || "自动"}...`;
     node.dataset.lastImagePayload = JSON.stringify(payload);
 
     const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
@@ -3255,7 +3283,7 @@ async function runImageGeneration(node) {
   }
 }
 
-async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b") {
+async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", provider = "apimart") {
   const deadline = Date.now() + 1800000;
   let lastStatus = "submitted";
   let attempts = 0;
@@ -3263,8 +3291,13 @@ async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b") {
   while (Date.now() < deadline) {
     await sleep(5000, signal);
     attempts += 1;
+    const query = new URLSearchParams({
+      taskId: String(taskId),
+      apimartChannel: String(apimartChannel || "b"),
+      provider: String(provider || "apimart"),
+    });
     const response = await fetch(
-      `/api/generate-image?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}`,
+      `/api/generate-image?${query.toString()}`,
       { signal },
     );
     const result = await readResponseJson(response);
@@ -3329,6 +3362,10 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
   if (!response.ok) {
     throw new Error(formatApiError(result, `HTTP ${response.status}`));
   }
+  if (result.imageUrl) {
+    status.textContent = result.provider === "rayinai" ? "RayinAI 已直接返回图片。" : "图片生成完成。";
+    return result;
+  }
   if (!result.taskId) {
     throw new Error("后端没有返回 taskId");
   }
@@ -3338,7 +3375,7 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
   if (preview) {
     preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
   }
-  return pollImageTask(result.taskId, status, signal, payload.apimartChannel);
+  return pollImageTask(result.taskId, status, signal, payload.apimartChannel, result.provider);
 }
 
 function cancelImageGeneration(node) {
@@ -4286,10 +4323,11 @@ function serializeNodes(nodes) {
       content: getNodeContent(node),
       imagePurpose: node.dataset.imagePurpose || "自定义",
       referenceMode: node.dataset.referenceMode || "structureStyle",
-      imageRole: node.dataset.imageRole || "general",
-      imageQuality: node.dataset.imageQuality || "high",
-      imageModel: node.dataset.imageModel || "gpt-image-2-official",
-      apimartChannel: "b",
+    imageRole: node.dataset.imageRole || "general",
+    imageQuality: node.dataset.imageQuality || "high",
+    imageModel: node.dataset.imageModel || "gpt-image-2-official",
+    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
+    apimartChannel: "b",
       fileName: node.dataset.fileName || "",
       imageNaturalWidth: node.dataset.imageNaturalWidth || "",
       imageNaturalHeight: node.dataset.imageNaturalHeight || "",
@@ -4408,6 +4446,7 @@ function restoreCanvasData(data) {
     delete node.dataset.imageResolution;
     node.dataset.imageQuality = saved.imageQuality || "high";
     node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
     node.dataset.apimartChannel = "b";
     if (saved.fileName) node.dataset.fileName = saved.fileName;
     if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
