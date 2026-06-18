@@ -629,9 +629,14 @@ referenceList?.addEventListener("click", (event) => {
     return node.querySelector(".node-title strong")?.textContent === item.dataset.referenceNode;
   });
   const sourceImages = getNodeImageSources(sourceNode);
+  const sourceInlineImages = getNodeImageSources(sourceNode, { preferData: true }).filter((value) => /^data:image\//i.test(value));
   if (configNode && sourceImages.length) {
     configNode.dataset.referenceImageUrls = JSON.stringify(sourceImages);
     configNode.dataset.referenceImageDataUrl = sourceImages[0];
+    if (sourceInlineImages.length) {
+      configNode.dataset.referenceImageDataUrls = JSON.stringify(sourceInlineImages);
+      configNode.dataset.referenceImageDataInlineUrl = sourceInlineImages[0];
+    }
     configNode.dataset.referenceFileName = item.dataset.referenceNode;
   }
   referencePicker.classList.remove("show");
@@ -646,10 +651,15 @@ addLocalReference?.addEventListener("change", async () => {
   if (configNode && file.type.startsWith("image/")) {
     configNode.dataset.referenceFileName = file.name;
     const url = await uploadImageFile(file);
+    const inlineDataUrl = await fileToDataUrl(file);
     const current = parseJsonArray(configNode.dataset.referenceImageUrls);
     const next = uniqueValues([...current, url]);
     configNode.dataset.referenceImageUrls = JSON.stringify(next);
     configNode.dataset.referenceImageDataUrl = next[0] || "";
+    const currentInline = parseJsonArray(configNode.dataset.referenceImageDataUrls);
+    const nextInline = uniqueValues([...currentInline, inlineDataUrl]);
+    configNode.dataset.referenceImageDataUrls = JSON.stringify(nextInline);
+    configNode.dataset.referenceImageDataInlineUrl = nextInline[0] || "";
   } else if (configNode && file.type.startsWith("video/")) {
     configNode.dataset.referenceFileName = file.name;
     const url = await uploadMediaFile(file);
@@ -2607,43 +2617,60 @@ function buildPromptWithIncomingText(node, ownPrompt) {
 
 function collectRoleReferenceImages(node) {
   const ownImages = getNodeImageSources(node);
+  const ownApiMartImages = getNodeImageSources(node, { preferData: true });
   const incomingNodes = getConnectedInputNodes(node);
   const editBaseImages = [];
   const structureImages = [];
   const styleImages = [];
   const generalImages = [];
+  const apimartEditBaseImages = [];
+  const apimartStructureImages = [];
+  const apimartStyleImages = [];
+  const apimartGeneralImages = [];
   const imageDimensions = {};
 
-  const rememberDimensions = (url, sourceNode) => {
+  const rememberDimensions = (url, sourceNode, aliases = []) => {
     if (!url || !sourceNode) return;
-    const domDimensions = getPreviewImageDimensions(sourceNode, url);
+    const domDimensions = getPreviewImageDimensions(sourceNode, url) || aliases.map((alias) => getPreviewImageDimensions(sourceNode, alias)).find(Boolean);
     const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || domDimensions?.width || 0);
     const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || domDimensions?.height || 0);
-    if (width > 0 && height > 0) imageDimensions[url] = { width, height };
+    if (width > 0 && height > 0) {
+      [url, ...aliases].filter(Boolean).forEach((key) => {
+        imageDimensions[key] = { width, height };
+      });
+    }
   };
 
   if ((node.dataset.imageRole || "output") === "editBase" && ownImages.length) {
     editBaseImages.push(...ownImages);
-    ownImages.forEach((url) => rememberDimensions(url, node));
+    apimartEditBaseImages.push(...ownApiMartImages);
+    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
   } else if ((node.dataset.imageRole || "output") !== "output" && ownImages.length) {
     structureImages.push(...ownImages);
-    ownImages.forEach((url) => rememberDimensions(url, node));
+    apimartStructureImages.push(...ownApiMartImages);
+    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
   }
 
   incomingNodes.forEach((sourceNode) => {
     const images = getNodeImageSources(sourceNode).filter(isRemoteImageUrl);
-    images.forEach((url) => rememberDimensions(url, sourceNode));
+    const apiMartImages = getNodeImageSources(sourceNode, { preferData: true }).filter(isImageReferenceValue);
+    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
     const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
     if (role === "editBase") {
       editBaseImages.push(...images);
+      apimartEditBaseImages.push(...apiMartImages);
     } else if (role === "structure") {
       structureImages.push(...images);
+      apimartStructureImages.push(...apiMartImages);
     } else if (role === "style") {
       styleImages.push(...images);
+      apimartStyleImages.push(...apiMartImages);
     } else if (role === "output") {
       editBaseImages.push(...images);
+      apimartEditBaseImages.push(...apiMartImages);
     } else if (role !== "output") {
       generalImages.push(...images);
+      apimartGeneralImages.push(...apiMartImages);
     }
   });
 
@@ -2652,6 +2679,10 @@ function collectRoleReferenceImages(node) {
     structure: uniqueValues(structureImages.filter(isRemoteImageUrl)),
     style: uniqueValues(styleImages.filter(isRemoteImageUrl)),
     general: uniqueValues(generalImages.filter(isRemoteImageUrl)),
+    apimartEditBase: uniqueValues(apimartEditBaseImages.filter(isImageReferenceValue)),
+    apimartStructure: uniqueValues(apimartStructureImages.filter(isImageReferenceValue)),
+    apimartStyle: uniqueValues(apimartStyleImages.filter(isImageReferenceValue)),
+    apimartGeneral: uniqueValues(apimartGeneralImages.filter(isImageReferenceValue)),
     dimensions: imageDimensions,
   };
 }
@@ -2672,20 +2703,32 @@ function getPreviewImageDimensions(node, url = "") {
   return { width: image.naturalWidth, height: image.naturalHeight };
 }
 
-function selectReferenceImagesForMode(mode, roleImages) {
-  return buildReferencePlan(mode, roleImages).images;
+function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
+  return buildReferencePlan(mode, roleImages, provider).images;
 }
 
-function buildReferencePlan(mode, roleImages) {
-  const editBase = roleImages.editBase?.[0] || "";
-  const explicitStructure = roleImages.structure[0] || "";
-  const fallbackStructure = roleImages.general[0] || "";
+function getProviderRoleImages(roleImages, provider = "apimart") {
+  if (normalizeImageProvider(provider) !== "apimart") return roleImages;
+  return {
+    ...roleImages,
+    editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
+    structure: roleImages.apimartStructure?.length ? roleImages.apimartStructure : roleImages.structure,
+    style: roleImages.apimartStyle?.length ? roleImages.apimartStyle : roleImages.style,
+    general: roleImages.apimartGeneral?.length ? roleImages.apimartGeneral : roleImages.general,
+  };
+}
+
+function buildReferencePlan(mode, roleImages, provider = "apimart") {
+  const providerImages = getProviderRoleImages(roleImages, provider);
+  const editBase = providerImages.editBase?.[0] || "";
+  const explicitStructure = providerImages.structure[0] || "";
+  const fallbackStructure = providerImages.general[0] || "";
   const structure = editBase || explicitStructure || fallbackStructure || "";
   const structureDimensions = roleImages.dimensions?.[structure] || null;
-  const remainingGeneral = structure ? roleImages.general.filter((url) => url !== structure) : roleImages.general;
+  const remainingGeneral = structure ? providerImages.general.filter((url) => url !== structure) : providerImages.general;
 
   if (mode === "structureStyle") {
-    const styles = (roleImages.style.length ? roleImages.style : remainingGeneral).slice(0, 1);
+    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral).slice(0, 1);
     const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
     const images = structure
       ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
@@ -2701,7 +2744,7 @@ function buildReferencePlan(mode, roleImages) {
     };
   }
   if (mode === "strict") {
-    const images = uniqueValues([structure, ...roleImages.structure, ...roleImages.general, ...roleImages.style].filter(Boolean)).slice(0, 1);
+    const images = uniqueValues([structure, ...providerImages.structure, ...providerImages.general, ...providerImages.style].filter(Boolean)).slice(0, 1);
     return {
       images,
       editBaseCount: editBase && images.length ? 1 : 0,
@@ -2712,7 +2755,7 @@ function buildReferencePlan(mode, roleImages) {
     };
   }
 
-  const styles = uniqueValues([...roleImages.style, ...roleImages.general, ...roleImages.structure]).slice(0, 4);
+  const styles = uniqueValues([...providerImages.style, ...providerImages.general, ...providerImages.structure]).slice(0, 4);
   return {
     images: styles,
     structureCount: 0,
@@ -2736,14 +2779,33 @@ function getNodeImageSource(node) {
   return getNodeImageSources(node)[0] || "";
 }
 
-function getNodeImageSources(node) {
+function getNodeImageSources(node, options = {}) {
   if (!node) return [];
+  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
+  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
+  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
+  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
+  const primaryImageData = node.dataset.imageDataInlineUrl || "";
+  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
+  const persistent = [
+    node.dataset.generatedImageUrl,
+    ...parseJsonArray(node.dataset.generatedImageUrls),
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ];
+  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
   return uniqueValues([
     node.dataset.generatedImageUrl,
     ...parseJsonArray(node.dataset.generatedImageUrls),
-    ...parseJsonArray(node.dataset.imageUrls),
+    ...uploadedDataUrls,
+    primaryImageData,
+    ...uploadedUrls,
     node.dataset.imageDataUrl,
-    ...parseJsonArray(node.dataset.referenceImageUrls),
+    ...referenceDataUrls,
+    primaryReferenceData,
+    ...referenceUrls,
     node.dataset.referenceImageDataUrl,
   ].filter(Boolean));
 }
@@ -2773,6 +2835,10 @@ function getNodeMediaSources(node) {
 
 function isRemoteImageUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value);
+}
+
+function isImageReferenceValue(value) {
+  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
 }
 
 function uniqueValues(values) {
@@ -2862,8 +2928,12 @@ function duplicateNode(node) {
     imageNaturalHeight: node.dataset.imageNaturalHeight || "",
     imageUrls: parseJsonArray(node.dataset.imageUrls),
     imageDataUrl: node.dataset.imageDataUrl || "",
+    imageDataUrls: parseJsonArray(node.dataset.imageDataUrls),
+    imageDataInlineUrl: node.dataset.imageDataInlineUrl || "",
     referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
     referenceImageDataUrl: node.dataset.referenceImageDataUrl || "",
+    referenceImageDataUrls: parseJsonArray(node.dataset.referenceImageDataUrls),
+    referenceImageDataInlineUrl: node.dataset.referenceImageDataInlineUrl || "",
     referenceFileName: node.dataset.referenceFileName || "",
     generatedImageUrl: node.dataset.generatedImageUrl || "",
     generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
@@ -3205,7 +3275,7 @@ async function runImageGeneration(node) {
   const selectedModel = normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
   const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
   const roleImages = collectRoleReferenceImages(node);
-  const referencePlan = buildReferencePlan(referenceMode, roleImages);
+  const referencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
   const referenceImages = referencePlan.images;
   const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
   const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
@@ -3832,10 +3902,15 @@ function uploadFilesToImageNode(node, files) {
     saveCurrentProject();
   });
 
-  Promise.all(imageFiles.map(uploadImageFile))
-    .then((uploadedUrls) => {
+  Promise.all([
+    Promise.all(imageFiles.map(uploadImageFile)),
+    Promise.all(imageFiles.map((file) => fileToDataUrl(file))),
+  ])
+    .then(([uploadedUrls, inlineDataUrls]) => {
       node.dataset.imageUrls = JSON.stringify(uploadedUrls);
       node.dataset.imageDataUrl = uploadedUrls[0] || "";
+      node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
+      node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
       renderNodeImagePreview(node);
       status.textContent = `${uploadedUrls.length} 张图片已上传并保存。`;
       saveCurrentProject();
@@ -4453,8 +4528,12 @@ function restoreCanvasData(data) {
     if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
     if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
     if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
+    if (Array.isArray(saved.imageDataUrls)) node.dataset.imageDataUrls = JSON.stringify(saved.imageDataUrls);
+    if (saved.imageDataInlineUrl) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
     if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
     if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
+    if (Array.isArray(saved.referenceImageDataUrls)) node.dataset.referenceImageDataUrls = JSON.stringify(saved.referenceImageDataUrls);
+    if (saved.referenceImageDataInlineUrl) node.dataset.referenceImageDataInlineUrl = saved.referenceImageDataInlineUrl;
     if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
     if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
     if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
