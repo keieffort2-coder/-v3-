@@ -12,6 +12,10 @@ function getRayinAiKey() {
   return sanitizeHeaderValue(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
 }
 
+function getRayinAiExtensionToken() {
+  return sanitizeHeaderValue(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
+}
+
 function getRayinAiKeyId() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || process.env.RAYINCODE_KEY_ID || "8634");
   const id = Number(raw);
@@ -41,7 +45,7 @@ module.exports = async function handler(req, res) {
     }
 
     const provider = normalizeProvider(req.query?.provider);
-    const apiKey = provider === "rayinai" ? getRayinAiKey() : getApiMartKey(req.query?.apimartChannel);
+    const apiKey = provider === "rayinai" ? getRayinAiExtensionToken() : getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
         error: provider === "rayinai" ? "RAYINAI_API_KEY is not configured" : "APIMART_API_KEY_2 is not configured",
@@ -96,6 +100,7 @@ module.exports = async function handler(req, res) {
   } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
   const rayinAiKey = getRayinAiKey();
+  const rayinExtensionToken = getRayinAiExtensionToken();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
   if (!apiKey && preferredProvider !== "rayinai") {
     res.status(500).json({
@@ -150,8 +155,8 @@ module.exports = async function handler(req, res) {
       submitBody.base_image_urls = editBaseUrls.slice(0, 4);
     }
 
-    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
-      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody);
+    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey || rayinExtensionToken)) {
+      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody, rayinExtensionToken);
       if (rayinResult.ok) {
         const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
         const taskId = extractTaskId(rayinResult.payload);
@@ -259,6 +264,9 @@ function shouldTryRayinAi(provider, model, apiKey) {
 
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
+  if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
+    return "RayinAI 扩展接口认证失败：请在 Vercel 增加 RAYINAI_EXTENSION_TOKEN，值使用 RayinAI 网页 Network 请求头里的 Authorization Bearer token。";
+  }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
@@ -468,7 +476,7 @@ function toRayinExtensionInputImage(value) {
   return item;
 }
 
-async function submitRayinImageTask(apiKey, submitBody) {
+async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey) {
   const baseUrl = getRayinAiBaseUrl();
   const headers = {
     Authorization: `Bearer ${apiKey}`,
@@ -481,7 +489,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   if (hasReferences) {
-    const extensionResult = await submitRayinExtensionImageTask(apiKey, rayinImageBody);
+    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
     if (extensionResult.ok) return extensionResult;
     return extensionResult;
   }
