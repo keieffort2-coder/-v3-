@@ -429,6 +429,7 @@ async function getRayinTask(apiKey, taskId) {
     if (response.ok) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = endpoint;
+        payload.rayinExtension = true;
       }
       return payload;
     }
@@ -482,6 +483,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
   if (hasReferences) {
     const extensionResult = await submitRayinExtensionImageTask(apiKey, rayinImageBody);
     if (extensionResult.ok) return extensionResult;
+    return extensionResult;
   }
   const responsesBody = buildRayinResponsesBody(rayinImageBody);
   const attempts = hasReferences
@@ -543,6 +545,7 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
   if (response.ok && taskId) {
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       payload.rayinEndpoint = endpoint;
+      payload.rayinExtension = true;
     }
     return { ok: true, status: response.status, payload };
   }
@@ -684,6 +687,11 @@ function extractTaskId(payload) {
 
 function extractResultUrl(payload) {
   const data = payload?.data;
+  if (payload?.rayinExtension) {
+    const assets = Array.isArray(data?.assets) ? data.assets : [];
+    const outputAsset = assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
+    return normalizeImageValue(outputAsset?.url) || normalizeImageValue(outputAsset?.download_url) || null;
+  }
   const candidates = [
     data?.result,
     data?.result?.url,
