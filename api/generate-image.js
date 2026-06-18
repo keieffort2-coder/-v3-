@@ -13,8 +13,13 @@ function getRayinAiKey() {
 }
 
 function getRayinAiBaseUrl() {
-  const value = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
-  return value.replace(/\/+$/, "");
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
+  const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
+  return withoutName
+    .replace(/\/v1\/responses\/?$/i, "")
+    .replace(/\/responses\/?$/i, "")
+    .replace(/\/v1\/?$/i, "")
+    .replace(/\/+$/, "");
 }
 
 function sanitizeHeaderValue(value) {
@@ -212,8 +217,7 @@ function isImageReferenceValue(value) {
 
 function shouldTryRayinAi(provider, model, apiKey) {
   if (!apiKey) return false;
-  if (provider === "rayinai") return true;
-  return model === "gpt-image-2" || model === "gpt-image-2-official";
+  return provider === "rayinai";
 }
 
 function formatUpstreamError(payload) {
@@ -468,6 +472,13 @@ function getTaskStatus(payload) {
 async function readJson(response) {
   const text = await response.text();
   if (!text) return {};
+  if (/^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)) {
+    const title = text.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/\s+/g, " ").trim();
+    return {
+      error: `HTTP ${response.status} HTML error`,
+      message: title || `HTTP ${response.status}: upstream returned HTML instead of JSON`,
+    };
+  }
   try {
     return JSON.parse(text);
   } catch {
