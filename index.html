@@ -390,7 +390,10 @@
           <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
           <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
         </select>
-        <span class="fixed-api-channel">ApiMart 通道 B</span>
+        <select id="imageProviderSelect">
+          <option value="apimart" selected>ApiMart</option>
+          <option value="rayinai">RayinAI</option>
+        </select>
         <button class="config-pill" type="button" id="openImageOptions">自定义 / 结构+风格 / 普通图 / 尺寸提示词优先，默认结构图 / high</button>
         <button class="config-submit" type="button" id="submitImageConfig">提交</button>
       </div>
