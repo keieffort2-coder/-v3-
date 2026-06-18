@@ -537,6 +537,9 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      Accept: "*/*",
+      Origin: baseUrl,
+      Referer: `${baseUrl}/extension/draw?`,
     },
     body: JSON.stringify(body),
   });
