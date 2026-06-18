@@ -1,9 +1,20 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
+const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
+
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
   const key = selected === "a" ? process.env.APIMART_API_KEY || process.env.APIMART_TOKEN : process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
   return sanitizeHeaderValue(key);
+}
+
+function getRayinAiKey() {
+  return sanitizeHeaderValue(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
+}
+
+function getRayinAiBaseUrl() {
+  const value = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
+  return value.replace(/\/+$/, "");
 }
 
 function sanitizeHeaderValue(value) {
@@ -18,23 +29,29 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const apiKey = getApiMartKey(req.query?.apimartChannel);
+    const provider = normalizeProvider(req.query?.provider);
+    const apiKey = provider === "rayinai" ? getRayinAiKey() : getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
-        error: "APIMART_API_KEY_2 is not configured",
-        message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
+        error: provider === "rayinai" ? "RAYINAI_API_KEY is not configured" : "APIMART_API_KEY_2 is not configured",
+        message: provider === "rayinai"
+          ? "Please configure RAYINAI_API_KEY in Vercel Environment Variables."
+          : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
     }
 
     try {
-      const taskPayload = await getTask(apiKey, String(taskId));
+      const taskPayload = provider === "rayinai"
+        ? await getRayinTask(apiKey, String(taskId))
+        : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
       const imageUrl = await persistResultImage(extractResultUrl(taskPayload), taskId);
       res.status(200).json({
         taskId,
         status,
         imageUrl,
+        provider,
         message: formatUpstreamError(taskPayload),
         payload: imageUrl ? undefined : taskPayload,
       });
@@ -52,9 +69,11 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const { prompt, quality, imageDataUrl, imageDataUrls, apimartChannel, model, size } = req.body || {};
+  const { prompt, quality, imageDataUrl, imageDataUrls, apimartChannel, model, size, provider } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
-  if (!apiKey) {
+  const rayinAiKey = getRayinAiKey();
+  const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
+  if (!apiKey && preferredProvider !== "rayinai") {
     res.status(500).json({
       error: "APIMART_API_KEY_2 is not configured",
       message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
@@ -85,6 +104,47 @@ module.exports = async function handler(req, res) {
     const imageUrls = references.filter((value) => typeof value === "string" && /^https?:\/\//i.test(value));
     if (imageUrls.length) {
       submitBody.image_urls = imageUrls.slice(0, 16);
+    }
+
+    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
+      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody);
+      if (rayinResult.ok) {
+        const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
+        const taskId = extractTaskId(rayinResult.payload);
+        res.status(imageUrl ? 200 : 202).json({
+          taskId,
+          status: imageUrl ? "completed" : "submitted",
+          imageUrl,
+          model: submitBody.model,
+          provider: "rayinai",
+          payload: imageUrl ? undefined : rayinResult.payload,
+        });
+        return;
+      }
+
+      if (!apiKey || preferredProvider === "rayinai") {
+        res.status(rayinResult.status || 502).json({
+          error: "RayinAI submit failed",
+          message: formatUpstreamError(rayinResult.payload),
+          upstream: rayinResult.payload,
+          request: {
+            model: submitBody.model,
+            size: submitBody.size,
+            quality: submitBody.quality,
+            output_format: submitBody.output_format,
+            referenceCount: imageUrls.length,
+          },
+        });
+        return;
+      }
+    }
+
+    if (!apiKey) {
+      res.status(500).json({
+        error: "APIMART_API_KEY_2 is not configured",
+        message: "RayinAI did not return a usable image, and APIMART_API_KEY_2 is not configured for fallback.",
+      });
+      return;
     }
 
     const submit = await fetch(`${API_BASE}/images/generations`, {
@@ -126,6 +186,7 @@ module.exports = async function handler(req, res) {
       taskId,
       status: "submitted",
       model: submitBody.model,
+      provider: "apimart",
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
     });
   } catch (error) {
@@ -136,12 +197,24 @@ module.exports = async function handler(req, res) {
   }
 };
 
+function normalizeProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  if (provider === "rayinai" || provider === "rayincode") return "rayinai";
+  return "apimart";
+}
+
+function shouldTryRayinAi(provider, model, apiKey) {
+  if (!apiKey) return false;
+  if (provider === "rayinai") return true;
+  return model === "gpt-image-2" || model === "gpt-image-2-official";
+}
+
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/internal server error|server_error/i.test(message)) {
-    return "APIMart upstream server error. Please retry later or switch API channel.";
+    return "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
-  return message || "APIMart request failed.";
+  return message || "Image generation request failed.";
 }
 
 function findMessage(value, seen = new Set()) {
@@ -164,6 +237,12 @@ function normalizeModel(model) {
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
+}
+
+function normalizeRayinModel(model) {
+  const value = normalizeModel(model);
+  if (value === "gpt-image-2-official") return "gpt-image-2";
+  return value;
 }
 
 function normalizeQuality(quality, model) {
@@ -286,6 +365,79 @@ async function getTask(apiKey, taskId) {
   return payload;
 }
 
+async function getRayinTask(apiKey, taskId) {
+  const baseUrl = getRayinAiBaseUrl();
+  const endpoints = [`${baseUrl}/v1/tasks/${taskId}`, `${baseUrl}/tasks/${taskId}`];
+  let lastPayload = null;
+  for (const endpoint of endpoints) {
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const payload = await readJson(response);
+    if (response.ok) return payload;
+    lastPayload = payload;
+    if (![404, 405].includes(response.status)) break;
+  }
+  throw new Error(JSON.stringify(lastPayload || { error: "RayinAI task polling failed" }));
+}
+
+async function submitRayinImageTask(apiKey, submitBody) {
+  const baseUrl = getRayinAiBaseUrl();
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+  const imageBody = {
+    ...submitBody,
+    model: normalizeRayinModel(submitBody.model),
+  };
+  const responsesBody = buildRayinResponsesBody(imageBody);
+  const attempts = [
+    { url: `${baseUrl}/v1/images/generations`, body: imageBody },
+    { url: `${baseUrl}/images/generations`, body: imageBody },
+    { url: `${baseUrl}/v1/responses`, body: responsesBody },
+    { url: `${baseUrl}/responses`, body: responsesBody },
+  ];
+  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
+
+  for (const attempt of attempts) {
+    const response = await fetch(attempt.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(attempt.body),
+    });
+    const payload = await readJson(response);
+    const imageUrl = extractResultUrl(payload);
+    const taskId = extractTaskId(payload);
+    if (response.ok && (imageUrl || taskId)) {
+      return { ok: true, status: response.status, payload };
+    }
+    last = { ok: false, status: response.status, payload };
+    if (response.ok) return last;
+    if (![404, 405].includes(response.status)) return last;
+  }
+
+  return last;
+}
+
+function buildRayinResponsesBody(submitBody) {
+  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
+  const content = imageUrls.length
+    ? [
+        { type: "input_text", text: submitBody.prompt },
+        ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
+      ]
+    : submitBody.prompt;
+  const body = {
+    model: normalizeRayinModel(submitBody.model),
+    input: [{ role: "user", content }],
+    tools: [{ type: "image_generation" }],
+  };
+  if (submitBody.quality) body.quality = submitBody.quality;
+  if (submitBody.size) body.size = submitBody.size;
+  return body;
+}
+
 function getTaskStatus(payload) {
   return payload?.data?.status || payload?.status || "unknown";
 }
@@ -387,6 +539,7 @@ function findImageUrl(value, seen = new Set()) {
     "base64",
     "image",
     "output",
+    "content",
     "result",
     "images",
     "data",
