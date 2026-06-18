@@ -494,10 +494,11 @@ function normalizeRayinImageBody(body) {
   if (body.quality) next.quality = body.quality;
   if (body.size) next.size = body.size;
   if (references.length) {
+    const inputImages = references.map(toRayinInputImage);
     next.image_urls = references;
     next.image_url = references[0];
-    next.images = references;
-    next.reference_images = references;
+    next.images = inputImages;
+    next.reference_images = inputImages;
     next.reference_image_urls = references;
     next.input_image_urls = references;
     next.operation = "edit";
@@ -505,23 +506,32 @@ function normalizeRayinImageBody(body) {
     next.aspect_ratio = "auto";
     next.base_resolution = "auto";
     next.moderation = "auto";
-    next.input_images = references.map(toRayinInputImage);
+    next.input_images = inputImages;
   }
   if (structureUrls.length) {
     next.structure_image_urls = structureUrls.slice(0, 4);
+    next.structure_images = structureUrls.slice(0, 4).map(toRayinInputImage);
     next.composition_image_urls = structureUrls.slice(0, 4);
+    next.composition_images = structureUrls.slice(0, 4).map(toRayinInputImage);
     next.layout_image_urls = structureUrls.slice(0, 4);
+    next.layout_images = structureUrls.slice(0, 4).map(toRayinInputImage);
   }
-  if (styleUrls.length) next.style_image_urls = styleUrls.slice(0, 4);
+  if (styleUrls.length) {
+    next.style_image_urls = styleUrls.slice(0, 4);
+    next.style_images = styleUrls.slice(0, 4).map(toRayinInputImage);
+  }
   if (editUrls.length) {
     next.edit_image_urls = editUrls.slice(0, 4);
+    next.edit_images = editUrls.slice(0, 4).map(toRayinInputImage);
     next.base_image_urls = editUrls.slice(0, 4);
+    next.base_images = editUrls.slice(0, 4).map(toRayinInputImage);
   }
   return next;
 }
 
 function toRayinInputImage(value) {
   const item = { mime_type: "image/png" };
+  item.image_url = value;
   if (/^data:image\//i.test(value)) {
     item.data_url = value;
     item.source_data_url = value;
