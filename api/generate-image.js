@@ -63,6 +63,7 @@ module.exports = async function handler(req, res) {
         status,
         imageUrl,
         provider,
+        rayinEndpoint: taskPayload?.rayinEndpoint,
         message: formatUpstreamError(taskPayload),
         payload: imageUrl ? undefined : taskPayload,
       });
@@ -160,6 +161,7 @@ module.exports = async function handler(req, res) {
           imageUrl,
           model: submitBody.model,
           provider: "rayinai",
+          rayinEndpoint: rayinResult.payload?.rayinEndpoint,
           payload: imageUrl ? undefined : rayinResult.payload,
         });
         return;
@@ -424,7 +426,12 @@ async function getRayinTask(apiKey, taskId) {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     const payload = await readJson(response);
-    if (response.ok) return payload;
+    if (response.ok) {
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        payload.rayinEndpoint = endpoint;
+      }
+      return payload;
+    }
     lastPayload = payload;
     if (![404, 405].includes(response.status)) break;
   }
@@ -532,9 +539,8 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     body: JSON.stringify(body),
   });
   const payload = await readJson(response);
-  const imageUrl = extractResultUrl(payload);
   const taskId = extractTaskId(payload);
-  if (response.ok && (imageUrl || taskId)) {
+  if (response.ok && taskId) {
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       payload.rayinEndpoint = endpoint;
     }
@@ -643,7 +649,7 @@ function buildRayinResponsesBody(submitBody) {
 }
 
 function getTaskStatus(payload) {
-  return payload?.data?.status || payload?.status || "unknown";
+  return payload?.data?.status || payload?.status || payload?.data?.state || payload?.state || "unknown";
 }
 
 async function readJson(response) {
@@ -711,8 +717,7 @@ function extractResultUrl(payload) {
   }
   if (Array.isArray(data?.assets)) {
     const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
-    const firstAsset = data.assets.find((asset) => asset?.url || asset?.download_url);
-    candidates.push(outputAsset?.url, outputAsset?.download_url, firstAsset?.url, firstAsset?.download_url);
+    candidates.push(outputAsset?.url, outputAsset?.download_url);
   }
 
   const direct = candidates.map(normalizeImageValue).find(Boolean);
