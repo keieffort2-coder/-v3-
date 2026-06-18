@@ -2708,7 +2708,8 @@ function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
 }
 
 function getProviderRoleImages(roleImages, provider = "apimart") {
-  if (normalizeImageProvider(provider) !== "apimart") return roleImages;
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider !== "apimart" && normalizedProvider !== "rayinai") return roleImages;
   return {
     ...roleImages,
     editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
@@ -2735,6 +2736,9 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
       : uniqueValues([...styles, ...generalFallback].filter(Boolean)).slice(0, 2);
     return {
       images,
+      editBaseImages: editBase ? [editBase] : [],
+      structureImages: structure ? [structure] : [],
+      styleImages: styles,
       editBaseCount: editBase ? 1 : 0,
       structureCount: structure && !editBase ? 1 : 0,
       hasExplicitStructure: Boolean(editBase || explicitStructure || fallbackStructure),
@@ -2747,6 +2751,9 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
     const images = uniqueValues([structure, ...providerImages.structure, ...providerImages.general, ...providerImages.style].filter(Boolean)).slice(0, 1);
     return {
       images,
+      editBaseImages: editBase && images.length ? [editBase] : [],
+      structureImages: !editBase && images.length ? images : [],
+      styleImages: [],
       editBaseCount: editBase && images.length ? 1 : 0,
       structureCount: !editBase && images.length ? 1 : 0,
       styleCount: 0,
@@ -2758,6 +2765,9 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
   const styles = uniqueValues([...providerImages.style, ...providerImages.general, ...providerImages.structure]).slice(0, 4);
   return {
     images: styles,
+    editBaseImages: [],
+    structureImages: [],
+    styleImages: styles,
     structureCount: 0,
     styleCount: styles.length,
     generalCount: 0,
@@ -3294,6 +3304,9 @@ async function runImageGeneration(node) {
       prompt: enhancedPrompt,
       imageName: safeAsciiFileName(uploadName, "image.png"),
       imageDataUrls: referenceImages,
+      structureImageUrls: referencePlan.structureImages || [],
+      styleImageUrls: referencePlan.styleImages || [],
+      editBaseImageUrls: referencePlan.editBaseImages || [],
       purpose: node.dataset.imagePurpose || imageOptions.purpose,
       referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
       quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
