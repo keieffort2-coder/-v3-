@@ -12,6 +12,12 @@ function getRayinAiKey() {
   return sanitizeHeaderValue(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
 }
 
+function getRayinAiKeyId() {
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || process.env.RAYINCODE_KEY_ID || "8634");
+  const id = Number(raw);
+  return Number.isFinite(id) && id > 0 ? id : 8634;
+}
+
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
@@ -407,7 +413,11 @@ async function getTask(apiKey, taskId) {
 
 async function getRayinTask(apiKey, taskId) {
   const baseUrl = getRayinAiBaseUrl();
-  const endpoints = [`${baseUrl}/v1/tasks/${taskId}`, `${baseUrl}/tasks/${taskId}`];
+  const endpoints = [
+    `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
+    `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
+    `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
+  ];
   let lastPayload = null;
   for (const endpoint of endpoints) {
     const response = await fetch(endpoint, {
@@ -421,6 +431,35 @@ async function getRayinTask(apiKey, taskId) {
   throw new Error(JSON.stringify(lastPayload || { error: "RayinAI task polling failed" }));
 }
 
+function buildRayinExtensionImageBody(body) {
+  const references = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  return {
+    key_id: getRayinAiKeyId(),
+    provider: "gpt",
+    operation: references.length ? "edit" : "generate",
+    model: normalizeRayinModel(body.model),
+    prompt: body.prompt,
+    input_images: references.map(toRayinExtensionInputImage),
+    n: 1,
+    aspect_ratio: "auto",
+    base_resolution: "auto",
+    moderation: "auto",
+    output_format: body.output_format || "png",
+    quality: "auto",
+    size: "auto",
+  };
+}
+
+function toRayinExtensionInputImage(value) {
+  const item = { mime_type: "image/png" };
+  if (/^data:image\//i.test(value)) {
+    item.data_url = value;
+  } else {
+    item.image_url = value;
+  }
+  return item;
+}
+
 async function submitRayinImageTask(apiKey, submitBody) {
   const baseUrl = getRayinAiBaseUrl();
   const headers = {
@@ -432,8 +471,12 @@ async function submitRayinImageTask(apiKey, submitBody) {
     model: normalizeRayinModel(submitBody.model),
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
-  const responsesBody = buildRayinResponsesBody(rayinImageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
+  if (hasReferences) {
+    const extensionResult = await submitRayinExtensionImageTask(apiKey, rayinImageBody);
+    if (extensionResult.ok) return extensionResult;
+  }
+  const responsesBody = buildRayinResponsesBody(rayinImageBody);
   const attempts = hasReferences
     ? [
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
@@ -474,6 +517,30 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last.payload.status = last.status;
   }
   return last;
+}
+
+async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
+  const baseUrl = getRayinAiBaseUrl();
+  const endpoint = `${baseUrl}/extension/api/image/tasks`;
+  const body = buildRayinExtensionImageBody(rayinImageBody);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await readJson(response);
+  const imageUrl = extractResultUrl(payload);
+  const taskId = extractTaskId(payload);
+  if (response.ok && (imageUrl || taskId)) {
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      payload.rayinEndpoint = endpoint;
+    }
+    return { ok: true, status: response.status, payload };
+  }
+  return { ok: false, status: response.status, payload };
 }
 
 function normalizeRayinImageBody(body) {
@@ -598,7 +665,9 @@ async function readJson(response) {
 
 function extractTaskId(payload) {
   if (payload?.data?.task_id) return String(payload.data.task_id);
+  if (payload?.data?.task_no) return String(payload.data.task_no);
   if (payload?.data?.id) return String(payload.data.id);
+  if (payload?.task_no) return String(payload.task_no);
   if (payload?.task_id) return String(payload.task_id);
   if (payload?.id) return String(payload.id);
   if (Array.isArray(payload?.data) && payload.data[0]?.task_id) {
@@ -639,6 +708,11 @@ function extractResultUrl(payload) {
   }
   if (Array.isArray(data?.images)) {
     candidates.push(data.images[0]?.url, data.images[0]?.image_url);
+  }
+  if (Array.isArray(data?.assets)) {
+    const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
+    const firstAsset = data.assets.find((asset) => asset?.url || asset?.download_url);
+    candidates.push(outputAsset?.url, outputAsset?.download_url, firstAsset?.url, firstAsset?.download_url);
   }
 
   const direct = candidates.map(normalizeImageValue).find(Boolean);
