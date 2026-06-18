@@ -465,9 +465,13 @@ async function submitRayinImageTask(apiKey, submitBody) {
     }
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
-    if (![404, 405].includes(response.status)) return last;
+    if (![404, 405, 502, 503, 504].includes(response.status)) return last;
   }
 
+  if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
+    last.payload.endpoint = attempts[attempts.length - 1]?.url;
+    last.payload.status = last.status;
+  }
   return last;
 }
 
