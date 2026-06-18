@@ -101,9 +101,12 @@ module.exports = async function handler(req, res) {
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
       : [imageDataUrl];
-    const imageUrls = references.filter((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const imageUrls = references.filter(isImageReferenceValue);
     if (imageUrls.length) {
       submitBody.image_urls = imageUrls.slice(0, 16);
+      submitBody.image_url = imageUrls[0];
+      submitBody.images = imageUrls.slice(0, 16);
+      submitBody.reference_images = imageUrls.slice(0, 16);
     }
 
     if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
@@ -201,6 +204,10 @@ function normalizeProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
   if (provider === "rayinai" || provider === "rayincode") return "rayinai";
   return "apimart";
+}
+
+function isImageReferenceValue(value) {
+  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
@@ -392,12 +399,20 @@ async function submitRayinImageTask(apiKey, submitBody) {
     model: normalizeRayinModel(submitBody.model),
   };
   const responsesBody = buildRayinResponsesBody(imageBody);
-  const attempts = [
-    { url: `${baseUrl}/v1/images/generations`, body: imageBody },
-    { url: `${baseUrl}/images/generations`, body: imageBody },
-    { url: `${baseUrl}/v1/responses`, body: responsesBody },
-    { url: `${baseUrl}/responses`, body: responsesBody },
-  ];
+  const hasReferences = Array.isArray(imageBody.image_urls) && imageBody.image_urls.length > 0;
+  const attempts = hasReferences
+    ? [
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        { url: `${baseUrl}/responses`, body: responsesBody },
+        { url: `${baseUrl}/v1/images/edits`, body: imageBody },
+        { url: `${baseUrl}/images/edits`, body: imageBody },
+      ]
+    : [
+        { url: `${baseUrl}/v1/images/generations`, body: imageBody },
+        { url: `${baseUrl}/images/generations`, body: imageBody },
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        { url: `${baseUrl}/responses`, body: responsesBody },
+      ];
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
@@ -422,12 +437,20 @@ async function submitRayinImageTask(apiKey, submitBody) {
 
 function buildRayinResponsesBody(submitBody) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
+  const prompt = imageUrls.length
+    ? [
+        "You must use the attached input images as visual references.",
+        "The generated image must preserve the referenced structure, camera, layout, perspective, object placement, palette, lighting, and material cues according to the user's role instructions.",
+        "Do not create an unrelated scene.",
+        submitBody.prompt,
+      ].join("\n")
+    : submitBody.prompt;
   const content = imageUrls.length
     ? [
-        { type: "input_text", text: submitBody.prompt },
+        { type: "input_text", text: prompt },
         ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
       ]
-    : submitBody.prompt;
+    : prompt;
   const body = {
     model: normalizeRayinModel(submitBody.model),
     input: [{ role: "user", content }],
