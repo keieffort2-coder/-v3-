@@ -406,10 +406,12 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const hasReferences = Array.isArray(imageBody.image_urls) && imageBody.image_urls.length > 0;
   const attempts = hasReferences
     ? [
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        { url: `${baseUrl}/responses`, body: responsesBody },
+        { url: `${baseUrl}/v1/images/generations`, body: imageBody },
+        { url: `${baseUrl}/images/generations`, body: imageBody },
         { url: `${baseUrl}/v1/images/edits`, body: imageBody },
         { url: `${baseUrl}/images/edits`, body: imageBody },
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        { url: `${baseUrl}/responses`, body: responsesBody },
       ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: imageBody },
