@@ -74,7 +74,19 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const { prompt, quality, imageDataUrl, imageDataUrls, apimartChannel, model, size, provider } = req.body || {};
+  const {
+    prompt,
+    quality,
+    imageDataUrl,
+    imageDataUrls,
+    structureImageUrls,
+    styleImageUrls,
+    editBaseImageUrls,
+    apimartChannel,
+    model,
+    size,
+    provider,
+  } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
   const rayinAiKey = getRayinAiKey();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
@@ -107,11 +119,28 @@ module.exports = async function handler(req, res) {
       ? imageDataUrls
       : [imageDataUrl];
     const imageUrls = references.filter(isImageReferenceValue);
+    const structureUrls = Array.isArray(structureImageUrls) ? structureImageUrls.filter(isImageReferenceValue) : [];
+    const styleUrls = Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [];
+    const editBaseUrls = Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [];
     if (imageUrls.length) {
       submitBody.image_urls = imageUrls.slice(0, 16);
       submitBody.image_url = imageUrls[0];
       submitBody.images = imageUrls.slice(0, 16);
       submitBody.reference_images = imageUrls.slice(0, 16);
+      submitBody.reference_image_urls = imageUrls.slice(0, 16);
+      submitBody.input_image_urls = imageUrls.slice(0, 16);
+    }
+    if (structureUrls.length) {
+      submitBody.structure_image_urls = structureUrls.slice(0, 4);
+      submitBody.composition_image_urls = structureUrls.slice(0, 4);
+      submitBody.layout_image_urls = structureUrls.slice(0, 4);
+    }
+    if (styleUrls.length) {
+      submitBody.style_image_urls = styleUrls.slice(0, 4);
+    }
+    if (editBaseUrls.length) {
+      submitBody.edit_image_urls = editBaseUrls.slice(0, 4);
+      submitBody.base_image_urls = editBaseUrls.slice(0, 4);
     }
 
     if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
@@ -402,20 +431,21 @@ async function submitRayinImageTask(apiKey, submitBody) {
     ...submitBody,
     model: normalizeRayinModel(submitBody.model),
   };
-  const responsesBody = buildRayinResponsesBody(imageBody);
-  const hasReferences = Array.isArray(imageBody.image_urls) && imageBody.image_urls.length > 0;
+  const rayinImageBody = normalizeRayinImageBody(imageBody);
+  const responsesBody = buildRayinResponsesBody(rayinImageBody);
+  const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const attempts = hasReferences
     ? [
-        { url: `${baseUrl}/v1/images/generations`, body: imageBody },
-        { url: `${baseUrl}/images/generations`, body: imageBody },
-        { url: `${baseUrl}/v1/images/edits`, body: imageBody },
-        { url: `${baseUrl}/images/edits`, body: imageBody },
+        { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
+        { url: `${baseUrl}/images/generations`, body: rayinImageBody },
+        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
+        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
       ]
     : [
-        { url: `${baseUrl}/v1/images/generations`, body: imageBody },
-        { url: `${baseUrl}/images/generations`, body: imageBody },
+        { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
+        { url: `${baseUrl}/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
       ];
@@ -439,6 +469,69 @@ async function submitRayinImageTask(apiKey, submitBody) {
   }
 
   return last;
+}
+
+function normalizeRayinImageBody(body) {
+  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue) : [];
+  const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
+  const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
+  const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
+  const references = uniqueArray([...editUrls, ...structureUrls, ...styleUrls, ...imageUrls]).slice(0, 16);
+  const next = {
+    model: normalizeRayinModel(body.model),
+    prompt: body.prompt,
+    n: 1,
+    provider: "gpt",
+    aspect_ratio: "auto",
+    base_resolution: "auto",
+    moderation: "auto",
+    output_format: body.output_format || "png",
+  };
+  if (body.quality) next.quality = body.quality;
+  if (body.size) next.size = body.size;
+  if (references.length) {
+    next.image_urls = references;
+    next.image_url = references[0];
+    next.images = references;
+    next.reference_images = references;
+    next.reference_image_urls = references;
+    next.input_image_urls = references;
+    next.operation = "edit";
+    next.provider = "gpt";
+    next.aspect_ratio = "auto";
+    next.base_resolution = "auto";
+    next.moderation = "auto";
+    next.input_images = references.map(toRayinInputImage);
+  }
+  if (structureUrls.length) {
+    next.structure_image_urls = structureUrls.slice(0, 4);
+    next.composition_image_urls = structureUrls.slice(0, 4);
+    next.layout_image_urls = structureUrls.slice(0, 4);
+  }
+  if (styleUrls.length) next.style_image_urls = styleUrls.slice(0, 4);
+  if (editUrls.length) {
+    next.edit_image_urls = editUrls.slice(0, 4);
+    next.base_image_urls = editUrls.slice(0, 4);
+  }
+  return next;
+}
+
+function toRayinInputImage(value) {
+  const item = { mime_type: "image/png" };
+  if (/^data:image\//i.test(value)) {
+    item.data_url = value;
+    item.source_data_url = value;
+    item.image_data_url = value;
+  } else {
+    item.url = value;
+    item.image_url = value;
+    item.source_url = value;
+  }
+  return item;
+}
+
+function uniqueArray(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function buildRayinResponsesBody(submitBody) {
