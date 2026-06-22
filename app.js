@@ -2806,11 +2806,93 @@ function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "struct
   return plan;
 }
 
+async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
+  const normalizedProvider = normalizeImageProvider(provider);
+  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
+  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
+  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
+    return buildSubmissionReferencePlan(plan, provider, mode);
+  }
+
+  const styleSwatches = await Promise.all(
+    plan.styleImages.map((url) => makeStyleReferenceSwatch(url).catch(() => url)),
+  );
+  const nextStyleImages = uniqueValues(styleSwatches.filter(isImageReferenceValue));
+  const nextImages = uniqueValues([
+    ...(plan.editBaseImages || []),
+    ...(plan.structureImages || []),
+    ...nextStyleImages,
+  ]).slice(0, 4);
+
+  return buildSubmissionReferencePlan({
+    ...plan,
+    images: nextImages,
+    styleImages: nextStyleImages,
+    styleCount: nextStyleImages.length,
+    styleSwatchMode: true,
+  }, provider, mode);
+}
+
+function makeStyleReferenceSwatch(src) {
+  return new Promise((resolve, reject) => {
+    if (!src || !isImageReferenceValue(src)) {
+      reject(new Error("Invalid style reference"));
+      return;
+    }
+
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      try {
+        const sampleSize = 24;
+        const outputSize = 512;
+        const sourceCanvas = document.createElement("canvas");
+        const sourceContext = sourceCanvas.getContext("2d");
+        sourceCanvas.width = sampleSize;
+        sourceCanvas.height = sampleSize;
+        sourceContext.drawImage(image, 0, 0, sampleSize, sampleSize);
+        const pixels = sourceContext.getImageData(0, 0, sampleSize, sampleSize).data;
+        const palette = [];
+        const step = 4 * 12;
+        for (let index = 0; index < pixels.length; index += step) {
+          palette.push([pixels[index], pixels[index + 1], pixels[index + 2]]);
+        }
+
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.width = outputSize;
+        canvas.height = outputSize;
+        const gradient = context.createLinearGradient(0, 0, outputSize, outputSize);
+        const stops = palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
+        stops.slice(0, 18).forEach((color, index) => {
+          gradient.addColorStop(index / Math.max(1, Math.min(stops.length, 18) - 1), `rgb(${color[0]}, ${color[1]}, ${color[2]})`);
+        });
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, outputSize, outputSize);
+        context.globalAlpha = 0.28;
+        for (let y = 0; y < 4; y += 1) {
+          for (let x = 0; x < 4; x += 1) {
+            const color = stops[(x + y * 4) % stops.length];
+            context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+            context.fillRect(x * 128, y * 128, 128, 128);
+          }
+        }
+        context.globalAlpha = 1;
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = () => reject(new Error("Style reference load failed"));
+    image.src = src;
+  });
+}
+
 function formatReferencePlan(plan) {
   const parts = [];
   if (plan.editBaseCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
   if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
-  if (plan.styleCount) parts.push(`${plan.styleCount} 张风格图`);
+  if (plan.styleCount) parts.push(plan.styleSwatchMode ? `${plan.styleCount} 张风格色板` : `${plan.styleCount} 张风格图`);
   if (plan.structureLocked && plan.lockedStyleCount) parts.push(`已启用结构锁，${plan.lockedStyleCount} 张风格图不作为构图输入`);
   if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
   if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
@@ -2844,9 +2926,11 @@ function buildReferenceBindingPrompt(plan) {
   if (styleCount > 0) {
     const start = hasStructure ? 2 : 1;
     const end = start + styleCount - 1;
+    const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
     lines.push(
-      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`}.`,
+      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
       "@风格参考图 is only a palette/material/lighting/atmosphere reference. It has zero authority over camera, composition, architecture, object placement, crop, or scene geometry.",
+      plan.styleSwatchMode ? "@风格参考图 has been converted into a non-spatial color/material swatch. Use it only for palette, light quality, contrast, material finish, and atmosphere." : "",
     );
   }
 
@@ -3388,7 +3472,7 @@ async function runImageGeneration(node) {
   const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
   const roleImages = collectRoleReferenceImages(node);
   const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
-  const referencePlan = buildSubmissionReferencePlan(rawReferencePlan, selectedProvider, referenceMode);
+  const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
   const referenceImages = referencePlan.images;
   const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
   const referenceBindings = buildReferenceBindingPrompt(referencePlan);
