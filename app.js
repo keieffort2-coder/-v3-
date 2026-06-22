@@ -2803,26 +2803,7 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
 }
 
 function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "structureStyle") {
-  const normalizedProvider = normalizeImageProvider(provider);
-  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
-  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
-  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
-    return plan;
-  }
-
-  const lockedImages = uniqueValues([
-    ...(plan.editBaseImages || []),
-    ...(plan.structureImages || []),
-  ]).slice(0, 4);
-  return {
-    ...plan,
-    images: lockedImages,
-    styleImages: [],
-    styleCount: 0,
-    generalCount: 0,
-    lockedStyleCount: plan.styleCount || plan.styleImages.length,
-    structureLocked: true,
-  };
+  return plan;
 }
 
 function formatReferencePlan(plan) {
@@ -3406,7 +3387,8 @@ async function runImageGeneration(node) {
   const selectedModel = normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
   const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
   const roleImages = collectRoleReferenceImages(node);
-  const referencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
+  const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
+  const referencePlan = buildSubmissionReferencePlan(rawReferencePlan, selectedProvider, referenceMode);
   const referenceImages = referencePlan.images;
   const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
   const referenceBindings = buildReferenceBindingPrompt(referencePlan);
@@ -3447,11 +3429,12 @@ async function runImageGeneration(node) {
       ...getConnectedInputNodes(node).flatMap(getNodeImageSources),
     ].some((value) => value && !isRemoteImageUrl(value));
 
+    const sizeStatus = referenceImages.length ? "按结构图/自动" : (requestedSize || "自动");
     status.textContent = referenceImages.length
-      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${requestedSize || "自动"}...`
+      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
       : hasLocalOnlyReferences
         ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
-      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${requestedSize || "自动"}...`;
+      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
     node.dataset.lastImagePayload = JSON.stringify(payload);
 
     const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
