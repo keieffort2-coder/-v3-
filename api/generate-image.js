@@ -40,6 +40,33 @@ function sanitizeBearerToken(value) {
   return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "");
 }
 
+function parseJwtPayload(token) {
+  try {
+    const part = String(token || "").split(".")[1];
+    if (!part) return {};
+    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function buildRayinExtensionReferer(baseUrl, token) {
+  const payload = parseJwtPayload(token);
+  const userId = payload.user_id || payload.userId || payload.sub || payload.id || "";
+  const query = new URLSearchParams({
+    token,
+    theme: "light",
+    lang: "zh",
+    ui_mode: "embedded",
+    src_host: baseUrl,
+    src_url: `${baseUrl}/customer`,
+  });
+  if (userId) query.set("user_id", String(userId));
+  return `${baseUrl}/extension/draw?${query.toString()}`;
+}
+
 module.exports = async function handler(req, res) {
   if (req.method === "GET") {
     const taskId = req.query?.taskId;
@@ -438,7 +465,12 @@ async function getRayinTask(apiKey, taskId) {
   let lastPayload = null;
   for (const endpoint of endpoints) {
     const response = await fetch(endpoint, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "*/*",
+        Origin: baseUrl,
+        Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+      },
     });
     const payload = await readJson(response);
     if (response.ok) {
@@ -554,7 +586,7 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
       "Content-Type": "application/json",
       Accept: "*/*",
       Origin: baseUrl,
-      Referer: `${baseUrl}/extension/draw?`,
+      Referer: buildRayinExtensionReferer(baseUrl, apiKey),
     },
     body: JSON.stringify(body),
   });
