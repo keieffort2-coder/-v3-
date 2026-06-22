@@ -175,13 +175,15 @@ module.exports = async function handler(req, res) {
     const structureUrls = Array.isArray(structureImageUrls) ? structureImageUrls.filter(isImageReferenceValue) : [];
     const styleUrls = Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [];
     const editBaseUrls = Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [];
-    if (imageUrls.length) {
-      submitBody.image_urls = imageUrls.slice(0, 16);
-      submitBody.image_url = imageUrls[0];
-      submitBody.images = imageUrls.slice(0, 16);
-      submitBody.reference_images = imageUrls.slice(0, 16);
-      submitBody.reference_image_urls = imageUrls.slice(0, 16);
-      submitBody.input_image_urls = imageUrls.slice(0, 16);
+    const orderedReferenceUrls = uniqueValues([
+      ...editBaseUrls,
+      ...structureUrls,
+      ...styleUrls,
+      ...imageUrls,
+    ]).slice(0, 16);
+    if (orderedReferenceUrls.length) {
+      submitBody.image_urls = orderedReferenceUrls;
+      submitBody.image_url = orderedReferenceUrls[0];
     }
     if (structureUrls.length) {
       submitBody.structure_image_urls = structureUrls.slice(0, 4);
@@ -296,6 +298,10 @@ function normalizeProvider(value) {
 
 function isImageReferenceValue(value) {
   return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
