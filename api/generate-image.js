@@ -16,6 +16,10 @@ function getRayinAiExtensionToken() {
   return sanitizeBearerToken(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
 }
 
+function getRayinAiExtensionCookie() {
+  return sanitizeHeaderValue(process.env.RAYINAI_EXTENSION_COOKIE || process.env.RAYINCODE_EXTENSION_COOKIE);
+}
+
 function getRayinAiKeyId() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || process.env.RAYINCODE_KEY_ID || "8634");
   const id = Number(raw);
@@ -37,7 +41,7 @@ function sanitizeHeaderValue(value) {
 }
 
 function sanitizeBearerToken(value) {
-  return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "");
+  return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "").replace(/\s+/g, "");
 }
 
 function parseJwtPayload(token) {
@@ -297,7 +301,7 @@ function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     if (payload?.rayinExtensionAuth?.hasToken) {
-      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认复制的是当前 RayinAI 网页 Headers 里的 Authorization，且 token 未过期。";
+      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认 token 未混入空格/换行且未过期；如果仍失败，请从 RayinAI 网页 Headers 复制 Cookie 到 RAYINAI_EXTENSION_COOKIE。";
     }
     return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
@@ -457,6 +461,7 @@ async function getTask(apiKey, taskId) {
 
 async function getRayinTask(apiKey, taskId) {
   const baseUrl = getRayinAiBaseUrl();
+  const cookie = getRayinAiExtensionCookie();
   const endpoints = [
     `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
@@ -464,14 +469,14 @@ async function getRayinTask(apiKey, taskId) {
   ];
   let lastPayload = null;
   for (const endpoint of endpoints) {
-    const response = await fetch(endpoint, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "*/*",
-        Origin: baseUrl,
-        Referer: buildRayinExtensionReferer(baseUrl, apiKey),
-      },
-    });
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "*/*",
+      Origin: baseUrl,
+      Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+    };
+    if (cookie) headers.Cookie = cookie;
+    const response = await fetch(endpoint, { headers });
     const payload = await readJson(response);
     if (response.ok) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -579,15 +584,18 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
   const baseUrl = getRayinAiBaseUrl();
   const endpoint = `${baseUrl}/extension/api/image/tasks`;
   const body = buildRayinExtensionImageBody(rayinImageBody);
+  const cookie = getRayinAiExtensionCookie();
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    Accept: "*/*",
+    Origin: baseUrl,
+    Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+  };
+  if (cookie) headers.Cookie = cookie;
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      Accept: "*/*",
-      Origin: baseUrl,
-      Referer: buildRayinExtensionReferer(baseUrl, apiKey),
-    },
+    headers,
     body: JSON.stringify(body),
   });
   const payload = await readJson(response);
