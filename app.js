@@ -2633,8 +2633,13 @@ function buildPromptWithIncomingText(node, ownPrompt) {
 }
 
 function collectRoleReferenceImages(node) {
-  const ownImages = getNodeImageSources(node);
-  const ownApiMartImages = getNodeImageSources(node, { preferData: true });
+  const ownRole = node.dataset.imageRole || "output";
+  const ownImages = ownRole === "output" || ownRole === "editBase"
+    ? getNodeImageSources(node)
+    : getNodeUploadedImageSources(node);
+  const ownApiMartImages = ownRole === "output" || ownRole === "editBase"
+    ? getNodeImageSources(node, { preferData: true })
+    : getNodeUploadedImageSources(node, { preferData: true });
   const incomingNodes = getReferenceSourceNodes(node);
   const editBaseImages = [];
   const structureImages = [];
@@ -2658,21 +2663,22 @@ function collectRoleReferenceImages(node) {
     }
   };
 
-  if ((node.dataset.imageRole || "output") === "editBase" && ownImages.length) {
+  if (ownRole === "editBase" && ownImages.length) {
     editBaseImages.push(...ownImages);
     apimartEditBaseImages.push(...ownApiMartImages);
     ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
-  } else if ((node.dataset.imageRole || "output") !== "output" && ownImages.length) {
+  } else if (ownRole !== "output" && ownImages.length) {
     structureImages.push(...ownImages);
     apimartStructureImages.push(...ownApiMartImages);
     ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
   }
 
   incomingNodes.forEach((sourceNode) => {
-    const images = getNodeImageSources(sourceNode).filter(isRemoteImageUrl);
-    const apiMartImages = getNodeImageSources(sourceNode, { preferData: true }).filter(isImageReferenceValue);
-    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
     const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
+    const useGenerated = role === "output" || role === "editBase";
+    const images = (useGenerated ? getNodeImageSources(sourceNode) : getNodeUploadedImageSources(sourceNode)).filter(isRemoteImageUrl);
+    const apiMartImages = (useGenerated ? getNodeImageSources(sourceNode, { preferData: true }) : getNodeUploadedImageSources(sourceNode, { preferData: true })).filter(isImageReferenceValue);
+    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
     if (role === "editBase") {
       editBaseImages.push(...images);
       apimartEditBaseImages.push(...apiMartImages);
@@ -2757,10 +2763,10 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
       : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
     return {
       images,
-      editBaseImages: [],
+      editBaseImages: structure ? [structure] : [],
       structureImages: structure ? [structure] : [],
       styleImages: styles,
-      editBaseCount: 0,
+      editBaseCount: structure ? 1 : 0,
       structureCount: structure ? 1 : 0,
       hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
       styleCount: styles.length,
@@ -2796,11 +2802,35 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
   };
 }
 
+function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "structureStyle") {
+  const normalizedProvider = normalizeImageProvider(provider);
+  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
+  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
+  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
+    return plan;
+  }
+
+  const lockedImages = uniqueValues([
+    ...(plan.editBaseImages || []),
+    ...(plan.structureImages || []),
+  ]).slice(0, 4);
+  return {
+    ...plan,
+    images: lockedImages,
+    styleImages: [],
+    styleCount: 0,
+    generalCount: 0,
+    lockedStyleCount: plan.styleCount || plan.styleImages.length,
+    structureLocked: true,
+  };
+}
+
 function formatReferencePlan(plan) {
   const parts = [];
   if (plan.editBaseCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
   if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
   if (plan.styleCount) parts.push(`${plan.styleCount} 张风格图`);
+  if (plan.structureLocked && plan.lockedStyleCount) parts.push(`已启用结构锁，${plan.lockedStyleCount} 张风格图不作为构图输入`);
   if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
   if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
   return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
@@ -2830,6 +2860,33 @@ function getNodeImageSources(node, options = {}) {
   return uniqueValues([
     node.dataset.generatedImageUrl,
     ...parseJsonArray(node.dataset.generatedImageUrls),
+    ...uploadedDataUrls,
+    primaryImageData,
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceDataUrls,
+    primaryReferenceData,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ].filter(Boolean));
+}
+
+function getNodeUploadedImageSources(node, options = {}) {
+  if (!node) return [];
+  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
+  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
+  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
+  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
+  const primaryImageData = node.dataset.imageDataInlineUrl || "";
+  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
+  const persistent = [
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ];
+  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
+  return uniqueValues([
     ...uploadedDataUrls,
     primaryImageData,
     ...uploadedUrls,
