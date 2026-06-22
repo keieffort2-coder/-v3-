@@ -167,8 +167,6 @@ module.exports = async function handler(req, res) {
 
     const normalizedQuality = normalizeQuality(quality, submitBody.model);
     if (normalizedQuality) submitBody.quality = normalizedQuality;
-    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
-    if (normalizedSize) submitBody.size = normalizedSize;
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
       : [imageDataUrl];
@@ -185,13 +183,14 @@ module.exports = async function handler(req, res) {
     const bindingPrompt = String(referenceBindings || "").trim();
     if (orderedReferenceUrls.length) {
       submitBody.image_urls = orderedReferenceUrls;
-      submitBody.image_url = orderedReferenceUrls[0];
       submitBody.prompt = [
         bindingPrompt,
         "Reference binding order: image_urls[0] is the structure/edit authority. Preserve its layout, camera, perspective, scale, object positions, and canvas ratio. Later image_urls are style references only; borrow palette, lighting, material, atmosphere, and finish without copying their composition.",
         String(prompt),
       ].filter(Boolean).join("\n");
     }
+    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
+    if (normalizedSize && !orderedReferenceUrls.length) submitBody.size = normalizedSize;
     if (structureUrls.length) {
       submitBody.structure_image_urls = structureUrls.slice(0, 4);
       submitBody.composition_image_urls = structureUrls.slice(0, 4);
@@ -247,13 +246,14 @@ module.exports = async function handler(req, res) {
       return;
     }
 
+    const apiMartSubmitBody = buildApiMartSubmitBody(submitBody);
     const submit = await fetch(`${API_BASE}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(submitBody),
+      body: JSON.stringify(apiMartSubmitBody),
     });
 
     const submitPayload = await readJson(submit);
@@ -263,11 +263,11 @@ module.exports = async function handler(req, res) {
         message: formatUpstreamError(submitPayload),
         upstream: submitPayload,
         request: {
-          model: submitBody.model,
-          size: submitBody.size,
-          quality: submitBody.quality,
-          output_format: submitBody.output_format,
-          referenceCount: imageUrls.length,
+          model: apiMartSubmitBody.model,
+          size: apiMartSubmitBody.size,
+          quality: apiMartSubmitBody.quality,
+          output_format: apiMartSubmitBody.output_format,
+          referenceCount: apiMartSubmitBody.image_urls?.length || 0,
         },
       });
       return;
@@ -285,7 +285,7 @@ module.exports = async function handler(req, res) {
     res.status(202).json({
       taskId,
       status: "submitted",
-      model: submitBody.model,
+      model: apiMartSubmitBody.model,
       provider: "apimart",
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
     });
@@ -309,6 +309,21 @@ function isImageReferenceValue(value) {
 
 function uniqueValues(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function buildApiMartSubmitBody(body) {
+  const next = {
+    model: body.model,
+    prompt: body.prompt,
+    n: body.n || 1,
+  };
+  if (body.output_format) next.output_format = body.output_format;
+  if (body.quality) next.quality = body.quality;
+  if (body.size) next.size = body.size;
+  if (Array.isArray(body.image_urls) && body.image_urls.length) {
+    next.image_urls = body.image_urls.filter(isImageReferenceValue).slice(0, 4);
+  }
+  return next;
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
