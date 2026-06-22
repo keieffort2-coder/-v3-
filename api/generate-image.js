@@ -184,6 +184,10 @@ module.exports = async function handler(req, res) {
     if (orderedReferenceUrls.length) {
       submitBody.image_urls = orderedReferenceUrls;
       submitBody.image_url = orderedReferenceUrls[0];
+      submitBody.prompt = [
+        "Reference binding order: image_urls[0] is the structure/edit authority. Preserve its layout, camera, perspective, scale, object positions, and canvas ratio. Later image_urls are style references only; borrow palette, lighting, material, atmosphere, and finish without copying their composition.",
+        String(prompt),
+      ].join("\n");
     }
     if (structureUrls.length) {
       submitBody.structure_image_urls = structureUrls.slice(0, 4);
