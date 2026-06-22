@@ -2613,7 +2613,7 @@ function getReferenceSourceNodes(node) {
   const ordered = [];
   const walk = (current, depth = 0) => {
     if (!current || depth > 4) return;
-    getConnectedInputNodes(current).forEach((sourceNode) => {
+    getIncomingNodes(current).forEach((sourceNode) => {
       if (!sourceNode?.id || visited.has(sourceNode.id)) return;
       visited.add(sourceNode.id);
       ordered.push(sourceNode);
@@ -2650,6 +2650,12 @@ function collectRoleReferenceImages(node) {
   const apimartStyleImages = [];
   const apimartGeneralImages = [];
   const imageDimensions = {};
+  const roleTitles = {
+    editBase: [],
+    structure: [],
+    style: [],
+    general: [],
+  };
 
   const rememberDimensions = (url, sourceNode, aliases = []) => {
     if (!url || !sourceNode) return;
@@ -2666,10 +2672,12 @@ function collectRoleReferenceImages(node) {
   if (ownRole === "editBase" && ownImages.length) {
     editBaseImages.push(...ownImages);
     apimartEditBaseImages.push(...ownApiMartImages);
+    roleTitles.editBase.push(getNodeTitle(node));
     ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
   } else if (ownRole !== "output" && ownImages.length) {
     structureImages.push(...ownImages);
     apimartStructureImages.push(...ownApiMartImages);
+    roleTitles.structure.push(getNodeTitle(node));
     ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
   }
 
@@ -2682,18 +2690,23 @@ function collectRoleReferenceImages(node) {
     if (role === "editBase") {
       editBaseImages.push(...images);
       apimartEditBaseImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
     } else if (role === "structure") {
       structureImages.push(...images);
       apimartStructureImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.structure.push(getNodeTitle(sourceNode));
     } else if (role === "style") {
       styleImages.push(...images);
       apimartStyleImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.style.push(getNodeTitle(sourceNode));
     } else if (role === "output") {
       editBaseImages.push(...images);
       apimartEditBaseImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
     } else if (role !== "output") {
       generalImages.push(...images);
       apimartGeneralImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.general.push(getNodeTitle(sourceNode));
     }
   });
 
@@ -2707,7 +2720,17 @@ function collectRoleReferenceImages(node) {
     apimartStyle: uniqueValues(apimartStyleImages.filter(isImageReferenceValue)),
     apimartGeneral: uniqueValues(apimartGeneralImages.filter(isImageReferenceValue)),
     dimensions: imageDimensions,
+    titles: {
+      editBase: uniqueValues(roleTitles.editBase),
+      structure: uniqueValues(roleTitles.structure),
+      style: uniqueValues(roleTitles.style),
+      general: uniqueValues(roleTitles.general),
+    },
   };
+}
+
+function getNodeTitle(node) {
+  return node?.querySelector(".node-title strong")?.textContent || "未命名节点";
 }
 
 function inferImageRole(node) {
@@ -2897,6 +2920,15 @@ function formatReferencePlan(plan) {
   if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
   if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
   return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
+}
+
+function formatReferenceSourceTitles(roleImages) {
+  const structure = roleImages?.titles?.structure?.[0] || roleImages?.titles?.editBase?.[0] || "";
+  const style = roleImages?.titles?.style?.[0] || "";
+  const parts = [];
+  if (structure) parts.push(`结构源：${structure}`);
+  if (style) parts.push(`风格源：${style}`);
+  return parts.join("，");
 }
 
 function buildReferenceBindingPrompt(plan) {
@@ -3514,8 +3546,9 @@ async function runImageGeneration(node) {
     ].some((value) => value && !isRemoteImageUrl(value));
 
     const sizeStatus = referenceImages.length ? "按结构图/自动" : (requestedSize || "自动");
+    const sourceStatus = formatReferenceSourceTitles(roleImages);
     status.textContent = referenceImages.length
-      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
+      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}${sourceStatus ? `，${sourceStatus}` : ""}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
       : hasLocalOnlyReferences
         ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
       : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
