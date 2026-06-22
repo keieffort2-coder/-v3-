@@ -9,11 +9,11 @@ function getApiMartKey(channel) {
 }
 
 function getRayinAiKey() {
-  return sanitizeHeaderValue(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
+  return sanitizeBearerToken(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
 }
 
 function getRayinAiExtensionToken() {
-  return sanitizeHeaderValue(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
+  return sanitizeBearerToken(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
 }
 
 function getRayinAiKeyId() {
@@ -34,6 +34,10 @@ function getRayinAiBaseUrl() {
 
 function sanitizeHeaderValue(value) {
   return String(value || "").trim().replace(/[^\x20-\x7E]/g, "");
+}
+
+function sanitizeBearerToken(value) {
+  return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "");
 }
 
 module.exports = async function handler(req, res) {
@@ -265,7 +269,10 @@ function shouldTryRayinAi(provider, model, apiKey) {
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
-    return "RayinAI 扩展接口认证失败：请在 Vercel 增加 RAYINAI_EXTENSION_TOKEN，值使用 RayinAI 网页 Network 请求头里的 Authorization Bearer token。";
+    if (payload?.rayinExtensionAuth?.hasToken) {
+      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认复制的是当前 RayinAI 网页 Headers 里的 Authorization，且 token 未过期。";
+    }
+    return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
@@ -553,6 +560,12 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
   });
   const payload = await readJson(response);
   const taskId = extractTaskId(payload);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    payload.rayinExtensionAuth = {
+      hasToken: Boolean(apiKey),
+      tokenLooksLikeJwt: /^eyJ/.test(apiKey || ""),
+    };
+  }
   if (response.ok && taskId) {
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       payload.rayinEndpoint = endpoint;
