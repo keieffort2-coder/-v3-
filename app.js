@@ -2724,24 +2724,28 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
   const editBase = providerImages.editBase?.[0] || "";
   const explicitStructure = providerImages.structure[0] || "";
   const fallbackStructure = providerImages.general[0] || "";
-  const structure = editBase || explicitStructure || fallbackStructure || "";
+  const structure = mode === "structureStyle"
+    ? explicitStructure || fallbackStructure || editBase || ""
+    : editBase || explicitStructure || fallbackStructure || "";
   const structureDimensions = roleImages.dimensions?.[structure] || null;
   const remainingGeneral = structure ? providerImages.general.filter((url) => url !== structure) : providerImages.general;
 
   if (mode === "structureStyle") {
-    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral).slice(0, 1);
+    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral)
+      .filter((url) => url !== structure)
+      .slice(0, 1);
     const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
-    const images = structure
+    const images = uniqueValues(structure
       ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
-      : uniqueValues([...styles, ...generalFallback].filter(Boolean)).slice(0, 2);
+      : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
     return {
       images,
-      editBaseImages: editBase ? [editBase] : [],
+      editBaseImages: [],
       structureImages: structure ? [structure] : [],
       styleImages: styles,
-      editBaseCount: editBase ? 1 : 0,
-      structureCount: structure && !editBase ? 1 : 0,
-      hasExplicitStructure: Boolean(editBase || explicitStructure || fallbackStructure),
+      editBaseCount: 0,
+      structureCount: structure ? 1 : 0,
+      hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
       styleCount: styles.length,
       generalCount: generalFallback.length,
       structureDimensions,
@@ -3847,14 +3851,15 @@ function buildImageEditPrompt(
     return [
       ...baseRules,
       "Image reference roles:",
-      "- The first input image is the SCENE STRUCTURE reference. It is the dominant source. If any other reference conflicts with it, ignore the other reference.",
+      "- Reference image 1 / first input image is the SCENE STRUCTURE reference. It is the dominant source. If any other reference conflicts with it, ignore the other reference.",
       "- Preserve the structure reference's camera position, lens feeling, horizon line, vanishing points, perspective, terrain or room shape, building silhouettes, architectural layout, object scale, foreground/midground/background relationship, and lighting direction.",
-      `- The next ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them only as color, material, lighting, atmosphere, texture, and render-finish samples.`,
+      `- Reference image 2 and the next ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them only as color, material, lighting, atmosphere, texture, and render-finish samples.`,
       "- Treat STYLE references as non-spatial swatches, not as scene images. Their composition, camera, architecture, layout, object positions, focal subject, silhouettes, and scene geometry have zero authority.",
       "Do not copy the style reference composition, camera angle, architecture layout, scene geometry, props, silhouettes, object placement, or focal subject.",
       "The final image must be a redraw of the structure reference's scene layout, not a redraw of the style reference.",
       "Keep perspective, horizon, vanishing points, architecture positions, terrain shape, wall/floor/ceiling relationships, scale, and lighting direction stable. Do not crop, rotate, zoom, reframe, replace, or redesign the scene layout.",
       "If the style reference is visually attractive but uses a different composition, ignore that composition completely.",
+      "中文强约束：参考图1是渲染结构图，只锁定构图、镜头、空间、比例、透视、主体位置和物体关系；参考图2是风格参考图，只提取色彩、材质、光影、氛围和笔触，不允许继承它的构图、场景、建筑轮廓、主体位置或镜头角度。",
     ].join("\n");
   }
 
