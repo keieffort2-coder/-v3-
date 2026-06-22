@@ -2607,8 +2607,25 @@ function getIncomingReferenceImages(node) {
   return getConnectedInputNodes(node).map(getNodeImageSource).filter(Boolean);
 }
 
+function getReferenceSourceNodes(node) {
+  const root = node;
+  const visited = new Set([root?.id].filter(Boolean));
+  const ordered = [];
+  const walk = (current, depth = 0) => {
+    if (!current || depth > 4) return;
+    getConnectedInputNodes(current).forEach((sourceNode) => {
+      if (!sourceNode?.id || visited.has(sourceNode.id)) return;
+      visited.add(sourceNode.id);
+      ordered.push(sourceNode);
+      walk(sourceNode, depth + 1);
+    });
+  };
+  walk(root);
+  return ordered;
+}
+
 function buildPromptWithIncomingText(node, ownPrompt) {
-  const textInputs = getConnectedInputNodes(node)
+  const textInputs = getReferenceSourceNodes(node)
     .filter((sourceNode) => sourceNode.dataset.type === "text")
     .map(getNodeContent)
     .filter(Boolean);
@@ -2618,7 +2635,7 @@ function buildPromptWithIncomingText(node, ownPrompt) {
 function collectRoleReferenceImages(node) {
   const ownImages = getNodeImageSources(node);
   const ownApiMartImages = getNodeImageSources(node, { preferData: true });
-  const incomingNodes = getConnectedInputNodes(node);
+  const incomingNodes = getReferenceSourceNodes(node);
   const editBaseImages = [];
   const structureImages = [];
   const styleImages = [];
