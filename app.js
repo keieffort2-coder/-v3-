@@ -2836,6 +2836,49 @@ function formatReferencePlan(plan) {
   return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
 }
 
+function buildReferenceBindingPrompt(plan) {
+  const imageCount = Array.isArray(plan?.images) ? plan.images.length : 0;
+  if (!imageCount) return "";
+
+  const structureCount = Number(plan.structureCount || 0);
+  const styleCount = Number(plan.styleCount || 0);
+  const editBaseCount = Number(plan.editBaseCount || 0);
+  const hasStructure = structureCount > 0 || editBaseCount > 0;
+  const structureSize = plan.structureDimensions?.width && plan.structureDimensions?.height
+    ? `${Math.round(plan.structureDimensions.width)}x${Math.round(plan.structureDimensions.height)}`
+    : "";
+
+  const lines = [
+    "Reference binding tags:",
+  ];
+
+  if (hasStructure) {
+    lines.push(
+      `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
+      "@渲染结构图 has absolute priority for composition, camera, lens, horizon, vanishing points, perspective, crop, object placement, scene layout, silhouettes, and canvas aspect ratio.",
+      "The final image must be a redraw/remaster of @渲染结构图's spatial structure, not a new composition.",
+    );
+  }
+
+  if (styleCount > 0) {
+    const start = hasStructure ? 2 : 1;
+    const end = start + styleCount - 1;
+    lines.push(
+      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`}.`,
+      "@风格参考图 is only a palette/material/lighting/atmosphere reference. It has zero authority over camera, composition, architecture, object placement, crop, or scene geometry.",
+    );
+  }
+
+  if (hasStructure && styleCount > 0) {
+    lines.push(
+      "Conflict rule: if @风格参考图 conflicts with @渲染结构图, always follow @渲染结构图 and ignore the conflicting style composition.",
+      "中文绑定：@渲染结构图只负责结构且优先级最高；@风格参考图只负责色调、材质、光影和氛围，不能改变结构图的构图、透视和物体位置。",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function getNodeImageSource(node) {
   return getNodeImageSources(node)[0] || "";
 }
@@ -3366,8 +3409,9 @@ async function runImageGeneration(node) {
   const referencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
   const referenceImages = referencePlan.images;
   const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
+  const referenceBindings = buildReferenceBindingPrompt(referencePlan);
   const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
-    prompt,
+    [referenceBindings, prompt].filter(Boolean).join("\n\n"),
     referenceMode,
     roleImages,
     referencePlan,
@@ -3385,6 +3429,7 @@ async function runImageGeneration(node) {
       structureImageUrls: referencePlan.structureImages || [],
       styleImageUrls: referencePlan.styleImages || [],
       editBaseImageUrls: referencePlan.editBaseImages || [],
+      referenceBindings,
       purpose: node.dataset.imagePurpose || imageOptions.purpose,
       referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
       quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
@@ -3403,7 +3448,7 @@ async function runImageGeneration(node) {
     ].some((value) => value && !isRemoteImageUrl(value));
 
     status.textContent = referenceImages.length
-      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，尺寸 ${requestedSize || "自动"}...`
+      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${requestedSize || "自动"}...`
       : hasLocalOnlyReferences
         ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
       : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${requestedSize || "自动"}...`;
