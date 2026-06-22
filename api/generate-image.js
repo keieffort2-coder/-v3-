@@ -26,6 +26,13 @@ function getRayinAiKeyId() {
   return Number.isFinite(id) && id > 0 ? id : 8634;
 }
 
+function getRayinAiUserId(token) {
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID);
+  if (raw) return raw;
+  const payload = parseJwtPayload(token);
+  return payload.user_id || payload.userId || payload.sub || payload.id || "";
+}
+
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
@@ -57,8 +64,7 @@ function parseJwtPayload(token) {
 }
 
 function buildRayinExtensionReferer(baseUrl, token) {
-  const payload = parseJwtPayload(token);
-  const userId = payload.user_id || payload.userId || payload.sub || payload.id || "";
+  const userId = getRayinAiUserId(token);
   const query = new URLSearchParams({
     token,
     theme: "light",
@@ -301,7 +307,7 @@ function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     if (payload?.rayinExtensionAuth?.hasToken) {
-      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认 token 未混入空格/换行且未过期；如果仍失败，请从 RayinAI 网页 Headers 复制 Cookie 到 RAYINAI_EXTENSION_COOKIE。";
+      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请在 Vercel 增加 RAYINAI_USER_ID，值用 RayinAI 网页 Referer 里的 user_id；你当前截图里是 5294。";
     }
     return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
@@ -472,8 +478,10 @@ async function getRayinTask(apiKey, taskId) {
     const headers = {
       Authorization: `Bearer ${apiKey}`,
       Accept: "*/*",
+      "Accept-Language": "zh-CN,zh;q=0.9",
       Origin: baseUrl,
       Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
     };
     if (cookie) headers.Cookie = cookie;
     const response = await fetch(endpoint, { headers });
@@ -589,8 +597,10 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
     Accept: "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9",
     Origin: baseUrl,
     Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
   };
   if (cookie) headers.Cookie = cookie;
   const response = await fetch(endpoint, {
