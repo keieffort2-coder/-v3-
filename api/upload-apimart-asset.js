@@ -1,4 +1,5 @@
 const API_BASE = "https://api.apimart.ai/v1";
+let sharpModulePromise = null;
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -33,10 +34,11 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const assetKind = getAssetKind(parsed.contentType);
+    const normalized = await normalizeUploadAsset(parsed);
+    const assetKind = getAssetKind(normalized.contentType);
     const endpoint = getUploadEndpoint(assetKind);
     const formData = new FormData();
-    formData.append("file", new Blob([parsed.buffer], { type: parsed.contentType }), sanitizeName(fileName || `asset.${getExtension(parsed.contentType)}`));
+    formData.append("file", new Blob([normalized.buffer], { type: normalized.contentType }), sanitizeName(fileName || `asset.${getExtension(normalized.contentType)}`));
 
     const upload = await fetch(`${API_BASE}${endpoint}`, {
       method: "POST",
@@ -58,7 +60,14 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    res.status(200).json({ url, assetKind, endpoint, payload });
+    res.status(200).json({
+      url,
+      assetKind,
+      endpoint,
+      normalized: normalized.normalized,
+      dimensions: normalized.dimensions,
+      payload,
+    });
   } catch (error) {
     res.status(500).json({
       error: "APIMart asset upload failed",
@@ -66,6 +75,74 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+
+async function normalizeUploadAsset(parsed) {
+  if (!parsed?.contentType?.startsWith("image/")) {
+    return { ...parsed, normalized: false, dimensions: null };
+  }
+  if (parsed.contentType === "image/gif" || parsed.contentType === "image/svg+xml") {
+    return { ...parsed, normalized: false, dimensions: null };
+  }
+
+  const sharp = await getSharp();
+  if (!sharp) return { ...parsed, normalized: false, dimensions: null };
+
+  const image = sharp(parsed.buffer, { failOn: "none" });
+  const metadata = await image.metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  if (!width || !height) return { ...parsed, normalized: false, dimensions: null };
+
+  const nextWidth = roundUpToMultiple(width, 16);
+  const nextHeight = roundUpToMultiple(height, 16);
+  if (nextWidth === width && nextHeight === height) {
+    return {
+      ...parsed,
+      normalized: false,
+      dimensions: { width, height },
+    };
+  }
+
+  const right = nextWidth - width;
+  const bottom = nextHeight - height;
+  const outputContentType = parsed.contentType === "image/webp" ? "image/webp" : "image/png";
+  let output = sharp(parsed.buffer, { failOn: "none" })
+    .extend({
+      top: 0,
+      left: 0,
+      right,
+      bottom,
+      extendWith: "copy",
+    });
+  output = outputContentType === "image/webp" ? output.webp({ quality: 95 }) : output.png({ compressionLevel: 6 });
+  const buffer = await output.toBuffer();
+
+  return {
+    contentType: outputContentType,
+    buffer,
+    normalized: true,
+    dimensions: {
+      width: nextWidth,
+      height: nextHeight,
+      sourceWidth: width,
+      sourceHeight: height,
+    },
+  };
+}
+
+async function getSharp() {
+  try {
+    sharpModulePromise ||= import("sharp").then((mod) => mod.default || mod);
+    return await sharpModulePromise;
+  } catch (error) {
+    console.error("sharp is unavailable; APIMart image upload normalization skipped:", error);
+    return null;
+  }
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
+}
 
 function parseDataUrl(value) {
   if (typeof value !== "string") return null;
