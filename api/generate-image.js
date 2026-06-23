@@ -1,7 +1,7 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
-const RHART_ENDPOINT_PATH = "/rhart-image-n-g31-flash/image-to-image";
-const RHART_DEFAULT_BASE = API_BASE;
+const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
+const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
 
 function getApiMartKey(channel) {
@@ -50,18 +50,23 @@ function getRayinAiBaseUrl() {
 }
 
 function getRhartBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL || RHART_DEFAULT_BASE);
+  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL);
   const withoutName = raw.replace(/^RHART(?:_G31)?_BASE_URL\s*=\s*/i, "");
   const value = withoutName
+    .replace(/\/v1\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
     .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
-    .replace(/\/v1\/?$/i, "/v1")
+    .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
   if (/^https?:\/\//i.test(value)) return value;
-  return RHART_DEFAULT_BASE;
+  return "";
 }
 
 function buildRhartEndpoint() {
-  return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${getRhartBaseUrl().replace(/\/+$/, "")}/`).toString();
+  const explicit = sanitizeHeaderValue(process.env.RHART_ENDPOINT_URL || process.env.RHART_G31_ENDPOINT_URL);
+  if (/^https?:\/\//i.test(explicit)) return explicit;
+  const base = getRhartBaseUrl();
+  if (!base) return "";
+  return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
 }
 
 function sanitizeHeaderValue(value) {
@@ -401,7 +406,7 @@ function buildApiMartSubmitBody(body) {
 function buildRhartSubmitBody(body) {
   const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
   const next = {
-    model: "gpt-image-2",
+    model: RHART_MODEL,
     prompt: body.prompt,
     n: body.n || 1,
     output_format: body.output_format || "png",
@@ -427,6 +432,16 @@ function buildRhartSubmitBody(body) {
 
 async function submitRhartImageTask(apiKey, body) {
   const endpoint = buildRhartEndpoint();
+  if (!endpoint) {
+    return {
+      ok: false,
+      status: 500,
+      payload: {
+        error: "RHART_ENDPOINT_URL / RHART_BASE_URL is not configured",
+        message: "RHarT G31 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
+      },
+    };
+  }
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
