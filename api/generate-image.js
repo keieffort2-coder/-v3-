@@ -1,6 +1,7 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
 const RHART_ENDPOINT_PATH = "/rhart-image-n-g31-flash/image-to-image";
+const RHART_DEFAULT_BASE = API_BASE;
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
 
 function getApiMartKey(channel) {
@@ -46,6 +47,21 @@ function getRayinAiBaseUrl() {
     .replace(/\/responses\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
+}
+
+function getRhartBaseUrl() {
+  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL || RHART_DEFAULT_BASE);
+  const withoutName = raw.replace(/^RHART(?:_G31)?_BASE_URL\s*=\s*/i, "");
+  const value = withoutName
+    .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
+    .replace(/\/v1\/?$/i, "/v1")
+    .replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(value)) return value;
+  return RHART_DEFAULT_BASE;
+}
+
+function buildRhartEndpoint() {
+  return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${getRhartBaseUrl().replace(/\/+$/, "")}/`).toString();
 }
 
 function sanitizeHeaderValue(value) {
@@ -410,7 +426,7 @@ function buildRhartSubmitBody(body) {
 }
 
 async function submitRhartImageTask(apiKey, body) {
-  const endpoint = `${API_BASE}${RHART_ENDPOINT_PATH}`;
+  const endpoint = buildRhartEndpoint();
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
