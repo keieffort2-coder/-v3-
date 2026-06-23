@@ -611,6 +611,11 @@ imageModelSelect?.addEventListener("change", () => {
 imageProviderSelect?.addEventListener("change", () => {
   if (!configNode || configNode.dataset.type !== "image") return;
   configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
+  if (configNode.dataset.imageProvider === "rhart") {
+    configNode.dataset.imageModel = "gpt-image-2";
+    if (imageModelSelect) imageModelSelect.value = "gpt-image-2";
+  }
+  syncImageOptionsUi();
   saveCurrentProject();
 });
 
@@ -2215,7 +2220,6 @@ function openImageConfig(node) {
           <option value="gpt-image-2">GPT图像2</option>
           <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
           <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
-          <option value="rhart-image-n-g31-flash/image-to-image">RHarT G31 Flash 图生图</option>
         `;
   }
   imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
@@ -2245,6 +2249,10 @@ function openImageConfig(node) {
   }
   if (imageProviderSelect) {
     imageProviderSelect.value = normalizeImageProvider(node.dataset.imageProvider || "apimart");
+  }
+  if (imageProviderSelect?.value === "rhart" && imageModelSelect) {
+    imageModelSelect.value = "gpt-image-2";
+    node.dataset.imageModel = "gpt-image-2";
   }
   syncImageOptionsUi();
   renderConfigInputThumbnails(node);
@@ -2281,7 +2289,10 @@ function syncImageOptionsSummary() {
     style: "风格图",
     output: "输出图",
   }[imageOptions.imageRole] || "普通图片";
-  const model = normalizeImageModel(configNode?.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const model = provider === "rhart"
+    ? "gpt-image-2"
+    : normalizeImageModel(configNode?.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
   const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
   openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
 }
@@ -2304,9 +2315,12 @@ function syncImageOptionsUi() {
 function syncImageQualityOptionLabels() {
   const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
   if (!qualityGrid) return;
-  const model = configNode?.dataset.type === "image"
-    ? normalizeImageModel(configNode.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official")
-    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
+  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const model = provider === "rhart"
+    ? "gpt-image-2"
+    : configNode?.dataset.type === "image"
+      ? normalizeImageModel(configNode.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official")
+      : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
   const labels = model === "gpt-image-2"
     ? { low: "1k", medium: "2k", high: "4k" }
     : { low: "low", medium: "medium", high: "high" };
@@ -2463,18 +2477,22 @@ function loadImageOptions() {
 function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (model === "rhart-image-n-g31-flash/image-to-image" || model === "/rhart-image-n-g31-flash/image-to-image") return "rhart-image-n-g31-flash/image-to-image";
+  if (model === "rhart-image-n-g31-flash/image-to-image" || model === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
 
 function normalizeImageProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
+  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
   return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
 }
 
 function getImageProviderLabel(value) {
-  return normalizeImageProvider(value) === "rayinai" ? "RayinAI" : "ApiMart";
+  const provider = normalizeImageProvider(value);
+  if (provider === "rayinai") return "RayinAI";
+  if (provider === "rhart") return "RHarT G31";
+  return "ApiMart";
 }
 
 function normalizeImageQualityForModel(quality, model) {
@@ -3502,8 +3520,10 @@ async function runImageGeneration(node) {
   const uploadName = node.dataset.fileName || "";
   const status = ensureNodeStatus(node);
   const referenceMode = node.dataset.referenceMode || "structureStyle";
-  const selectedModel = normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
   const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const selectedModel = selectedProvider === "rhart"
+    ? "gpt-image-2"
+    : normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
   const roleImages = collectRoleReferenceImages(node);
   const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
   const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
@@ -3672,7 +3692,11 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
     throw new Error(formatApiError(result, `HTTP ${response.status}`));
   }
   if (result.imageUrl) {
-    status.textContent = result.provider === "rayinai" ? "RayinAI 已直接返回图片。" : "图片生成完成。";
+    status.textContent = result.provider === "rayinai"
+      ? "RayinAI 已直接返回图片。"
+      : result.provider === "rhart"
+        ? "RHarT G31 图片生成完成。"
+        : "图片生成完成。";
     return result;
   }
   if (!result.taskId) {
