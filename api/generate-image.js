@@ -9,6 +9,10 @@ function getApiMartKey(channel) {
   return sanitizeHeaderValue(key);
 }
 
+function getRhartKey() {
+  return sanitizeHeaderValue(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
+}
+
 function getRayinAiKey() {
   return sanitizeBearerToken(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
 }
@@ -87,12 +91,22 @@ module.exports = async function handler(req, res) {
     }
 
     const provider = normalizeProvider(req.query?.provider);
-    const apiKey = provider === "rayinai" ? getRayinAiExtensionToken() : getApiMartKey(req.query?.apimartChannel);
+    const apiKey = provider === "rayinai"
+      ? getRayinAiExtensionToken()
+      : provider === "rhart"
+        ? getRhartKey()
+        : getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
-        error: provider === "rayinai" ? "RAYINAI_API_KEY is not configured" : "APIMART_API_KEY_2 is not configured",
+        error: provider === "rayinai"
+          ? "RAYINAI_API_KEY is not configured"
+          : provider === "rhart"
+            ? "RHART_G31_API_KEY / RHART_API_KEY is not configured"
+            : "APIMART_API_KEY_2 is not configured",
         message: provider === "rayinai"
           ? "Please configure RAYINAI_API_KEY in Vercel Environment Variables."
+          : provider === "rhart"
+            ? "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables."
           : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
@@ -142,10 +156,18 @@ module.exports = async function handler(req, res) {
     provider,
   } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
+  const rhartKey = getRhartKey();
   const rayinAiKey = getRayinAiKey();
   const rayinExtensionToken = getRayinAiExtensionToken();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
-  if (!apiKey && preferredProvider !== "rayinai") {
+  if (preferredProvider === "rhart" && !rhartKey) {
+    res.status(500).json({
+      error: "RHART_G31_API_KEY / RHART_API_KEY is not configured",
+      message: "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables.",
+    });
+    return;
+  }
+  if (!apiKey && preferredProvider !== "rayinai" && preferredProvider !== "rhart") {
     res.status(500).json({
       error: "APIMART_API_KEY_2 is not configured",
       message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
@@ -207,7 +229,7 @@ module.exports = async function handler(req, res) {
 
     if (preferredProvider === "rhart") {
       const rhartSubmitBody = buildRhartSubmitBody(submitBody);
-      const rhartResult = await submitRhartImageTask(apiKey, rhartSubmitBody);
+      const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
       if (rhartResult.ok) {
         const imageUrl = await persistResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`);
         const taskId = extractTaskId(rhartResult.payload);
