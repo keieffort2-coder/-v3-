@@ -190,7 +190,7 @@ module.exports = async function handler(req, res) {
       ].filter(Boolean).join("\n");
     }
     const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
-    if (normalizedSize && !orderedReferenceUrls.length) submitBody.size = normalizedSize;
+    if (normalizedSize) submitBody.size = normalizedSize;
     if (structureUrls.length) {
       submitBody.structure_image_urls = structureUrls.slice(0, 4);
       submitBody.composition_image_urls = structureUrls.slice(0, 4);
@@ -363,6 +363,7 @@ function findMessage(value, seen = new Set()) {
 function normalizeModel(model) {
   const value = String(model || "").trim();
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
+  if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "rhart-image-n-g31-flash/image-to-image";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
@@ -376,6 +377,7 @@ function normalizeRayinModel(model) {
 function normalizeQuality(quality, model) {
   const value = String(quality || "").trim().toLowerCase();
   if (!value) return "";
+  if (model === "rhart-image-n-g31-flash/image-to-image") return "";
   if (model === "gpt-image-2") {
     if (value === "low" || value === "standard" || value === "1k") return "1k";
     if (value === "medium" || value === "hd" || value === "2k") return "2k";
@@ -400,8 +402,8 @@ function normalizeSize(size, model = "") {
     const sourceHeight = Number(match[2]);
     const maxEdge = Math.max(sourceWidth, sourceHeight);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-    const width = Math.min(3840, Math.max(16, Math.round((sourceWidth * scale) / 16) * 16));
-    const height = Math.min(3840, Math.max(16, Math.round((sourceHeight * scale) / 16) * 16));
+    const width = Math.min(3840, Math.max(16, Math.round(sourceWidth * scale)));
+    const height = Math.min(3840, Math.max(16, Math.round(sourceHeight * scale)));
     return `${width}x${height}`;
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
