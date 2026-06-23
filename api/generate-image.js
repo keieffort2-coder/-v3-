@@ -1,7 +1,7 @@
-const API_BASE = "https://api.apimart.ai/v1";
+const { put } = require("@vercel/blob");
 
-const RHART_ENDPOINT_PATH = "/rhart-image-n-g31-flash/image-to-image";
-const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
+const API_BASE = "https://api.apimart.ai/v1";
+let sharpModulePromise = null;
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -9,77 +9,8 @@ function getApiMartKey(channel) {
   return sanitizeHeaderValue(key);
 }
 
-function getRhartKey() {
-  return sanitizeHeaderValue(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
-}
-
-function getRayinAiKey() {
-  return sanitizeBearerToken(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
-}
-
-function getRayinAiExtensionToken() {
-  return sanitizeBearerToken(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
-}
-
-function getRayinAiExtensionCookie() {
-  return sanitizeHeaderValue(process.env.RAYINAI_EXTENSION_COOKIE || process.env.RAYINCODE_EXTENSION_COOKIE);
-}
-
-function getRayinAiKeyId() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || process.env.RAYINCODE_KEY_ID || "8634");
-  const id = Number(raw);
-  return Number.isFinite(id) && id > 0 ? id : 8634;
-}
-
-function getRayinAiUserId(token) {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID);
-  if (raw) return raw;
-  const payload = parseJwtPayload(token);
-  return payload.user_id || payload.userId || payload.sub || payload.id || "";
-}
-
-function getRayinAiBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
-  const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
-  return withoutName
-    .replace(/\/v1\/responses\/?$/i, "")
-    .replace(/\/responses\/?$/i, "")
-    .replace(/\/v1\/?$/i, "")
-    .replace(/\/+$/, "");
-}
-
 function sanitizeHeaderValue(value) {
   return String(value || "").trim().replace(/[^\x20-\x7E]/g, "");
-}
-
-function sanitizeBearerToken(value) {
-  return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "").replace(/\s+/g, "");
-}
-
-function parseJwtPayload(token) {
-  try {
-    const part = String(token || "").split(".")[1];
-    if (!part) return {};
-    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function buildRayinExtensionReferer(baseUrl, token) {
-  const userId = getRayinAiUserId(token);
-  const query = new URLSearchParams({
-    token,
-    theme: "light",
-    lang: "zh",
-    ui_mode: "embedded",
-    src_host: baseUrl,
-    src_url: `${baseUrl}/customer`,
-  });
-  if (userId) query.set("user_id", String(userId));
-  return `${baseUrl}/extension/draw?${query.toString()}`;
 }
 
 module.exports = async function handler(req, res) {
@@ -90,40 +21,25 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const provider = normalizeProvider(req.query?.provider);
-    const apiKey = provider === "rayinai"
-      ? getRayinAiExtensionToken()
-      : provider === "rhart"
-        ? getRhartKey()
-        : getApiMartKey(req.query?.apimartChannel);
+    const apiKey = getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
-        error: provider === "rayinai"
-          ? "RAYINAI_API_KEY is not configured"
-          : provider === "rhart"
-            ? "RHART_G31_API_KEY / RHART_API_KEY is not configured"
-            : "APIMART_API_KEY_2 is not configured",
-        message: provider === "rayinai"
-          ? "Please configure RAYINAI_API_KEY in Vercel Environment Variables."
-          : provider === "rhart"
-            ? "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables."
-          : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
+        error: "APIMART_API_KEY_2 is not configured",
+        message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
     }
 
     try {
-      const taskPayload = provider === "rayinai"
-        ? await getRayinTask(apiKey, String(taskId))
-        : await getTask(apiKey, String(taskId));
+      const taskPayload = await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
-      const imageUrl = await persistResultImage(extractResultUrl(taskPayload), taskId);
+      const rawImageUrl = extractResultUrl(taskPayload);
+      const shouldPersist = String(req.query?.persist || "").toLowerCase() === "true" || req.query?.persist === "1";
+      const imageUrl = shouldPersist ? await persistResultImage(rawImageUrl, taskId) : rawImageUrl;
       res.status(200).json({
         taskId,
         status,
         imageUrl,
-        provider,
-        rayinEndpoint: taskPayload?.rayinEndpoint,
         message: formatUpstreamError(taskPayload),
         payload: imageUrl ? undefined : taskPayload,
       });
@@ -153,21 +69,9 @@ module.exports = async function handler(req, res) {
     apimartChannel,
     model,
     size,
-    provider,
   } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
-  const rhartKey = getRhartKey();
-  const rayinAiKey = getRayinAiKey();
-  const rayinExtensionToken = getRayinAiExtensionToken();
-  const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
-  if (preferredProvider === "rhart" && !rhartKey) {
-    res.status(500).json({
-      error: "RHART_G31_API_KEY / RHART_API_KEY is not configured",
-      message: "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables.",
-    });
-    return;
-  }
-  if (!apiKey && preferredProvider !== "rayinai" && preferredProvider !== "rhart") {
+  if (!apiKey) {
     res.status(500).json({
       error: "APIMART_API_KEY_2 is not configured",
       message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
@@ -193,27 +97,31 @@ module.exports = async function handler(req, res) {
     const references = Array.isArray(imageDataUrls)
       ? imageDataUrls
       : [imageDataUrl];
-    const imageUrls = references.filter(isImageReferenceValue);
-    const structureUrls = Array.isArray(structureImageUrls) ? structureImageUrls.filter(isImageReferenceValue) : [];
-    const styleUrls = Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [];
-    const editBaseUrls = Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [];
+    const referenceCache = new Map();
+    const imageUrls = await normalizeReferenceUrls(references.filter(isImageReferenceValue), apiKey, referenceCache);
+    const structureUrls = await normalizeReferenceUrls(Array.isArray(structureImageUrls) ? structureImageUrls.filter(isImageReferenceValue) : [], apiKey, referenceCache);
+    const styleUrls = await normalizeReferenceUrls(Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [], apiKey, referenceCache);
+    const editBaseUrls = await normalizeReferenceUrls(Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [], apiKey, referenceCache);
     const orderedReferenceUrls = uniqueValues([
-      ...editBaseUrls,
       ...structureUrls,
       ...styleUrls,
       ...imageUrls,
+      ...editBaseUrls,
     ]).slice(0, 16);
     const bindingPrompt = String(referenceBindings || "").trim();
     if (orderedReferenceUrls.length) {
       submitBody.image_urls = orderedReferenceUrls;
       submitBody.prompt = [
         bindingPrompt,
-        "Reference binding order: image_urls[0] is the structure/edit authority. Preserve its layout, camera, perspective, scale, object positions, and canvas ratio. Later image_urls are style references only; borrow palette, lighting, material, atmosphere, and finish without copying their composition.",
+        "Reference binding order: image_urls[0] is the structure authority. Preserve its layout, camera, perspective, scale, object positions, and canvas ratio. Style reference images only control palette, lighting, material, atmosphere, and finish; they must not change composition.",
         String(prompt),
       ].filter(Boolean).join("\n");
     }
-    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
-    if (normalizedSize) submitBody.size = normalizedSize;
+    const normalizedSize = submitBody.model === "gemini-3-pro-image-preview" ? "" : normalizeSize(size);
+    if (normalizedSize) {
+      submitBody.size = normalizedSize;
+      if (orderedReferenceUrls.length) submitBody.aspect_ratio = "auto";
+    }
     if (structureUrls.length) {
       submitBody.structure_image_urls = structureUrls.slice(0, 4);
       submitBody.composition_image_urls = structureUrls.slice(0, 4);
@@ -227,88 +135,13 @@ module.exports = async function handler(req, res) {
       submitBody.base_image_urls = editBaseUrls.slice(0, 4);
     }
 
-    if (preferredProvider === "rhart") {
-      const rhartSubmitBody = buildRhartSubmitBody(submitBody);
-      const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
-      if (rhartResult.ok) {
-        const imageUrl = await persistResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`);
-        const taskId = extractTaskId(rhartResult.payload);
-        res.status(imageUrl ? 200 : 202).json({
-          taskId,
-          status: imageUrl ? "completed" : "submitted",
-          imageUrl,
-          model: submitBody.model,
-          provider: "rhart",
-          payload: imageUrl ? undefined : rhartResult.payload,
-        });
-        return;
-      }
-
-      res.status(rhartResult.status || 502).json({
-        error: "RHarT G31 submit failed",
-        message: formatUpstreamError(rhartResult.payload),
-        upstream: rhartResult.payload,
-        request: {
-          model: rhartSubmitBody.model,
-          size: rhartSubmitBody.size,
-          quality: rhartSubmitBody.quality,
-          output_format: rhartSubmitBody.output_format,
-          referenceCount: rhartSubmitBody.image_urls?.length || 0,
-        },
-      });
-      return;
-    }
-
-    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey || rayinExtensionToken)) {
-      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody, rayinExtensionToken);
-      if (rayinResult.ok) {
-        const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
-        const taskId = extractTaskId(rayinResult.payload);
-        res.status(imageUrl ? 200 : 202).json({
-          taskId,
-          status: imageUrl ? "completed" : "submitted",
-          imageUrl,
-          model: submitBody.model,
-          provider: "rayinai",
-          rayinEndpoint: rayinResult.payload?.rayinEndpoint,
-          payload: imageUrl ? undefined : rayinResult.payload,
-        });
-        return;
-      }
-
-      if (!apiKey || preferredProvider === "rayinai") {
-        res.status(rayinResult.status || 502).json({
-          error: "RayinAI submit failed",
-          message: formatUpstreamError(rayinResult.payload),
-          upstream: rayinResult.payload,
-          request: {
-            model: submitBody.model,
-            size: submitBody.size,
-            quality: submitBody.quality,
-            output_format: submitBody.output_format,
-            referenceCount: imageUrls.length,
-          },
-        });
-        return;
-      }
-    }
-
-    if (!apiKey) {
-      res.status(500).json({
-        error: "APIMART_API_KEY_2 is not configured",
-        message: "RayinAI did not return a usable image, and APIMART_API_KEY_2 is not configured for fallback.",
-      });
-      return;
-    }
-
-    const apiMartSubmitBody = buildApiMartSubmitBody(submitBody);
     const submit = await fetch(`${API_BASE}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(apiMartSubmitBody),
+      body: JSON.stringify(submitBody),
     });
 
     const submitPayload = await readJson(submit);
@@ -318,11 +151,13 @@ module.exports = async function handler(req, res) {
         message: formatUpstreamError(submitPayload),
         upstream: submitPayload,
         request: {
-          model: apiMartSubmitBody.model,
-          size: apiMartSubmitBody.size,
-          quality: apiMartSubmitBody.quality,
-          output_format: apiMartSubmitBody.output_format,
-          referenceCount: apiMartSubmitBody.image_urls?.length || 0,
+          model: submitBody.model,
+          size: submitBody.size,
+          quality: submitBody.quality,
+          output_format: submitBody.output_format,
+          referenceCount: orderedReferenceUrls.length,
+          structureReferenceCount: structureUrls.length,
+          styleReferenceCount: styleUrls.length,
         },
       });
       return;
@@ -340,8 +175,7 @@ module.exports = async function handler(req, res) {
     res.status(202).json({
       taskId,
       status: "submitted",
-      model: apiMartSubmitBody.model,
-      provider: "apimart",
+      model: submitBody.model,
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
     });
   } catch (error) {
@@ -352,103 +186,12 @@ module.exports = async function handler(req, res) {
   }
 };
 
-function normalizeProvider(value) {
-  const provider = String(value || "").trim().toLowerCase();
-  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
-  if (provider === "rayinai" || provider === "rayincode") return "rayinai";
-  return "apimart";
-}
-
-function isImageReferenceValue(value) {
-  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
-}
-
-function uniqueValues(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function buildApiMartSubmitBody(body) {
-  const next = {
-    model: body.model,
-    prompt: body.prompt,
-    n: body.n || 1,
-  };
-  if (body.output_format) next.output_format = body.output_format;
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
-  if (Array.isArray(body.image_urls) && body.image_urls.length) {
-    next.image_urls = body.image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
-  return next;
-}
-
-function buildRhartSubmitBody(body) {
-  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
-  const next = {
-    model: "gpt-image-2",
-    prompt: body.prompt,
-    n: body.n || 1,
-    output_format: body.output_format || "png",
-  };
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
-  if (imageUrls.length) {
-    next.image_urls = imageUrls;
-    next.images = imageUrls.map((url) => ({ image_url: url, url }));
-    next.input_images = imageUrls.map((url) => ({ image_url: url, url }));
-  }
-  if (Array.isArray(body.structure_image_urls) && body.structure_image_urls.length) {
-    next.structure_image_urls = body.structure_image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
-  if (Array.isArray(body.style_image_urls) && body.style_image_urls.length) {
-    next.style_image_urls = body.style_image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
-  if (Array.isArray(body.edit_image_urls) && body.edit_image_urls.length) {
-    next.edit_image_urls = body.edit_image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
-  return next;
-}
-
-async function submitRhartImageTask(apiKey, body) {
-  const endpoint = `${API_BASE}${RHART_ENDPOINT_PATH}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = await readJson(response);
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.rhartEndpoint = endpoint;
-  }
-  const imageUrl = extractResultUrl(payload);
-  const taskId = extractTaskId(payload);
-  return {
-    ok: response.ok && Boolean(imageUrl || taskId),
-    status: response.status,
-    payload,
-  };
-}
-
-function shouldTryRayinAi(provider, model, apiKey) {
-  if (!apiKey) return false;
-  return provider === "rayinai";
-}
-
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
-  if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
-    if (payload?.rayinExtensionAuth?.hasToken) {
-      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请在 Vercel 增加 RAYINAI_USER_ID，值用 RayinAI 网页 Referer 里的 user_id；你当前截图里是 5294。";
-    }
-    return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
-  }
   if (/internal server error|server_error/i.test(message)) {
-    return "上游图片生成服务内部错误，请稍后重试或切换通道。";
+    return "APIMart upstream server error. Please retry later or switch API channel.";
   }
-  return message || "Image generation request failed.";
+  return message || "APIMart request failed.";
 }
 
 function findMessage(value, seen = new Set()) {
@@ -469,21 +212,13 @@ function findMessage(value, seen = new Set()) {
 function normalizeModel(model) {
   const value = String(model || "").trim();
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
-}
-
-function normalizeRayinModel(model) {
-  const value = normalizeModel(model);
-  if (value === "gpt-image-2-official") return "gpt-image-2";
-  return value;
 }
 
 function normalizeQuality(quality, model) {
   const value = String(quality || "").trim().toLowerCase();
   if (!value) return "";
-  if (model === "rhart-image-n-g31-flash/image-to-image") return "";
   if (model === "gpt-image-2") {
     if (value === "low" || value === "standard" || value === "1k") return "1k";
     if (value === "medium" || value === "hd" || value === "2k") return "2k";
@@ -495,11 +230,144 @@ function normalizeQuality(quality, model) {
   return "high";
 }
 
-function shouldSendSize(model) {
-  return model !== "gemini-3-pro-image-preview";
+function isImageReferenceValue(value) {
+  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
 }
 
-function normalizeSize(size, model = "") {
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+async function normalizeReferenceUrls(urls, apiKey, cache = new Map()) {
+  const normalized = [];
+  for (const url of urls) {
+    normalized.push(await normalizeReferenceUrl(url, apiKey, cache));
+  }
+  return uniqueValues(normalized);
+}
+
+async function normalizeReferenceUrl(url, apiKey, cache = new Map()) {
+  if (cache.has(url)) return cache.get(url);
+  try {
+    const source = await readImageBytes(url);
+    const normalized = await normalizeImageBufferForApiMart(source);
+    if (!normalized.normalized) {
+      cache.set(url, url);
+      return url;
+    }
+    const uploaded = await uploadNormalizedReference(apiKey, normalized);
+    const result = uploaded || url;
+    cache.set(url, result);
+    return result;
+  } catch (error) {
+    console.error("Failed to normalize APIMart reference image:", error);
+    cache.set(url, url);
+    return url;
+  }
+}
+
+async function normalizeImageBufferForApiMart(source) {
+  const contentType = source?.contentType || "image/png";
+  if (!contentType.startsWith("image/") || contentType === "image/gif" || contentType === "image/svg+xml") {
+    return { ...source, normalized: false, dimensions: null };
+  }
+
+  const sharp = await getSharp();
+  if (!sharp) return { ...source, normalized: false, dimensions: null };
+
+  const image = sharp(source.buffer, { failOn: "none" });
+  const metadata = await image.metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  if (!width || !height) return { ...source, normalized: false, dimensions: null };
+
+  const nextWidth = roundUpToMultiple(width, 16);
+  const nextHeight = roundUpToMultiple(height, 16);
+  if (nextWidth === width && nextHeight === height) {
+    return { ...source, normalized: false, dimensions: { width, height } };
+  }
+
+  const outputContentType = contentType === "image/webp" ? "image/webp" : "image/png";
+  let output = sharp(source.buffer, { failOn: "none" }).extend({
+    top: 0,
+    left: 0,
+    right: nextWidth - width,
+    bottom: nextHeight - height,
+    extendWith: "copy",
+  });
+  output = outputContentType === "image/webp" ? output.webp({ quality: 95 }) : output.png({ compressionLevel: 6 });
+  const buffer = await output.toBuffer();
+
+  return {
+    contentType: outputContentType,
+    buffer,
+    normalized: true,
+    dimensions: {
+      width: nextWidth,
+      height: nextHeight,
+      sourceWidth: width,
+      sourceHeight: height,
+    },
+  };
+}
+
+async function uploadNormalizedReference(apiKey, image) {
+  const formData = new FormData();
+  const extension = contentTypeToExtension(image.contentType);
+  const fileName = image.dimensions?.sourceWidth && image.dimensions?.sourceHeight
+    ? `reference-${image.dimensions.sourceWidth}x${image.dimensions.sourceHeight}-to-${image.dimensions.width}x${image.dimensions.height}.${extension}`
+    : `reference.${extension}`;
+  formData.append("file", new Blob([image.buffer], { type: image.contentType }), fileName);
+
+  const upload = await fetch(`${API_BASE}/uploads/images`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: formData,
+  });
+  const payload = await readJson(upload);
+  if (!upload.ok) {
+    console.error("APIMart normalized reference upload failed:", payload);
+    return "";
+  }
+  return extractAssetUrl(payload) || "";
+}
+
+function extractAssetUrl(payload) {
+  const candidates = [
+    payload?.data?.url,
+    payload?.data?.asset_url,
+    payload?.data?.assetUrl,
+    payload?.data?.file_url,
+    payload?.data?.image_url,
+    payload?.url,
+    payload?.asset_url,
+    payload?.assetUrl,
+    payload?.file_url,
+    payload?.image_url,
+  ];
+  if (Array.isArray(payload?.data)) {
+    candidates.push(payload.data[0]?.url, payload.data[0]?.asset_url, payload.data[0]?.file_url, payload.data[0]?.image_url);
+  }
+  return candidates.find((value) => typeof value === "string" && value);
+}
+
+async function getSharp() {
+  try {
+    sharpModulePromise ||= import("sharp").then((mod) => mod.default || mod);
+    return await sharpModulePromise;
+  } catch (error) {
+    console.error("sharp is unavailable; reference normalization skipped:", error);
+    return null;
+  }
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
+}
+
+function normalizeSize(size) {
   const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
   if (!value) return "";
   const match = value.match(/^(\d{3,5})x(\d{3,5})$/);
@@ -508,8 +376,8 @@ function normalizeSize(size, model = "") {
     const sourceHeight = Number(match[2]);
     const maxEdge = Math.max(sourceWidth, sourceHeight);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-    const width = Math.min(3840, Math.max(16, Math.round(sourceWidth * scale)));
-    const height = Math.min(3840, Math.max(16, Math.round(sourceHeight * scale)));
+    const width = Math.min(3840, Math.max(16, Math.round((sourceWidth * scale) / 16) * 16));
+    const height = Math.min(3840, Math.max(16, Math.round((sourceHeight * scale) / 16) * 16));
     return `${width}x${height}`;
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
@@ -522,7 +390,6 @@ async function persistResultImage(imageUrl, taskId) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return imageUrl;
 
   try {
-    const { put } = require("@vercel/blob");
     const { buffer, contentType } = await readImageBytes(imageUrl);
     const extension = contentTypeToExtension(contentType);
     const pathname = `aivideobox/generated/${Date.now()}-${String(taskId || "image").replace(/[^a-z0-9_-]/gi, "-")}.${extension}`;
@@ -601,280 +468,13 @@ async function getTask(apiKey, taskId) {
   return payload;
 }
 
-async function getRayinTask(apiKey, taskId) {
-  const baseUrl = getRayinAiBaseUrl();
-  const cookie = getRayinAiExtensionCookie();
-  const endpoints = [
-    `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
-    `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
-    `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
-  ];
-  let lastPayload = null;
-  for (const endpoint of endpoints) {
-    const headers = {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "*/*",
-      "Accept-Language": "zh-CN,zh;q=0.9",
-      Origin: baseUrl,
-      Referer: buildRayinExtensionReferer(baseUrl, apiKey),
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-    };
-    if (cookie) headers.Cookie = cookie;
-    const response = await fetch(endpoint, { headers });
-    const payload = await readJson(response);
-    if (response.ok) {
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        payload.rayinEndpoint = endpoint;
-        payload.rayinExtension = true;
-      }
-      return payload;
-    }
-    lastPayload = payload;
-    if (![404, 405].includes(response.status)) break;
-  }
-  throw new Error(JSON.stringify(lastPayload || { error: "RayinAI task polling failed" }));
-}
-
-function buildRayinExtensionImageBody(body) {
-  const references = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  return {
-    key_id: getRayinAiKeyId(),
-    provider: "gpt",
-    operation: references.length ? "edit" : "generate",
-    model: normalizeRayinModel(body.model),
-    prompt: body.prompt,
-    input_images: references.map(toRayinExtensionInputImage),
-    n: 1,
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    moderation: "auto",
-    output_format: body.output_format || "png",
-    quality: "auto",
-    size: "auto",
-  };
-}
-
-function toRayinExtensionInputImage(value) {
-  const item = { mime_type: "image/png" };
-  if (/^data:image\//i.test(value)) {
-    item.data_url = value;
-  } else {
-    item.image_url = value;
-  }
-  return item;
-}
-
-async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey) {
-  const baseUrl = getRayinAiBaseUrl();
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  };
-  const imageBody = {
-    ...submitBody,
-    model: normalizeRayinModel(submitBody.model),
-  };
-  const rayinImageBody = normalizeRayinImageBody(imageBody);
-  const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  if (hasReferences) {
-    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
-    if (extensionResult.ok) return extensionResult;
-    return extensionResult;
-  }
-  const responsesBody = buildRayinResponsesBody(rayinImageBody);
-  const attempts = hasReferences
-    ? [
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        { url: `${baseUrl}/responses`, body: responsesBody },
-        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
-        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
-      ]
-    : [
-        { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        { url: `${baseUrl}/responses`, body: responsesBody },
-      ];
-  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
-
-  for (const attempt of attempts) {
-    const response = await fetch(attempt.url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(attempt.body),
-    });
-    const payload = await readJson(response);
-    const imageUrl = extractResultUrl(payload);
-    const taskId = extractTaskId(payload);
-    if (response.ok && (imageUrl || taskId)) {
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        payload.rayinEndpoint = attempt.url;
-      }
-      return { ok: true, status: response.status, payload };
-    }
-    last = { ok: false, status: response.status, payload };
-    if (response.ok) return last;
-    if (![404, 405, 502, 503, 504].includes(response.status)) return last;
-  }
-
-  if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
-    last.payload.endpoint = attempts[attempts.length - 1]?.url;
-    last.payload.status = last.status;
-  }
-  return last;
-}
-
-async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
-  const baseUrl = getRayinAiBaseUrl();
-  const endpoint = `${baseUrl}/extension/api/image/tasks`;
-  const body = buildRayinExtensionImageBody(rayinImageBody);
-  const cookie = getRayinAiExtensionCookie();
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    Accept: "*/*",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    Origin: baseUrl,
-    Referer: buildRayinExtensionReferer(baseUrl, apiKey),
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-  };
-  if (cookie) headers.Cookie = cookie;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  const payload = await readJson(response);
-  const taskId = extractTaskId(payload);
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.rayinExtensionAuth = {
-      hasToken: Boolean(apiKey),
-      tokenLooksLikeJwt: /^eyJ/.test(apiKey || ""),
-    };
-  }
-  if (response.ok && taskId) {
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      payload.rayinEndpoint = endpoint;
-      payload.rayinExtension = true;
-    }
-    return { ok: true, status: response.status, payload };
-  }
-  return { ok: false, status: response.status, payload };
-}
-
-function normalizeRayinImageBody(body) {
-  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue) : [];
-  const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
-  const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
-  const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
-  const references = uniqueArray([...editUrls, ...structureUrls, ...styleUrls, ...imageUrls]).slice(0, 16);
-  const next = {
-    model: normalizeRayinModel(body.model),
-    prompt: body.prompt,
-    n: 1,
-    provider: "gpt",
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    moderation: "auto",
-    output_format: body.output_format || "png",
-  };
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
-  if (references.length) {
-    const inputImages = references.map(toRayinInputImage);
-    next.image_urls = references;
-    next.image_url = references[0];
-    next.images = inputImages;
-    next.reference_images = inputImages;
-    next.reference_image_urls = references;
-    next.input_image_urls = references;
-    next.operation = "edit";
-    next.provider = "gpt";
-    next.aspect_ratio = "auto";
-    next.base_resolution = "auto";
-    next.moderation = "auto";
-    next.input_images = inputImages;
-  }
-  if (structureUrls.length) {
-    next.structure_image_urls = structureUrls.slice(0, 4);
-    next.structure_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-    next.composition_image_urls = structureUrls.slice(0, 4);
-    next.composition_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-    next.layout_image_urls = structureUrls.slice(0, 4);
-    next.layout_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  if (styleUrls.length) {
-    next.style_image_urls = styleUrls.slice(0, 4);
-    next.style_images = styleUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  if (editUrls.length) {
-    next.edit_image_urls = editUrls.slice(0, 4);
-    next.edit_images = editUrls.slice(0, 4).map(toRayinInputImage);
-    next.base_image_urls = editUrls.slice(0, 4);
-    next.base_images = editUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  return next;
-}
-
-function toRayinInputImage(value) {
-  const item = { mime_type: "image/png" };
-  item.image_url = value;
-  if (/^data:image\//i.test(value)) {
-    item.data_url = value;
-    item.source_data_url = value;
-    item.image_data_url = value;
-  } else {
-    item.url = value;
-    item.image_url = value;
-    item.source_url = value;
-  }
-  return item;
-}
-
-function uniqueArray(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function buildRayinResponsesBody(submitBody) {
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
-  const prompt = imageUrls.length
-    ? [
-        "You must use the attached input images as visual references.",
-        "The generated image must preserve the referenced structure, camera, layout, perspective, object placement, palette, lighting, and material cues according to the user's role instructions.",
-        "Do not create an unrelated scene.",
-        submitBody.prompt,
-      ].join("\n")
-    : submitBody.prompt;
-  const content = imageUrls.length
-    ? [
-        { type: "input_text", text: prompt },
-        ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
-      ]
-    : prompt;
-  const body = {
-    model: normalizeRayinModel(submitBody.model),
-    input: [{ role: "user", content }],
-    tools: [{ type: "image_generation" }],
-  };
-  if (submitBody.quality) body.quality = submitBody.quality;
-  if (submitBody.size) body.size = submitBody.size;
-  return body;
-}
-
 function getTaskStatus(payload) {
-  return payload?.data?.status || payload?.status || payload?.data?.state || payload?.state || "unknown";
+  return payload?.data?.status || payload?.status || "unknown";
 }
 
 async function readJson(response) {
   const text = await response.text();
   if (!text) return {};
-  if (/^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)) {
-    const title = text.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/\s+/g, " ").trim();
-    return {
-      error: `HTTP ${response.status} HTML error`,
-      message: title || `HTTP ${response.status}: upstream returned HTML instead of JSON`,
-    };
-  }
   try {
     return JSON.parse(text);
   } catch {
@@ -884,9 +484,7 @@ async function readJson(response) {
 
 function extractTaskId(payload) {
   if (payload?.data?.task_id) return String(payload.data.task_id);
-  if (payload?.data?.task_no) return String(payload.data.task_no);
   if (payload?.data?.id) return String(payload.data.id);
-  if (payload?.task_no) return String(payload.task_no);
   if (payload?.task_id) return String(payload.task_id);
   if (payload?.id) return String(payload.id);
   if (Array.isArray(payload?.data) && payload.data[0]?.task_id) {
@@ -897,11 +495,6 @@ function extractTaskId(payload) {
 
 function extractResultUrl(payload) {
   const data = payload?.data;
-  if (payload?.rayinExtension) {
-    const assets = Array.isArray(data?.assets) ? data.assets : [];
-    const outputAsset = assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
-    return normalizeImageValue(outputAsset?.url) || normalizeImageValue(outputAsset?.download_url) || null;
-  }
   const candidates = [
     data?.result,
     data?.result?.url,
@@ -932,10 +525,6 @@ function extractResultUrl(payload) {
   }
   if (Array.isArray(data?.images)) {
     candidates.push(data.images[0]?.url, data.images[0]?.image_url);
-  }
-  if (Array.isArray(data?.assets)) {
-    const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
-    candidates.push(outputAsset?.url, outputAsset?.download_url);
   }
 
   const direct = candidates.map(normalizeImageValue).find(Boolean);
@@ -980,7 +569,6 @@ function findImageUrl(value, seen = new Set()) {
     "base64",
     "image",
     "output",
-    "content",
     "result",
     "images",
     "data",
