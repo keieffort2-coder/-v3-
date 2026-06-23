@@ -1,5 +1,6 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
+const RHART_ENDPOINT_PATH = "/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
 
 function getApiMartKey(channel) {
@@ -204,6 +205,38 @@ module.exports = async function handler(req, res) {
       submitBody.base_image_urls = editBaseUrls.slice(0, 4);
     }
 
+    if (preferredProvider === "rhart") {
+      const rhartSubmitBody = buildRhartSubmitBody(submitBody);
+      const rhartResult = await submitRhartImageTask(apiKey, rhartSubmitBody);
+      if (rhartResult.ok) {
+        const imageUrl = await persistResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`);
+        const taskId = extractTaskId(rhartResult.payload);
+        res.status(imageUrl ? 200 : 202).json({
+          taskId,
+          status: imageUrl ? "completed" : "submitted",
+          imageUrl,
+          model: submitBody.model,
+          provider: "rhart",
+          payload: imageUrl ? undefined : rhartResult.payload,
+        });
+        return;
+      }
+
+      res.status(rhartResult.status || 502).json({
+        error: "RHarT G31 submit failed",
+        message: formatUpstreamError(rhartResult.payload),
+        upstream: rhartResult.payload,
+        request: {
+          model: rhartSubmitBody.model,
+          size: rhartSubmitBody.size,
+          quality: rhartSubmitBody.quality,
+          output_format: rhartSubmitBody.output_format,
+          referenceCount: rhartSubmitBody.image_urls?.length || 0,
+        },
+      });
+      return;
+    }
+
     if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey || rayinExtensionToken)) {
       const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody, rayinExtensionToken);
       if (rayinResult.ok) {
@@ -299,6 +332,7 @@ module.exports = async function handler(req, res) {
 
 function normalizeProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
+  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
   if (provider === "rayinai" || provider === "rayincode") return "rayinai";
   return "apimart";
 }
@@ -324,6 +358,56 @@ function buildApiMartSubmitBody(body) {
     next.image_urls = body.image_urls.filter(isImageReferenceValue).slice(0, 4);
   }
   return next;
+}
+
+function buildRhartSubmitBody(body) {
+  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
+  const next = {
+    model: "gpt-image-2",
+    prompt: body.prompt,
+    n: body.n || 1,
+    output_format: body.output_format || "png",
+  };
+  if (body.quality) next.quality = body.quality;
+  if (body.size) next.size = body.size;
+  if (imageUrls.length) {
+    next.image_urls = imageUrls;
+    next.images = imageUrls.map((url) => ({ image_url: url, url }));
+    next.input_images = imageUrls.map((url) => ({ image_url: url, url }));
+  }
+  if (Array.isArray(body.structure_image_urls) && body.structure_image_urls.length) {
+    next.structure_image_urls = body.structure_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  }
+  if (Array.isArray(body.style_image_urls) && body.style_image_urls.length) {
+    next.style_image_urls = body.style_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  }
+  if (Array.isArray(body.edit_image_urls) && body.edit_image_urls.length) {
+    next.edit_image_urls = body.edit_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  }
+  return next;
+}
+
+async function submitRhartImageTask(apiKey, body) {
+  const endpoint = `${API_BASE}${RHART_ENDPOINT_PATH}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await readJson(response);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    payload.rhartEndpoint = endpoint;
+  }
+  const imageUrl = extractResultUrl(payload);
+  const taskId = extractTaskId(payload);
+  return {
+    ok: response.ok && Boolean(imageUrl || taskId),
+    status: response.status,
+    payload,
+  };
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
@@ -363,7 +447,7 @@ function findMessage(value, seen = new Set()) {
 function normalizeModel(model) {
   const value = String(model || "").trim();
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "rhart-image-n-g31-flash/image-to-image";
+  if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
