@@ -2215,6 +2215,7 @@ function openImageConfig(node) {
           <option value="gpt-image-2">GPT图像2</option>
           <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
           <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
+          <option value="rhart-image-n-g31-flash/image-to-image">RHarT G31 Flash 图生图</option>
         `;
   }
   imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
@@ -2462,6 +2463,7 @@ function loadImageOptions() {
 function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
+  if (model === "rhart-image-n-g31-flash/image-to-image" || model === "/rhart-image-n-g31-flash/image-to-image") return "rhart-image-n-g31-flash/image-to-image";
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
@@ -3545,7 +3547,7 @@ async function runImageGeneration(node) {
       ...getConnectedInputNodes(node).flatMap(getNodeImageSources),
     ].some((value) => value && !isRemoteImageUrl(value));
 
-    const sizeStatus = referenceImages.length ? "按结构图/自动" : (requestedSize || "自动");
+    const sizeStatus = requestedSize || (referenceImages.length ? "按结构图/自动" : "自动");
     const sourceStatus = formatReferenceSourceTitles(roleImages);
     status.textContent = referenceImages.length
       ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}${sourceStatus ? `，${sourceStatus}` : ""}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
@@ -3840,8 +3842,8 @@ function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-  const nextWidth = Math.min(3840, Math.max(16, Math.round((width * scale) / 16) * 16));
-  const nextHeight = Math.min(3840, Math.max(16, Math.round((height * scale) / 16) * 16));
+  const nextWidth = Math.min(3840, Math.max(16, Math.round(width * scale)));
+  const nextHeight = Math.min(3840, Math.max(16, Math.round(height * scale)));
   return `${nextWidth}x${nextHeight}`;
 }
 
