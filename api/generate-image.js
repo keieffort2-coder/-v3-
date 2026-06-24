@@ -3,7 +3,6 @@ const API_BASE = "https://api.apimart.ai/v1";
 const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
-const RAYINAI_ENDPOINT_TIMEOUT_MS = 180000;
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -43,17 +42,11 @@ function getRayinAiUserId(token) {
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
-  const normalized = withoutName
+  return withoutName
     .replace(/\/v1\/responses\/?$/i, "")
     .replace(/\/responses\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
-  if (/^https?:\/\/(?:www\.)?240423\.xyz\b/i.test(normalized)) return RAYINAI_DEFAULT_BASE;
-  return normalized || RAYINAI_DEFAULT_BASE;
-}
-
-function getRayinResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || process.env.RAYINCODE_RESPONSES_MODEL || "gpt-5.4");
 }
 
 function getRhartBaseUrl() {
@@ -322,23 +315,17 @@ module.exports = async function handler(req, res) {
       }
 
       if (!apiKey || preferredProvider === "rayinai") {
-        const rayinRequestInfo = {
-          model: submitBody.model,
-          rayinResponsesModel: rayinResult.payload?.rayinResponsesModel || getRayinResponsesModel(),
-          rayinEndpoint: rayinResult.payload?.endpoint || rayinResult.payload?.rayinEndpoint,
-          size: submitBody.size,
-          quality: submitBody.quality,
-          output_format: submitBody.output_format,
-          referenceCount: orderedReferenceUrls.length,
-          structureCount: structureUrls.length,
-          styleCount: styleUrls.length,
-          editBaseCount: editBaseUrls.length,
-        };
         res.status(rayinResult.status || 502).json({
           error: "RayinAI submit failed",
-          message: formatRayinSubmitError(rayinResult.payload, rayinRequestInfo),
+          message: formatUpstreamError(rayinResult.payload),
           upstream: rayinResult.payload,
-          request: rayinRequestInfo,
+          request: {
+            model: submitBody.model,
+            size: submitBody.size,
+            quality: submitBody.quality,
+            output_format: submitBody.output_format,
+            referenceCount: imageUrls.length,
+          },
         });
         return;
       }
@@ -520,28 +507,19 @@ function formatUpstreamError(payload) {
     if (payload?.rayinExtensionAuth?.hasToken) {
       const auth = payload.rayinExtensionAuth;
       if (!auth.hasUserId) {
-        return "RayinAI 在线绘图接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请从 RayinAI 在线绘图请求 Referer 里复制同一会话的 user_id，配置为 RAYINAI_USER_ID 或 user_id，并重新部署。";
+        return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请在 Vercel 配置 RAYINAI_USER_ID 或 user_id，并重新部署。";
       }
       if (!auth.hasCookie) {
-        return "RayinAI 在线绘图接口认证失败：已读取 token 和 user_id，但上游仍返回 401。Cookie 未配置；如同一 token/user_id 仍失败，请从在线绘图请求里复制同一会话的 RAYINAI_EXTENSION_COOKIE。";
+        return "RayinAI 扩展接口认证失败：已读取 token 和 user_id，但没有读到 RAYINAI_EXTENSION_COOKIE。请从 RayinAI 网页请求里复制同一登录会话的 Cookie。";
       }
-      return "RayinAI 在线绘图接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 在线绘图 Network 请求抓取同一会话的 Authorization token、Referer user_id 和 Cookie。";
+      return "RayinAI 扩展接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 网页抓取同一会话的 RAYINAI_EXTENSION_TOKEN 和 RAYINAI_EXTENSION_COOKIE。";
     }
-    return "RayinAI 在线绘图接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请从在线绘图 Network 请求复制 Authorization Bearer token，并配置为 RAYINAI_EXTENSION_TOKEN。";
+    return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
   return message || "Image generation request failed.";
-}
-
-function formatRayinSubmitError(payload, requestInfo = {}) {
-  const message = formatUpstreamError(payload);
-  const parts = [];
-  if (requestInfo.rayinEndpoint) parts.push(`endpoint: ${requestInfo.rayinEndpoint}`);
-  if (requestInfo.rayinResponsesModel) parts.push(`model: ${requestInfo.rayinResponsesModel}`);
-  if (Number.isFinite(Number(requestInfo.referenceCount))) parts.push(`refs: ${requestInfo.referenceCount}`);
-  return parts.length ? `${message}（${parts.join("，")}）` : message;
 }
 
 function findMessage(value, seen = new Set()) {
@@ -746,8 +724,8 @@ function buildRayinExtensionImageBody(body) {
     base_resolution: "auto",
     moderation: "auto",
     output_format: body.output_format || "png",
-    quality: body.quality || "auto",
-    size: body.size || "auto",
+    quality: "auto",
+    size: "auto",
   };
 }
 
@@ -775,92 +753,54 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  const responseBodies = buildRayinResponsesBodies(rayinImageBody);
+  const responsesBody = buildRayinResponsesBody(rayinImageBody);
+  let extensionFailure = null;
+  if (hasReferences) {
+    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
+    if (extensionResult.ok) return extensionResult;
+    extensionFailure = extensionResult;
+  }
   const attempts = hasReferences
-    ? responseBodies.map((item) => ({ url: `${baseUrl}/v1/responses`, body: item.body, rayinResponsesModel: item.model }))
+    ? [
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        { url: `${baseUrl}/responses`, body: responsesBody },
+        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
+        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
+      ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/images/generations`, body: rayinImageBody },
-        ...responseBodies.map((item) => ({ url: `${baseUrl}/v1/responses`, body: item.body, rayinResponsesModel: item.model })),
-        ...responseBodies.map((item) => ({ url: `${baseUrl}/responses`, body: item.body, rayinResponsesModel: item.model })),
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        { url: `${baseUrl}/responses`, body: responsesBody },
       ];
-  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
+  let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
-    let response;
-    try {
-      response = await fetchWithTimeout(attempt.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(attempt.body),
-      }, RAYINAI_ENDPOINT_TIMEOUT_MS);
-    } catch (error) {
-      last = {
-        ok: false,
-        status: 504,
-        payload: {
-          error: "RayinAI endpoint fetch failed",
-          message: error instanceof Error ? error.message : String(error),
-          endpoint: attempt.url,
-          rayinResponsesModel: attempt.rayinResponsesModel,
-        },
-      };
-      continue;
-    }
+    const response = await fetch(attempt.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(attempt.body),
+    });
     const payload = await readJson(response);
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
     if (response.ok && (imageUrl || taskId)) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = attempt.url;
-        if (attempt.rayinResponsesModel) payload.rayinResponsesModel = attempt.rayinResponsesModel;
       }
       return { ok: true, status: response.status, payload };
     }
     last = { ok: false, status: response.status, payload };
-    if (last.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
-      last.payload.endpoint = attempt.url;
-      if (attempt.rayinResponsesModel) last.payload.rayinResponsesModel = attempt.rayinResponsesModel;
-    }
     if (response.ok) return last;
     if (![404, 405, 502, 503, 504].includes(response.status)) return last;
-  }
-
-  if (hasReferences) {
-    if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
-      last.payload.endpoint = attempts[attempts.length - 1]?.url;
-      last.payload.status = last.status;
-      last.payload.rayinResponsesModel ||= attempts[attempts.length - 1]?.rayinResponsesModel;
-      last.payload.message = last.payload.message || last.payload.error || "RayinAI /v1/responses request failed.";
-    }
-    return last;
   }
 
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
+    if (extensionFailure?.payload) last.payload.extensionFailure = extensionFailure.payload;
   }
   return last;
-}
-
-function summarizePayload(payload, depth = 0, seen = new Set()) {
-  if (!payload || typeof payload !== "object") return payload;
-  if (seen.has(payload)) return "[Circular]";
-  if (depth > 3) return "[Object]";
-  seen.add(payload);
-  if (Array.isArray(payload)) {
-    return payload.slice(0, 20).map((item) => summarizePayload(item, depth + 1, seen));
-  }
-  const summary = {};
-  Object.entries(payload).slice(0, 40).forEach(([key, value]) => {
-    if (key.toLowerCase().includes("token") || key.toLowerCase().includes("cookie") || key.toLowerCase().includes("authorization")) {
-      summary[key] = "[redacted]";
-      return;
-    }
-    summary[key] = summarizePayload(value, depth + 1, seen);
-  });
-  seen.delete(payload);
-  return summary;
 }
 
 async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
@@ -913,7 +853,7 @@ function normalizeRayinImageBody(body) {
   const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
   const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
   const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
-  const references = uniqueArray([...structureUrls, ...styleUrls, ...imageUrls, ...editUrls]).slice(0, 16);
+  const references = uniqueArray([...editUrls, ...structureUrls, ...styleUrls, ...imageUrls]).slice(0, 16);
   const next = {
     model: normalizeRayinModel(body.model),
     prompt: body.prompt,
@@ -981,50 +921,28 @@ function uniqueArray(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function buildRayinResponsesBodies(submitBody) {
-  const models = uniqueArray([getRayinResponsesModel()]);
-  return models.map((model) => ({ model, body: buildRayinResponsesBody(submitBody, model) }));
-}
-
-function buildRayinResponsesBody(submitBody, model = getRayinResponsesModel()) {
+function buildRayinResponsesBody(submitBody) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
   const prompt = imageUrls.length
     ? [
         "You must use the attached input images as visual references.",
-        "Use structure references for geometry, camera, layout, perspective, scale, and object placement only.",
-        "Use style references for global palette, color grade, lighting mood, atmosphere, material feel, texture, and finish.",
-        "Red light must stay localized to visible lamps, warning glows, signs, and original red materials. Do not let red light contaminate the global color grade, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
-        "Do not output a near-identical copy of any input image; re-render according to the user's role instructions.",
+        "The generated image must preserve the referenced structure, camera, layout, perspective, object placement, palette, lighting, and material cues according to the user's role instructions.",
+        "Do not create an unrelated scene.",
         submitBody.prompt,
       ].join("\n")
     : submitBody.prompt;
-  const content = [{ type: "input_text", text: prompt }];
-  imageUrls.slice(0, 16).forEach((url, index) => {
-    content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
-    content.push({ type: "input_image", image_url: url });
-  });
+  const content = [
+    { type: "input_text", text: prompt },
+    ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
+  ];
   const body = {
-    model,
+    model: normalizeRayinModel(submitBody.model),
     input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
+  if (submitBody.quality) body.quality = submitBody.quality;
+  if (submitBody.size) body.size = submitBody.size;
   return body;
-}
-
-function getRayinReferenceLabel(submitBody, url, index) {
-  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
-  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
-  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls : [];
-  if (structureUrls.includes(url)) {
-    return `Input image ${index + 1}: STRUCTURE reference. Use for camera, composition, perspective, scale, object placement, canvas ratio, and scene geometry.`;
-  }
-  if (styleUrls.includes(url)) {
-    return `Input image ${index + 1}: STYLE reference. Use for global palette, color grade, lighting mood, atmosphere, material finish, texture quality, and render style only.`;
-  }
-  if (editUrls.includes(url)) {
-    return `Input image ${index + 1}: EDIT BASE reference. Preserve its scene and apply the requested edit.`;
-  }
-  return `Input image ${index + 1}: supporting reference. Use only if it does not conflict with STRUCTURE and STYLE references.`;
 }
 
 function getTaskStatus(payload) {
@@ -1045,24 +963,6 @@ async function readJson(response) {
     return JSON.parse(text);
   } catch {
     return { raw: text };
-  }
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: options.signal || controller.signal,
-    });
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
