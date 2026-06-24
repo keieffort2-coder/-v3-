@@ -928,6 +928,7 @@ function buildRayinResponsesBody(submitBody) {
         "You must use the attached input images as visual references.",
         "Use structure references for geometry, camera, layout, perspective, scale, and object placement only.",
         "Use style references for global palette, color grade, lighting mood, atmosphere, material feel, texture, and finish.",
+        "Red light must stay localized to visible lamps, warning glows, signs, and original red materials. Do not let red light contaminate the global color grade, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
         "Do not output a near-identical copy of any input image; re-render according to the user's role instructions.",
         submitBody.prompt,
       ].join("\n")
