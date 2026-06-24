@@ -799,6 +799,15 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   }
 
   if (hasReferences && shouldPreferResponses) {
+    if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
+      last.payload.endpoint = attempts[attempts.length - 1]?.url;
+      last.payload.status = last.status;
+      last.payload.message = last.payload.message || last.payload.error || "RayinAI responses request failed before extension fallback.";
+    }
+    return last;
+  }
+
+  if (hasReferences) {
     const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
     if (extensionResult.ok) return extensionResult;
     extensionFailure = extensionResult;
