@@ -808,9 +808,31 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
-    if (extensionFailure?.payload) last.payload.extensionFailure = extensionFailure.payload;
+    if (extensionFailure?.payload && extensionFailure.payload !== last.payload) {
+      last.payload.extensionFailure = summarizePayload(extensionFailure.payload);
+    }
   }
   return last;
+}
+
+function summarizePayload(payload, depth = 0, seen = new Set()) {
+  if (!payload || typeof payload !== "object") return payload;
+  if (seen.has(payload)) return "[Circular]";
+  if (depth > 3) return "[Object]";
+  seen.add(payload);
+  if (Array.isArray(payload)) {
+    return payload.slice(0, 20).map((item) => summarizePayload(item, depth + 1, seen));
+  }
+  const summary = {};
+  Object.entries(payload).slice(0, 40).forEach(([key, value]) => {
+    if (key.toLowerCase().includes("token") || key.toLowerCase().includes("cookie") || key.toLowerCase().includes("authorization")) {
+      summary[key] = "[redacted]";
+      return;
+    }
+    summary[key] = summarizePayload(value, depth + 1, seen);
+  });
+  seen.delete(payload);
+  return summary;
 }
 
 async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
