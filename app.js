@@ -2819,10 +2819,10 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
       : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
     return {
       images,
-      editBaseImages: structure ? [structure] : [],
+      editBaseImages: [],
       structureImages: structure ? [structure] : [],
       styleImages: styles,
-      editBaseCount: structure ? 1 : 0,
+      editBaseCount: 0,
       structureCount: structure ? 1 : 0,
       hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
       styleCount: styles.length,
@@ -4446,6 +4446,7 @@ function buildImageEditPrompt(
       `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
       "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
       "- User request decides the intended content. Structure decides geometry. Style decides look.",
+      "- Do not output a near-identical copy of the structure reference. Re-render it with the requested content clarity and the style reference's finish.",
       "- Do not copy composition from style references.",
     ].join("\n");
   }
