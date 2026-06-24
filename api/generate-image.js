@@ -326,10 +326,15 @@ module.exports = async function handler(req, res) {
           upstream: rayinResult.payload,
           request: {
             model: submitBody.model,
+            rayinResponsesModel: getRayinResponsesModel(),
+            rayinEndpoint: rayinResult.payload?.endpoint || rayinResult.payload?.rayinEndpoint,
             size: submitBody.size,
             quality: submitBody.quality,
             output_format: submitBody.output_format,
-            referenceCount: imageUrls.length,
+            referenceCount: orderedReferenceUrls.length,
+            structureCount: structureUrls.length,
+            styleCount: styleUrls.length,
+            editBaseCount: editBaseUrls.length,
           },
         });
         return;
