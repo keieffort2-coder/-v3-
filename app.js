@@ -3787,24 +3787,14 @@ async function submitAndPollImageTask(payload, status, preview, node, signal) {
 }
 
 async function submitAndPollImageTaskOnce(payload, status, preview, node, signal) {
-  let response = await fetch("/api/generate-image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  let response = await fetchImageGenerationApi(payload, signal);
 
   let result = await readResponseJson(response);
   if (!response.ok && shouldRetryWithSaferPrompt(result)) {
     status.textContent = "提示词触发上游拦截，正在安全改写后重试提交...";
     payload.prompt = makePromptSafer(payload.prompt);
     node.dataset.lastImagePayload = JSON.stringify(payload);
-    response = await fetch("/api/generate-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    });
+    response = await fetchImageGenerationApi(payload, signal);
     result = await readResponseJson(response);
   }
   if (!response.ok) {
@@ -3829,6 +3819,20 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
     preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
   }
   return pollImageTask(result.taskId, status, signal, payload.apimartChannel, result.provider);
+}
+
+async function fetchImageGenerationApi(payload, signal) {
+  try {
+    return await fetch("/api/generate-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new Error(`前端到 /api/generate-image 连接失败：${error instanceof Error ? error.message : String(error)}。可能是 Vercel 函数超时、部署正在重启，或网络请求被中断。`);
+  }
 }
 
 function cancelImageGeneration(node) {
