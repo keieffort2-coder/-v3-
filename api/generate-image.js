@@ -556,12 +556,16 @@ function normalizeSize(size, model = "") {
     const sourceHeight = Number(match[2]);
     const maxEdge = Math.max(sourceWidth, sourceHeight);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-    const width = Math.min(3840, Math.max(16, Math.round(sourceWidth * scale)));
-    const height = Math.min(3840, Math.max(16, Math.round(sourceHeight * scale)));
+    const width = Math.min(3840, roundUpToMultiple(sourceWidth * scale, 16));
+    const height = Math.min(3840, roundUpToMultiple(sourceHeight * scale, 16));
     return `${width}x${height}`;
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
   return "";
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
 }
 
 async function persistResultImage(imageUrl, taskId) {
