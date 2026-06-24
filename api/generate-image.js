@@ -982,12 +982,7 @@ function uniqueArray(values) {
 }
 
 function buildRayinResponsesBodies(submitBody) {
-  const models = uniqueArray([
-    getRayinResponsesModel(),
-    normalizeRayinModel(submitBody.model),
-    "gpt-image-2",
-    "gpt-5.4",
-  ]);
+  const models = uniqueArray([getRayinResponsesModel()]);
   return models.map((model) => ({ model, body: buildRayinResponsesBody(submitBody, model) }));
 }
 
