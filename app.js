@@ -2971,6 +2971,7 @@ function buildReferenceBindingPrompt(plan) {
     lines.push(
       `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
       "@渲染结构图 has absolute priority for composition, camera, lens, horizon, vanishing points, perspective, crop, object placement, scene layout, silhouettes, and canvas aspect ratio.",
+      "@渲染结构图 is NOT the color authority. Do not copy its global color grade, red warning lights, red glow, warm cast, or emergency-light tint unless the style reference clearly uses the same dominant color.",
       "The final image must be a redraw/remaster of @渲染结构图's spatial structure, not a new composition.",
     );
   }
@@ -2981,7 +2982,8 @@ function buildReferenceBindingPrompt(plan) {
     const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
     lines.push(
       `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
-      "@风格参考图 is only a palette/material/lighting/atmosphere reference. It has zero authority over camera, composition, architecture, object placement, crop, or scene geometry.",
+      "@风格参考图 is the COLOR AUTHORITY for palette, color temperature, saturation, contrast, material color, lighting mood, atmosphere, and finish.",
+      "@风格参考图 has zero authority over camera, composition, architecture, object placement, crop, or scene geometry.",
       plan.styleSwatchMode ? "@风格参考图 has been converted into a non-spatial color/material swatch. Use it only for palette, light quality, contrast, material finish, and atmosphere." : "",
     );
   }
@@ -2989,7 +2991,10 @@ function buildReferenceBindingPrompt(plan) {
   if (hasStructure && styleCount > 0) {
     lines.push(
       "Conflict rule: if @风格参考图 conflicts with @渲染结构图, always follow @渲染结构图 and ignore the conflicting style composition.",
+      "Color conflict rule: if @风格参考图 color conflicts with @渲染结构图 color, always follow @风格参考图.",
+      "Avoid an overall red, orange, or magenta cast unless @风格参考图 is clearly dominated by that cast.",
       "中文绑定：@渲染结构图只负责结构且优先级最高；@风格参考图只负责色调、材质、光影和氛围，不能改变结构图的构图、透视和物体位置。",
+      "中文颜色绑定：不要因为结构图里的红色灯光把整张图染红；最终整体颜色必须跟随风格参考图。",
     );
   }
 
