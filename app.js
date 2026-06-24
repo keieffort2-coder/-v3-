@@ -4278,12 +4278,23 @@ function formatApiError(result, fallback) {
   if (!result) return fallback;
   if (typeof result === "string") return result;
   const message = extractApiErrorMessage(result);
-  if (message) return message;
+  const diagnostic = formatApiErrorDiagnostic(result);
+  if (message) return diagnostic ? `${message}（${diagnostic}）` : message;
   try {
     return JSON.stringify(result);
   } catch {
     return fallback;
   }
+}
+
+function formatApiErrorDiagnostic(result) {
+  const request = result?.request;
+  if (!request || typeof request !== "object") return "";
+  const parts = [];
+  if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
+  if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
+  if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
+  return parts.join("，");
 }
 
 function extractApiErrorMessage(value, seen = new Set()) {
