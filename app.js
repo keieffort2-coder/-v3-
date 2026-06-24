@@ -2922,17 +2922,24 @@ function makeStyleReferenceSwatch(src) {
         sourceContext.drawImage(image, 0, 0, sampleSize, sampleSize);
         const pixels = sourceContext.getImageData(0, 0, sampleSize, sampleSize).data;
         const palette = [];
+        let redDominantCount = 0;
         const step = 4 * 12;
         for (let index = 0; index < pixels.length; index += step) {
-          palette.push([pixels[index], pixels[index + 1], pixels[index + 2]]);
+          const color = [pixels[index], pixels[index + 1], pixels[index + 2]];
+          if (isRedEmissiveColor(color)) redDominantCount += 1;
+          palette.push(color);
         }
+        const redRatio = palette.length ? redDominantCount / palette.length : 0;
+        const stylePalette = redRatio > 0 && redRatio < 0.35
+          ? palette.filter((color) => !isRedEmissiveColor(color))
+          : palette;
 
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d");
         canvas.width = outputSize;
         canvas.height = outputSize;
         const gradient = context.createLinearGradient(0, 0, outputSize, outputSize);
-        const stops = palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
+        const stops = stylePalette.length ? stylePalette : palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
         stops.slice(0, 18).forEach((color, index) => {
           gradient.addColorStop(index / Math.max(1, Math.min(stops.length, 18) - 1), `rgb(${color[0]}, ${color[1]}, ${color[2]})`);
         });
@@ -2955,6 +2962,14 @@ function makeStyleReferenceSwatch(src) {
     image.onerror = () => reject(new Error("Style reference load failed"));
     image.src = src;
   });
+}
+
+function isRedEmissiveColor(color) {
+  const [red, green, blue] = color.map((value) => Number(value || 0));
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const saturation = max ? (max - min) / max : 0;
+  return red > 80 && saturation > 0.32 && red > green * 1.28 && red > blue * 1.12;
 }
 
 function formatReferencePlan(plan) {
@@ -3015,6 +3030,7 @@ function buildReferenceBindingPrompt(plan) {
     lines.push(
       "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
       "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
+      "Red light rule: red must remain localized to visible lamps, warning glows, signs, or original red materials only. Do not spread red into the overall color temperature, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
     );
   }
 
@@ -4458,6 +4474,7 @@ function buildImageEditPrompt(
       "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
       `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
       "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
+      "- Red light must stay local: preserve red lamps, warning light spills, signs, and original red markings only where they physically exist. Do not turn the full scene, fog, shadows, walls, floor, or neutral materials reddish unless the style reference is globally red.",
       "- User request decides the intended content. Structure decides geometry. Style decides look.",
       "- Do not output a near-identical copy of the structure reference. Re-render it with the requested content clarity and the style reference's finish.",
       "- Do not copy composition from style references.",
