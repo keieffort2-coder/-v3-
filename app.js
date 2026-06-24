@@ -2592,17 +2592,23 @@ function renderConfigInputThumbnails(node) {
       ].filter(Boolean)
     : [];
 
-  const inputs = [
-    ...ownVideoAssets,
-    ...getConnectedInputNodes(node)
+  const sourcePreviewItems = getConnectedInputNodes(node)
     .flatMap((sourceNode) => {
       const title = sourceNode.querySelector(".node-title strong")?.textContent || "输入节点";
+      const role = sourceNode.dataset.type === "image" ? sourceNode.dataset.imageRole || inferImageRole(sourceNode) : "";
       return [
-        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image" })),
-        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video" })),
+        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image", role })),
+        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video", role: "" })),
       ];
     })
-    .filter((item) => item.src),
+    .filter((item) => item.src);
+  const imageRolePriority = { structure: 0, editBase: 1, style: 2, general: 3, output: 4 };
+  const orderedPreviewItems = sourcePreviewItems
+    .map((item, index) => ({ ...item, index }))
+    .sort((a, b) => (imageRolePriority[a.role] ?? 5) - (imageRolePriority[b.role] ?? 5) || a.index - b.index);
+  const inputs = [
+    ...ownVideoAssets,
+    ...orderedPreviewItems,
   ];
 
   if (!inputs.length) return;
