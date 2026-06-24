@@ -23,7 +23,7 @@ function getRayinAiExtensionToken() {
 }
 
 function getRayinAiExtensionCookie() {
-  return sanitizeHeaderValue(process.env.RAYINAI_EXTENSION_COOKIE || process.env.RAYINCODE_EXTENSION_COOKIE);
+  return sanitizeCookieHeader(process.env.RAYINAI_EXTENSION_COOKIE || process.env.RAYINCODE_EXTENSION_COOKIE);
 }
 
 function getRayinAiKeyId() {
@@ -33,7 +33,7 @@ function getRayinAiKeyId() {
 }
 
 function getRayinAiUserId(token) {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID || process.env.user_id || process.env.USER_ID);
+  const raw = sanitizeUserId(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID || process.env.user_id || process.env.USER_ID);
   if (raw) return raw;
   const payload = parseJwtPayload(token);
   return payload.user_id || payload.userId || payload.sub || payload.id || "";
@@ -75,7 +75,23 @@ function sanitizeHeaderValue(value) {
 }
 
 function sanitizeBearerToken(value) {
-  return sanitizeHeaderValue(value).replace(/^Bearer\s+/i, "").replace(/\s+/g, "");
+  return sanitizeHeaderValue(value)
+    .replace(/^Authorization\s*:\s*/i, "")
+    .replace(/^Bearer\s+/i, "")
+    .replace(/\s+/g, "");
+}
+
+function sanitizeCookieHeader(value) {
+  return sanitizeHeaderValue(value)
+    .replace(/^Cookie\s*:\s*/i, "")
+    .replace(/^cookie\s*=\s*/i, "");
+}
+
+function sanitizeUserId(value) {
+  return sanitizeHeaderValue(value)
+    .replace(/^user_id\s*=\s*/i, "")
+    .replace(/^RAYINAI_USER_ID\s*=\s*/i, "")
+    .replace(/^USER_ID\s*=\s*/i, "");
 }
 
 function parseJwtPayload(token) {
@@ -735,12 +751,13 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
+  const responsesBody = buildRayinResponsesBody(rayinImageBody);
+  let extensionFailure = null;
   if (hasReferences) {
     const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
     if (extensionResult.ok) return extensionResult;
-    return extensionResult;
+    extensionFailure = extensionResult;
   }
-  const responsesBody = buildRayinResponsesBody(rayinImageBody);
   const attempts = hasReferences
     ? [
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
@@ -754,7 +771,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
       ];
-  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
+  let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
     const response = await fetch(attempt.url, {
@@ -779,6 +796,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
+    if (extensionFailure?.payload) last.payload.extensionFailure = extensionFailure.payload;
   }
   return last;
 }
@@ -911,15 +929,13 @@ function buildRayinResponsesBody(submitBody) {
         submitBody.prompt,
       ].join("\n")
     : submitBody.prompt;
-  const content = imageUrls.length
-    ? [
-        { type: "input_text", text: prompt },
-        ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
-      ]
-    : prompt;
+  const content = [
+    { type: "input_text", text: prompt },
+    ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
+  ];
   const body = {
     model: normalizeRayinModel(submitBody.model),
-    input: [{ role: "user", content }],
+    input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
   if (submitBody.quality) body.quality = submitBody.quality;
