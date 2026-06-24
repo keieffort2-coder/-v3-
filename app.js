@@ -36,6 +36,7 @@ const closeImageViewer = document.querySelector("#closeImageViewer");
 const arrangeCanvasNodes = document.querySelector("#arrangeCanvasNodes");
 const createFolderFromSelection = document.querySelector("#createFolderFromSelection");
 const exitFolderCanvas = document.querySelector("#exitFolderCanvas");
+const exportGeneratedImagesButton = document.querySelector("#exportGeneratedImages");
 const folderExitTop = document.querySelector("#folderExitTop");
 const resetCanvasView = document.querySelector("#resetCanvasView");
 const zoomCanvasOut = document.querySelector("#zoomCanvasOut");
@@ -75,6 +76,13 @@ const videoModelLabels = {
 };
 const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
 const videoResolutions = ["480p", "720p", "1080p"];
+const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
 const nodeDefaults = {
   text: "输入对话内容、brief 或 prompt。",
   image: "",
@@ -101,6 +109,7 @@ let imageViewerScale = 1;
 let imageViewerSources = [];
 let imageViewerIndex = 0;
 let canvasDragDepth = 0;
+let exportImageSelection = new Set();
 const imageGenerationControllers = new Map();
 const selectedNodes = new Set();
 let conversationMemories = [];
@@ -420,6 +429,10 @@ document.addEventListener("click", (event) => {
 });
 
 closeImageViewer?.addEventListener("click", closeImageViewerPanel);
+
+exportGeneratedImagesButton?.addEventListener("click", () => {
+  openGeneratedImageExportPanel();
+});
 
 imageViewer?.addEventListener("click", (event) => {
   if (event.target === imageViewer) closeImageViewerPanel();
@@ -3868,6 +3881,269 @@ function getViewerSourcesForImage(image) {
   }
   const scope = image.closest(".upload-preview, .config-input-thumbs, .output-history-popover") || document;
   return uniqueValues([...scope.querySelectorAll("img")].map((item) => item.src).filter(Boolean));
+}
+
+function openGeneratedImageExportPanel() {
+  const items = collectGeneratedImageExportItems();
+  let modal = document.querySelector("#generatedImageExportModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "generatedImageExportModal";
+    modal.className = "generated-export-modal";
+    modal.setAttribute("aria-hidden", "true");
+    modal.innerHTML = `
+      <div class="generated-export-panel" role="dialog" aria-modal="true">
+        <header>
+          <div>
+            <strong>导出生成图片</strong>
+            <span data-export-summary></span>
+          </div>
+          <button type="button" data-export-close>关闭</button>
+        </header>
+        <div class="generated-export-actions">
+          <button type="button" data-export-select="all">全选</button>
+          <button type="button" data-export-select="none">取消</button>
+          <button type="button" data-export-select="latest">每个节点最新</button>
+        </div>
+        <div class="generated-export-grid" data-export-grid></div>
+        <footer>
+          <span data-export-status></span>
+          <button type="button" data-export-download>导出 ZIP</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", handleGeneratedImageExportClick);
+  }
+
+  exportImageSelection = new Set(items.map((item) => item.id));
+  modal.dataset.items = JSON.stringify(items);
+  renderGeneratedImageExportPanel(modal, items);
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function collectGeneratedImageExportItems() {
+  const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node.dataset.type === "image");
+  const items = [];
+  const seen = new Set();
+  nodes.forEach((node) => {
+    const title = node.querySelector(".node-title strong")?.textContent || "图片节点";
+    const history = getGeneratedImageHistory(node);
+    history.forEach((url, index) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      items.push({
+        id: `img-${items.length}`,
+        url,
+        title,
+        index,
+        latest: index === 0,
+        fileName: buildExportImageFileName(title, index, url, items.length),
+      });
+    });
+  });
+  return items;
+}
+
+function buildExportImageFileName(title, index, url, globalIndex = 0) {
+  const safeTitle = String(title || "image").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 48) || "image";
+  const extension = getImageExtensionFromUrl(url);
+  const suffix = index === 0 ? "latest" : `history-${index + 1}`;
+  return `${String(globalIndex + 1).padStart(3, "0")}-${safeTitle}-${suffix}.${extension}`;
+}
+
+function getImageExtensionFromUrl(url) {
+  if (/^data:image\/jpe?g/i.test(url)) return "jpg";
+  if (/^data:image\/webp/i.test(url)) return "webp";
+  if (/^data:image\/gif/i.test(url)) return "gif";
+  const pathname = (() => {
+    try {
+      return new URL(url, window.location.href).pathname;
+    } catch {
+      return String(url || "");
+    }
+  })();
+  const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
+  return match ? match[1].toLowerCase().replace("jpeg", "jpg") : "png";
+}
+
+function renderGeneratedImageExportPanel(modal, items) {
+  const grid = modal.querySelector("[data-export-grid]");
+  const summary = modal.querySelector("[data-export-summary]");
+  const status = modal.querySelector("[data-export-status]");
+  if (summary) summary.textContent = items.length ? `共 ${items.length} 张生成图` : "暂无可导出的生成图";
+  if (status) status.textContent = items.length ? `已选 ${exportImageSelection.size} 张` : "画布上还没有生成图片";
+  if (!grid) return;
+  grid.innerHTML = items.length
+    ? items.map((item) => `
+      <label class="generated-export-item ${exportImageSelection.has(item.id) ? "selected" : ""}">
+        <input type="checkbox" data-export-item="${escapeHtml(item.id)}" ${exportImageSelection.has(item.id) ? "checked" : ""}>
+        <img src="${item.url}" alt="">
+        <span>${escapeHtml(item.title)}</span>
+        <small>${item.latest ? "最新" : `历史 ${item.index + 1}`}</small>
+      </label>
+    `).join("")
+    : '<div class="generated-export-empty">暂无生成图片</div>';
+}
+
+function handleGeneratedImageExportClick(event) {
+  const modal = event.currentTarget;
+  if (event.target === modal || event.target.closest("[data-export-close]")) {
+    closeGeneratedImageExportPanel();
+    return;
+  }
+  const items = readGeneratedExportItems(modal);
+  const checkbox = event.target.closest("[data-export-item]");
+  if (checkbox) {
+    if (checkbox.checked) exportImageSelection.add(checkbox.dataset.exportItem);
+    else exportImageSelection.delete(checkbox.dataset.exportItem);
+    renderGeneratedImageExportPanel(modal, items);
+    return;
+  }
+  const selectButton = event.target.closest("[data-export-select]");
+  if (selectButton) {
+    const mode = selectButton.dataset.exportSelect;
+    if (mode === "all") exportImageSelection = new Set(items.map((item) => item.id));
+    if (mode === "none") exportImageSelection = new Set();
+    if (mode === "latest") exportImageSelection = new Set(items.filter((item) => item.latest).map((item) => item.id));
+    renderGeneratedImageExportPanel(modal, items);
+    return;
+  }
+  if (event.target.closest("[data-export-download]")) {
+    exportSelectedGeneratedImages(modal);
+  }
+}
+
+function readGeneratedExportItems(modal) {
+  try {
+    return JSON.parse(modal.dataset.items || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function closeGeneratedImageExportPanel() {
+  const modal = document.querySelector("#generatedImageExportModal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function exportSelectedGeneratedImages(modal) {
+  const items = readGeneratedExportItems(modal).filter((item) => exportImageSelection.has(item.id));
+  const status = modal.querySelector("[data-export-status]");
+  const button = modal.querySelector("[data-export-download]");
+  if (!items.length) {
+    if (status) status.textContent = "请先选择图片";
+    return;
+  }
+  if (button) button.disabled = true;
+  if (status) status.textContent = `正在读取 ${items.length} 张图片...`;
+  const files = [];
+  const failures = [];
+  for (const item of items) {
+    try {
+      const bytes = await readImageAsUint8Array(item.url);
+      files.push({ name: item.fileName, bytes });
+    } catch (error) {
+      failures.push(item);
+    }
+  }
+  if (!files.length) {
+    if (status) status.textContent = "导出失败：选中图片都无法读取";
+    if (button) button.disabled = false;
+    return;
+  }
+  if (status) status.textContent = "正在打包 ZIP...";
+  const zipBlob = createZipBlob(files);
+  downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
+  if (status) status.textContent = failures.length ? `已导出 ${files.length} 张，${failures.length} 张读取失败` : `已导出 ${files.length} 张`;
+  if (button) button.disabled = false;
+}
+
+async function readImageAsUint8Array(url) {
+  if (/^data:image\//i.test(url)) {
+    const base64 = url.split(",")[1] || "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function createZipBlob(files) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  files.forEach((file) => {
+    const nameBytes = encodeUtf8(file.name);
+    const crc = crc32(file.bytes);
+    const localHeader = concatUint8Arrays([
+      uint32le(0x04034b50), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
+      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0), nameBytes,
+    ]);
+    const centralHeader = concatUint8Arrays([
+      uint32le(0x02014b50), uint16le(20), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
+      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0),
+      uint16le(0), uint16le(0), uint16le(0), uint32le(0), uint32le(offset), nameBytes,
+    ]);
+    localParts.push(localHeader, file.bytes);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + file.bytes.length;
+  });
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = concatUint8Arrays([
+    uint32le(0x06054b50), uint16le(0), uint16le(0), uint16le(files.length), uint16le(files.length),
+    uint32le(centralSize), uint32le(offset), uint16le(0),
+  ]);
+  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+}
+
+function encodeUtf8(value) {
+  return new TextEncoder().encode(String(value || ""));
+}
+
+function uint16le(value) {
+  return new Uint8Array([value & 255, (value >> 8) & 255]);
+}
+
+function uint32le(value) {
+  return new Uint8Array([value & 255, (value >> 8) & 255, (value >> 16) & 255, (value >> 24) & 255]);
+}
+
+function concatUint8Arrays(parts) {
+  const length = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+  return output;
+}
+
+function crc32(bytes) {
+  let crc = -1;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ bytes[index]) & 255];
+  }
+  return (crc ^ -1) >>> 0;
+}
+
+function downloadBlob(blob, fileName) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || "download").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 60) || "download";
 }
 
 async function resolveGenerationSize(prompt, referencePlan, model = "") {
