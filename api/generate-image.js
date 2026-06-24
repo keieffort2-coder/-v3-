@@ -322,22 +322,23 @@ module.exports = async function handler(req, res) {
       }
 
       if (!apiKey || preferredProvider === "rayinai") {
+        const rayinRequestInfo = {
+          model: submitBody.model,
+          rayinResponsesModel: getRayinResponsesModel(),
+          rayinEndpoint: rayinResult.payload?.endpoint || rayinResult.payload?.rayinEndpoint,
+          size: submitBody.size,
+          quality: submitBody.quality,
+          output_format: submitBody.output_format,
+          referenceCount: orderedReferenceUrls.length,
+          structureCount: structureUrls.length,
+          styleCount: styleUrls.length,
+          editBaseCount: editBaseUrls.length,
+        };
         res.status(rayinResult.status || 502).json({
           error: "RayinAI submit failed",
-          message: formatUpstreamError(rayinResult.payload),
+          message: formatRayinSubmitError(rayinResult.payload, rayinRequestInfo),
           upstream: rayinResult.payload,
-          request: {
-            model: submitBody.model,
-            rayinResponsesModel: getRayinResponsesModel(),
-            rayinEndpoint: rayinResult.payload?.endpoint || rayinResult.payload?.rayinEndpoint,
-            size: submitBody.size,
-            quality: submitBody.quality,
-            output_format: submitBody.output_format,
-            referenceCount: orderedReferenceUrls.length,
-            structureCount: structureUrls.length,
-            styleCount: styleUrls.length,
-            editBaseCount: editBaseUrls.length,
-          },
+          request: rayinRequestInfo,
         });
         return;
       }
@@ -532,6 +533,15 @@ function formatUpstreamError(payload) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
   return message || "Image generation request failed.";
+}
+
+function formatRayinSubmitError(payload, requestInfo = {}) {
+  const message = formatUpstreamError(payload);
+  const parts = [];
+  if (requestInfo.rayinEndpoint) parts.push(`endpoint: ${requestInfo.rayinEndpoint}`);
+  if (requestInfo.rayinResponsesModel) parts.push(`model: ${requestInfo.rayinResponsesModel}`);
+  if (Number.isFinite(Number(requestInfo.referenceCount))) parts.push(`refs: ${requestInfo.referenceCount}`);
+  return parts.length ? `${message}（${parts.join("，")}）` : message;
 }
 
 function findMessage(value, seen = new Set()) {
