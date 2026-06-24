@@ -3,7 +3,7 @@ const API_BASE = "https://api.apimart.ai/v1";
 const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
-const RAYINAI_ENDPOINT_TIMEOUT_MS = 45000;
+const RAYINAI_ENDPOINT_TIMEOUT_MS = 180000;
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -763,12 +763,16 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     extensionFailure = extensionResult;
   }
   const attempts = hasReferences
-    ? [
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        { url: `${baseUrl}/responses`, body: responsesBody },
-        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
-        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
-      ]
+    ? shouldPreferResponses
+      ? [
+          { url: `${baseUrl}/v1/responses`, body: responsesBody },
+        ]
+      : [
+          { url: `${baseUrl}/v1/responses`, body: responsesBody },
+          { url: `${baseUrl}/responses`, body: responsesBody },
+          { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
+          { url: `${baseUrl}/images/edits`, body: rayinImageBody },
+        ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/images/generations`, body: rayinImageBody },
@@ -815,7 +819,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
       last.payload.endpoint = attempts[attempts.length - 1]?.url;
       last.payload.status = last.status;
-      last.payload.message = last.payload.message || last.payload.error || "RayinAI API request failed on responses and image edit endpoints.";
+      last.payload.message = last.payload.message || last.payload.error || "RayinAI /v1/responses request failed.";
     }
     return last;
   }
@@ -997,8 +1001,6 @@ function buildRayinResponsesBody(submitBody) {
     input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
-  if (submitBody.quality) body.quality = submitBody.quality;
-  if (submitBody.size) body.size = submitBody.size;
   return body;
 }
 
