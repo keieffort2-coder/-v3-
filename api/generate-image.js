@@ -33,7 +33,7 @@ function getRayinAiKeyId() {
 }
 
 function getRayinAiUserId(token) {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID);
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID || process.env.user_id || process.env.USER_ID);
   if (raw) return raw;
   const payload = parseJwtPayload(token);
   return payload.user_id || payload.userId || payload.sub || payload.id || "";
@@ -489,7 +489,7 @@ function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     if (payload?.rayinExtensionAuth?.hasToken) {
-      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请在 Vercel 增加 RAYINAI_USER_ID，值用 RayinAI 网页 Referer 里的 user_id；你当前截图里是 5294。";
+      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认 Vercel 里配置了 RAYINAI_USER_ID 或 user_id，值用 RayinAI 网页 Referer 里的 user_id。";
     }
     return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
