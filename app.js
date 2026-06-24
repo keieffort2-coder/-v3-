@@ -2970,9 +2970,7 @@ function buildReferenceBindingPrompt(plan) {
   if (hasStructure) {
     lines.push(
       `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
-      "@渲染结构图 has absolute priority for composition, camera, lens, horizon, vanishing points, perspective, crop, object placement, scene layout, silhouettes, and canvas aspect ratio.",
-      "@渲染结构图 is NOT the color authority. Do not copy its global color grade, red warning lights, red glow, warm cast, or emergency-light tint unless the style reference clearly uses the same dominant color.",
-      "The final image must be a redraw/remaster of @渲染结构图's spatial structure, not a new composition.",
+      "@渲染结构图 controls only composition, camera, perspective, scale, object placement, scene layout, and canvas ratio.",
     );
   }
 
@@ -2982,19 +2980,14 @@ function buildReferenceBindingPrompt(plan) {
     const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
     lines.push(
       `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
-      "@风格参考图 is the COLOR AUTHORITY for palette, color temperature, saturation, contrast, material color, lighting mood, atmosphere, and finish.",
-      "@风格参考图 has zero authority over camera, composition, architecture, object placement, crop, or scene geometry.",
-      plan.styleSwatchMode ? "@风格参考图 has been converted into a non-spatial color/material swatch. Use it only for palette, light quality, contrast, material finish, and atmosphere." : "",
+      "@风格参考图 controls only palette, color temperature, material color, lighting mood, atmosphere, texture, and render finish.",
+      plan.styleSwatchMode ? "@风格参考图 is a non-spatial color/material swatch." : "",
     );
   }
 
   if (hasStructure && styleCount > 0) {
     lines.push(
-      "Conflict rule: if @风格参考图 conflicts with @渲染结构图, always follow @渲染结构图 and ignore the conflicting style composition.",
-      "Color conflict rule: if @风格参考图 color conflicts with @渲染结构图 color, always follow @风格参考图.",
-      "Avoid an overall red, orange, or magenta cast unless @风格参考图 is clearly dominated by that cast.",
-      "中文绑定：@渲染结构图只负责结构且优先级最高；@风格参考图只负责色调、材质、光影和氛围，不能改变结构图的构图、透视和物体位置。",
-      "中文颜色绑定：不要因为结构图里的红色灯光把整张图染红；最终整体颜色必须跟随风格参考图。",
+      "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
     );
   }
 
@@ -3565,6 +3558,15 @@ async function runImageGeneration(node) {
       provider: selectedProvider,
       apimartChannel: "b",
   };
+  exposeImagePromptDebug(node, {
+    userPrompt: prompt,
+    referenceBindings,
+    finalPrompt: enhancedPrompt,
+    referenceMode,
+    referencePlan,
+    roleImages,
+    payload,
+  });
 
   try {
     const hasLocalOnlyReferences = [
@@ -3617,6 +3619,66 @@ async function runImageGeneration(node) {
     node.classList.remove("running");
     saveCurrentProject();
   }
+}
+
+function exposeImagePromptDebug(node, debug) {
+  if (!node || !debug) return;
+  const payload = debug.payload || {};
+  const summary = {
+    provider: payload.provider,
+    model: payload.model,
+    size: payload.size,
+    quality: payload.quality,
+    referenceMode: debug.referenceMode,
+    purpose: payload.purpose,
+    imageCount: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.length : 0,
+    structureCount: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.length : 0,
+    styleCount: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.length : 0,
+    editBaseCount: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.length : 0,
+  };
+  const report = {
+    summary,
+    userPrompt: debug.userPrompt || "",
+    referenceBindings: debug.referenceBindings || "",
+    finalPrompt: debug.finalPrompt || "",
+    payload,
+    referencePlan: debug.referencePlan || null,
+  };
+  try {
+    node.dataset.lastImagePrompt = String(debug.finalPrompt || "").slice(0, 20000);
+    node.dataset.lastImagePromptDebug = JSON.stringify({
+      ...report,
+      payload: {
+        ...payload,
+        imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+        structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
+        styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
+        editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
+      },
+    });
+  } catch (error) {
+    console.warn("[AI Video Box] Failed to store image prompt debug data.", error);
+  }
+  if (typeof window === "undefined") return;
+  window.__lastImagePromptDebug = report;
+  console.groupCollapsed("[AI Video Box] Image prompt sent to backend");
+  console.log("Summary:", summary);
+  console.log("User prompt:", report.userPrompt);
+  console.log("Reference bindings:", report.referenceBindings);
+  console.log("Final prompt:", report.finalPrompt);
+  console.log("Payload:", payload);
+  console.groupEnd();
+}
+
+function summarizeImageSource(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  if (text.startsWith("data:")) {
+    const commaIndex = text.indexOf(",");
+    const header = commaIndex >= 0 ? text.slice(0, commaIndex) : text.slice(0, 64);
+    return `${header};base64...(${estimateDataUrlBytes(text)} bytes)`;
+  }
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
 async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", provider = "apimart") {
@@ -4065,10 +4127,9 @@ function buildImageEditPrompt(
       : "Output size policy: Follow any explicit aspect ratio, canvas size, image size, or resolution in the user request. If none is provided and no structure reference is attached, choose a natural production canvas for the requested scene without inventing arbitrary numeric dimensions.";
   const baseRules = [
     purposeText,
-    "Production target: high-quality game environment concept art with readable spatial design, stable perspective, clear foreground/midground/background depth, polished lighting, strong atmosphere, and production-ready material detail.",
-    "Follow the user's intent exactly. Improve wording clarity only; do not invent a different setting, architecture type, story, logo, text, or unrelated props.",
-    "Avoid low resolution, blur, muddy textures, warped architecture, unstable perspective, duplicated objects, random text, watermark, logo, frame, UI overlay, and poster typography unless explicitly requested.",
-    "Keep an environment-focused composition and avoid unrelated added subjects unless the user explicitly requests them.",
+    "Make a clean, high-quality game environment image.",
+    "Follow the user's request. Do not invent a different setting, architecture type, story, logo, text, or unrelated props.",
+    "Avoid blur, warped architecture, unstable perspective, duplicated objects, random text, watermark, logo, frame, UI overlay, and poster typography unless explicitly requested.",
     referenceSizeRule,
     "User request:",
     userPrompt,
@@ -4077,7 +4138,7 @@ function buildImageEditPrompt(
   if (!referenceCount) {
     return [
       ...baseRules,
-      "No reference image is attached. Build the scene from the user request with stable camera, coherent perspective, readable environment layout, clear lighting direction, and finished game environment art quality.",
+      "No reference image is attached. Build the scene from the user request.",
     ].join("\n");
   }
 
@@ -4085,13 +4146,10 @@ function buildImageEditPrompt(
     return [
       ...baseRules,
       "Multimodal edit mode:",
-      "- The first input image is the EDIT BASE image. It is the dominant source. Edit this exact scene image instead of creating a new unrelated image.",
-      "- Preserve the base image's camera position, perspective, horizon line, vanishing points, scene layout, architecture positions, terrain or room shape, scale, depth layers, and lighting direction unless the user explicitly asks to change them.",
-      `- The next ${Math.max(0, styleCount)} input image(s) are STYLE references. Use them only for environment art style, color grading, lighting quality, weather, atmosphere, material finish, surface texture, brush or render language, and final polish.`,
-      "Apply only the requested changes from the user request. Keep unchanged areas visually consistent with the base image.",
-      "If a style reference conflicts with the edit base image's layout, camera, geometry, or object placement, ignore the conflicting part of the style reference.",
-      "Avoid unrelated added subjects, text, UI, watermark, new architecture, or unrelated props unless explicitly requested.",
-      "Do not crop, rotate, zoom, reframe, or redesign the scene.",
+      "- Input image 1 is the edit base. Edit this scene instead of creating a new composition.",
+      "- Preserve camera, perspective, layout, scale, and object placement unless the user asks to change them.",
+      `- The next ${Math.max(0, styleCount)} input image(s) are style references for palette, lighting, material, atmosphere, texture, and finish.`,
+      "- Apply only the requested changes.",
     ].join("\n");
   }
 
@@ -4100,50 +4158,37 @@ function buildImageEditPrompt(
       return [
         ...baseRules,
         "Image reference roles:",
-        `- The ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them for environment art style, color grading, lighting quality, weather, atmosphere, material finish, surface texture, brush or render language, and final polish.`,
-        "No structure reference image is attached. Build the scene layout from the user's request instead of copying composition from any style reference.",
-        "Do not treat any style reference as the scene structure. Do not copy its camera angle, architecture layout, props, or composition unless explicitly requested.",
+        `- The ${Math.max(0, styleCount)} input image(s) are style references only: use palette, lighting mood, material feel, atmosphere, texture, and finish.`,
+        "- Build the composition from the user request.",
       ].join("\n");
     }
     return [
       ...baseRules,
       "Image reference roles:",
-      "- Reference image 1 / first input image is the SCENE STRUCTURE reference. It is the dominant source. If any other reference conflicts with it, ignore the other reference.",
-      "- Preserve the structure reference's camera position, lens feeling, horizon line, vanishing points, perspective, terrain or room shape, building silhouettes, architectural layout, object scale, foreground/midground/background relationship, and lighting direction.",
-      `- Reference image 2 and the next ${Math.max(0, styleCount)} input image(s) are STYLE references only. Use them only as color, material, lighting, atmosphere, texture, and render-finish samples.`,
-      "- Treat STYLE references as non-spatial swatches, not as scene images. Their composition, camera, architecture, layout, object positions, focal subject, silhouettes, and scene geometry have zero authority.",
-      "Do not copy the style reference composition, camera angle, architecture layout, scene geometry, props, silhouettes, object placement, or focal subject.",
-      "The final image must be a redraw of the structure reference's scene layout, not a redraw of the style reference.",
-      "Keep perspective, horizon, vanishing points, architecture positions, terrain shape, wall/floor/ceiling relationships, scale, and lighting direction stable. Do not crop, rotate, zoom, reframe, replace, or redesign the scene layout.",
-      "If the style reference is visually attractive but uses a different composition, ignore that composition completely.",
-      "中文强约束：参考图1是渲染结构图，只锁定构图、镜头、空间、比例、透视、主体位置和物体关系；参考图2是风格参考图，只提取色彩、材质、光影、氛围和笔触，不允许继承它的构图、场景、建筑轮廓、主体位置或镜头角度。",
+      "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, and canvas ratio.",
+      `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
+      "- User request decides the intended content. Structure decides geometry. Style decides look.",
+      "- Do not copy composition from style references.",
     ].join("\n");
   }
 
   if (mode === "style") {
     return [
       ...baseRules,
-      "Use the input images as environment style and mood references.",
-      "Borrow the color palette, atmosphere, lighting quality, weather, material feeling, surface texture, and artistic finish, but let the scene layout follow the user's request.",
-      "Avoid unrelated architecture, added subjects, text, watermark, and excessive layout changes unless requested.",
+      "Use the input images as style and mood references. Let the scene layout follow the user request.",
     ].join("\n");
   }
 
   if (mode === "creative") {
     return [
       ...baseRules,
-      "Use the input images as loose environment inspiration.",
-      "Keep recognizable mood, material language, lighting atmosphere, and visual motifs, but allow creative reinterpretation and improvement.",
-      "Maintain coherent perspective, readable space, professional environment composition, and avoid artifacts, text, or watermark.",
+      "Use the input images as loose inspiration. Keep the mood and material language, but follow the user request.",
     ].join("\n");
   }
 
   return [
     ...baseRules,
-    "Use the first input image as the exact scene structure reference.",
-    "Preserve the original camera angle, framing, horizon line, vanishing points, perspective, terrain shape, room shape, building silhouettes, architecture layout, floor/wall/ceiling relationships, object positions, scale, lighting direction, color relationships, and major damage or surface patterns.",
-    "Do not add new architecture. Do not remove architecture. Do not move key objects. Avoid unrelated added subjects. Do not crop, zoom, rotate, reframe, simplify, or redesign the scene.",
-    "Only improve clarity, texture fidelity, edge cleanliness, lighting quality, atmosphere, and render polish while keeping the original scene structure unchanged.",
+    "Use the first input image as the scene reference. Preserve its camera, layout, scale, and main object positions while improving clarity and finish.",
   ].join("\n");
 }
 
