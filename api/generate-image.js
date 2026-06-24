@@ -230,7 +230,7 @@ module.exports = async function handler(req, res) {
       submitBody.image_urls = orderedReferenceUrls;
       submitBody.prompt = [
         bindingPrompt,
-        "Reference order: structure images control geometry and composition; style images control palette, lighting, materials, atmosphere, texture, and finish.",
+        "Reference order: structure images control geometry, composition, local red lights, markings, and inherent object/material colors; style images control the global palette, color grade, ambient light, shadows, fog, atmosphere, texture, and finish.",
         String(prompt),
       ].filter(Boolean).join("\n");
     }
