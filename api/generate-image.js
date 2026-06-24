@@ -489,7 +489,14 @@ function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     if (payload?.rayinExtensionAuth?.hasToken) {
-      return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但 token 被上游拒绝。请确认 Vercel 里配置了 RAYINAI_USER_ID 或 user_id，值用 RayinAI 网页 Referer 里的 user_id。";
+      const auth = payload.rayinExtensionAuth;
+      if (!auth.hasUserId) {
+        return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请在 Vercel 配置 RAYINAI_USER_ID 或 user_id，并重新部署。";
+      }
+      if (!auth.hasCookie) {
+        return "RayinAI 扩展接口认证失败：已读取 token 和 user_id，但没有读到 RAYINAI_EXTENSION_COOKIE。请从 RayinAI 网页请求里复制同一登录会话的 Cookie。";
+      }
+      return "RayinAI 扩展接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 网页抓取同一会话的 RAYINAI_EXTENSION_TOKEN 和 RAYINAI_EXTENSION_COOKIE。";
     }
     return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
   }
@@ -781,13 +788,15 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
   const endpoint = `${baseUrl}/extension/api/image/tasks`;
   const body = buildRayinExtensionImageBody(rayinImageBody);
   const cookie = getRayinAiExtensionCookie();
+  const userId = getRayinAiUserId(apiKey);
+  const referer = buildRayinExtensionReferer(baseUrl, apiKey);
   const headers = {
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
     Accept: "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9",
     Origin: baseUrl,
-    Referer: buildRayinExtensionReferer(baseUrl, apiKey),
+    Referer: referer,
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
   };
   if (cookie) headers.Cookie = cookie;
@@ -802,6 +811,11 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     payload.rayinExtensionAuth = {
       hasToken: Boolean(apiKey),
       tokenLooksLikeJwt: /^eyJ/.test(apiKey || ""),
+      hasUserId: Boolean(userId),
+      hasCookie: Boolean(cookie),
+      keyId: getRayinAiKeyId(),
+      baseUrl,
+      refererHasUserId: referer.includes("user_id="),
     };
   }
   if (response.ok && taskId) {
