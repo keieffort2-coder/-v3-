@@ -50,6 +50,10 @@ function getRayinAiBaseUrl() {
     .replace(/\/+$/, "");
 }
 
+function getRayinResponsesModel() {
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || process.env.RAYINCODE_RESPONSES_MODEL || "gpt-image-2");
+}
+
 function getRhartBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL);
   const withoutName = raw.replace(/^RHART(?:_G31)?_BASE_URL\s*=\s*/i, "");
@@ -997,7 +1001,7 @@ function buildRayinResponsesBody(submitBody) {
     content.push({ type: "input_image", image_url: url });
   });
   const body = {
-    model: normalizeRayinModel(submitBody.model),
+    model: getRayinResponsesModel(),
     input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
