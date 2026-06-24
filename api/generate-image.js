@@ -43,15 +43,17 @@ function getRayinAiUserId(token) {
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
-  return withoutName
+  const normalized = withoutName
     .replace(/\/v1\/responses\/?$/i, "")
     .replace(/\/responses\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
+  if (/^https?:\/\/(?:www\.)?240423\.xyz\b/i.test(normalized)) return RAYINAI_DEFAULT_BASE;
+  return normalized || RAYINAI_DEFAULT_BASE;
 }
 
 function getRayinResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || process.env.RAYINCODE_RESPONSES_MODEL || "gpt-image-2");
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || process.env.RAYINCODE_RESPONSES_MODEL || "gpt-5.4");
 }
 
 function getRhartBaseUrl() {
@@ -517,14 +519,14 @@ function formatUpstreamError(payload) {
     if (payload?.rayinExtensionAuth?.hasToken) {
       const auth = payload.rayinExtensionAuth;
       if (!auth.hasUserId) {
-        return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请在 Vercel 配置 RAYINAI_USER_ID 或 user_id，并重新部署。";
+        return "RayinAI 在线绘图接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请从 RayinAI 在线绘图请求 Referer 里复制同一会话的 user_id，配置为 RAYINAI_USER_ID 或 user_id，并重新部署。";
       }
       if (!auth.hasCookie) {
-        return "RayinAI 扩展接口认证失败：已读取 token 和 user_id，但没有读到 RAYINAI_EXTENSION_COOKIE。请从 RayinAI 网页请求里复制同一登录会话的 Cookie。";
+        return "RayinAI 在线绘图接口认证失败：已读取 token 和 user_id，但上游仍返回 401。Cookie 未配置；如同一 token/user_id 仍失败，请从在线绘图请求里复制同一会话的 RAYINAI_EXTENSION_COOKIE。";
       }
-      return "RayinAI 扩展接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 网页抓取同一会话的 RAYINAI_EXTENSION_TOKEN 和 RAYINAI_EXTENSION_COOKIE。";
+      return "RayinAI 在线绘图接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 在线绘图 Network 请求抓取同一会话的 Authorization token、Referer user_id 和 Cookie。";
     }
-    return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
+    return "RayinAI 在线绘图接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请从在线绘图 Network 请求复制 Authorization Bearer token，并配置为 RAYINAI_EXTENSION_TOKEN。";
   }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
@@ -764,31 +766,17 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const responsesBody = buildRayinResponsesBody(rayinImageBody);
-  let extensionFailure = null;
-  const shouldPreferResponses = Boolean(apiKey);
-  if (hasReferences && !shouldPreferResponses) {
-    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
-    if (extensionResult.ok) return extensionResult;
-    extensionFailure = extensionResult;
-  }
   const attempts = hasReferences
-    ? shouldPreferResponses
-      ? [
-          { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        ]
-      : [
-          { url: `${baseUrl}/v1/responses`, body: responsesBody },
-          { url: `${baseUrl}/responses`, body: responsesBody },
-          { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
-          { url: `${baseUrl}/images/edits`, body: rayinImageBody },
-        ]
+    ? [
+        { url: `${baseUrl}/v1/responses`, body: responsesBody },
+      ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
       ];
-  let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
+  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
     let response;
@@ -824,7 +812,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     if (![404, 405, 502, 503, 504].includes(response.status)) return last;
   }
 
-  if (hasReferences && shouldPreferResponses) {
+  if (hasReferences) {
     if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
       last.payload.endpoint = attempts[attempts.length - 1]?.url;
       last.payload.status = last.status;
@@ -833,19 +821,9 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     return last;
   }
 
-  if (hasReferences) {
-    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
-    if (extensionResult.ok) return extensionResult;
-    extensionFailure = extensionResult;
-    last = extensionResult;
-  }
-
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
-    if (extensionFailure?.payload && extensionFailure.payload !== last.payload) {
-      last.payload.extensionFailure = summarizePayload(extensionFailure.payload);
-    }
   }
   return last;
 }
