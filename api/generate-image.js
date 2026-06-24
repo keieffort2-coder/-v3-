@@ -724,8 +724,8 @@ function buildRayinExtensionImageBody(body) {
     base_resolution: "auto",
     moderation: "auto",
     output_format: body.output_format || "png",
-    quality: "auto",
-    size: "auto",
+    quality: body.quality || "auto",
+    size: body.size || "auto",
   };
 }
 
