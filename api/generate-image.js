@@ -3,6 +3,7 @@ const API_BASE = "https://api.apimart.ai/v1";
 const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
+const RAYINAI_ENDPOINT_TIMEOUT_MS = 45000;
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -777,11 +778,25 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
-    const response = await fetch(attempt.url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(attempt.body),
-    });
+    let response;
+    try {
+      response = await fetchWithTimeout(attempt.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(attempt.body),
+      }, RAYINAI_ENDPOINT_TIMEOUT_MS);
+    } catch (error) {
+      last = {
+        ok: false,
+        status: 504,
+        payload: {
+          error: "RayinAI endpoint fetch failed",
+          message: error instanceof Error ? error.message : String(error),
+          endpoint: attempt.url,
+        },
+      };
+      continue;
+    }
     const payload = await readJson(response);
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
@@ -1021,6 +1036,24 @@ async function readJson(response) {
     return JSON.parse(text);
   } catch {
     return { raw: text };
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
