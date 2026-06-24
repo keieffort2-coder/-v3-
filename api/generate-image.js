@@ -853,7 +853,7 @@ function normalizeRayinImageBody(body) {
   const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
   const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
   const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
-  const references = uniqueArray([...editUrls, ...structureUrls, ...styleUrls, ...imageUrls]).slice(0, 16);
+  const references = uniqueArray([...structureUrls, ...styleUrls, ...editUrls, ...imageUrls]).slice(0, 16);
   const next = {
     model: normalizeRayinModel(body.model),
     prompt: body.prompt,
@@ -926,15 +926,20 @@ function buildRayinResponsesBody(submitBody) {
   const prompt = imageUrls.length
     ? [
         "You must use the attached input images as visual references.",
-        "The generated image must preserve the referenced structure, camera, layout, perspective, object placement, palette, lighting, and material cues according to the user's role instructions.",
+        "Reference roles are strict and must not be swapped.",
+        "STRUCTURE reference controls scene content, architecture, camera, layout, perspective, scale, object placement, crop, and canvas ratio.",
+        "STYLE reference controls only palette, color temperature, brushwork, material finish, lighting mood, atmosphere, texture quality, and render style.",
+        "Do not copy the STYLE reference composition, objects, camera, perspective, or scene layout.",
+        "Do not let the STYLE reference replace or reinterpret the STRUCTURE reference content.",
         "Do not create an unrelated scene.",
         submitBody.prompt,
       ].join("\n")
     : submitBody.prompt;
-  const content = [
-    { type: "input_text", text: prompt },
-    ...imageUrls.slice(0, 16).map((url) => ({ type: "input_image", image_url: url })),
-  ];
+  const content = [{ type: "input_text", text: prompt }];
+  imageUrls.slice(0, 16).forEach((url, index) => {
+    content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
+    content.push({ type: "input_image", image_url: url });
+  });
   const body = {
     model: normalizeRayinModel(submitBody.model),
     input: [{ type: "message", role: "user", content }],
@@ -943,6 +948,22 @@ function buildRayinResponsesBody(submitBody) {
   if (submitBody.quality) body.quality = submitBody.quality;
   if (submitBody.size) body.size = submitBody.size;
   return body;
+}
+
+function getRayinReferenceLabel(submitBody, url, index) {
+  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
+  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
+  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls : [];
+  if (structureUrls.includes(url)) {
+    return `Input image ${index + 1}: STRUCTURE reference. Use it for geometry, camera, composition, scene content, object placement, crop, and canvas ratio.`;
+  }
+  if (styleUrls.includes(url)) {
+    return `Input image ${index + 1}: STYLE reference. Use it only for color palette, lighting mood, brushwork, material finish, atmosphere, texture quality, and render style. Do not use its composition or objects.`;
+  }
+  if (editUrls.includes(url)) {
+    return `Input image ${index + 1}: EDIT BASE reference. Preserve its scene and apply only the requested edit.`;
+  }
+  return `Input image ${index + 1}: supporting reference. Use only if it does not conflict with STRUCTURE and STYLE references.`;
 }
 
 function getTaskStatus(payload) {
