@@ -765,10 +765,8 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     ? [
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
-        ...(shouldPreferResponses ? [] : [
-          { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
-          { url: `${baseUrl}/images/edits`, body: rayinImageBody },
-        ]),
+        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
+        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
       ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
@@ -802,7 +800,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
       last.payload.endpoint = attempts[attempts.length - 1]?.url;
       last.payload.status = last.status;
-      last.payload.message = last.payload.message || last.payload.error || "RayinAI responses request failed before extension fallback.";
+      last.payload.message = last.payload.message || last.payload.error || "RayinAI API request failed on responses and image edit endpoints.";
     }
     return last;
   }
