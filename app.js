@@ -3534,6 +3534,7 @@ async function runImageGeneration(node) {
   const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
   const referenceImages = referencePlan.images;
   const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
+  const brokenReferenceCount = [...node.querySelectorAll(".broken-image-placeholder")].length;
   const referenceBindings = buildReferenceBindingPrompt(referencePlan);
   const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
     [referenceBindings, prompt].filter(Boolean).join("\n\n"),
@@ -3544,7 +3545,9 @@ async function runImageGeneration(node) {
   ), selectedModel, requestedSize, referencePlan));
 
   node.classList.add("running");
-  status.textContent = `正在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`;
+  status.textContent = brokenReferenceCount
+    ? `检测到 ${brokenReferenceCount} 个失效图片链接，建议重新上传参考图；仍在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`
+    : `正在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`;
 
     const payload = {
       model: selectedModel,
@@ -3871,9 +3874,13 @@ function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-  const nextWidth = Math.min(3840, Math.max(16, Math.round(width * scale)));
-  const nextHeight = Math.min(3840, Math.max(16, Math.round(height * scale)));
+  const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
+  const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
   return `${nextWidth}x${nextHeight}`;
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
 }
 
 async function readResponseJson(response) {
