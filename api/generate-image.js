@@ -324,7 +324,7 @@ module.exports = async function handler(req, res) {
       if (!apiKey || preferredProvider === "rayinai") {
         const rayinRequestInfo = {
           model: submitBody.model,
-          rayinResponsesModel: getRayinResponsesModel(),
+          rayinResponsesModel: rayinResult.payload?.rayinResponsesModel || getRayinResponsesModel(),
           rayinEndpoint: rayinResult.payload?.endpoint || rayinResult.payload?.rayinEndpoint,
           size: submitBody.size,
           quality: submitBody.quality,
@@ -775,16 +775,14 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  const responsesBody = buildRayinResponsesBody(rayinImageBody);
+  const responseBodies = buildRayinResponsesBodies(rayinImageBody);
   const attempts = hasReferences
-    ? [
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-      ]
+    ? responseBodies.map((item) => ({ url: `${baseUrl}/v1/responses`, body: item.body, rayinResponsesModel: item.model }))
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
         { url: `${baseUrl}/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-        { url: `${baseUrl}/responses`, body: responsesBody },
+        ...responseBodies.map((item) => ({ url: `${baseUrl}/v1/responses`, body: item.body, rayinResponsesModel: item.model })),
+        ...responseBodies.map((item) => ({ url: `${baseUrl}/responses`, body: item.body, rayinResponsesModel: item.model })),
       ];
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
@@ -804,6 +802,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
           error: "RayinAI endpoint fetch failed",
           message: error instanceof Error ? error.message : String(error),
           endpoint: attempt.url,
+          rayinResponsesModel: attempt.rayinResponsesModel,
         },
       };
       continue;
@@ -814,10 +813,15 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     if (response.ok && (imageUrl || taskId)) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = attempt.url;
+        if (attempt.rayinResponsesModel) payload.rayinResponsesModel = attempt.rayinResponsesModel;
       }
       return { ok: true, status: response.status, payload };
     }
     last = { ok: false, status: response.status, payload };
+    if (last.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
+      last.payload.endpoint = attempt.url;
+      if (attempt.rayinResponsesModel) last.payload.rayinResponsesModel = attempt.rayinResponsesModel;
+    }
     if (response.ok) return last;
     if (![404, 405, 502, 503, 504].includes(response.status)) return last;
   }
@@ -826,6 +830,7 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
       last.payload.endpoint = attempts[attempts.length - 1]?.url;
       last.payload.status = last.status;
+      last.payload.rayinResponsesModel ||= attempts[attempts.length - 1]?.rayinResponsesModel;
       last.payload.message = last.payload.message || last.payload.error || "RayinAI /v1/responses request failed.";
     }
     return last;
@@ -976,7 +981,17 @@ function uniqueArray(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function buildRayinResponsesBody(submitBody) {
+function buildRayinResponsesBodies(submitBody) {
+  const models = uniqueArray([
+    getRayinResponsesModel(),
+    normalizeRayinModel(submitBody.model),
+    "gpt-image-2",
+    "gpt-5.4",
+  ]);
+  return models.map((model) => ({ model, body: buildRayinResponsesBody(submitBody, model) }));
+}
+
+function buildRayinResponsesBody(submitBody, model = getRayinResponsesModel()) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
   const prompt = imageUrls.length
     ? [
@@ -994,7 +1009,7 @@ function buildRayinResponsesBody(submitBody) {
     content.push({ type: "input_image", image_url: url });
   });
   const body = {
-    model: getRayinResponsesModel(),
+    model,
     input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
