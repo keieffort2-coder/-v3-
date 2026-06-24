@@ -64,6 +64,7 @@ function getRhartBaseUrl() {
 function buildRhartEndpoint() {
   const explicit = sanitizeHeaderValue(process.env.RHART_ENDPOINT_URL || process.env.RHART_G31_ENDPOINT_URL);
   if (/^https?:\/\//i.test(explicit)) return explicit;
+  if (explicit) return explicit;
   const base = getRhartBaseUrl();
   if (!base) return "";
   return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
@@ -229,7 +230,7 @@ module.exports = async function handler(req, res) {
       submitBody.image_urls = orderedReferenceUrls;
       submitBody.prompt = [
         bindingPrompt,
-        "Reference binding order: image_urls[0] is the structure/edit authority. Preserve its layout, camera, perspective, scale, object positions, and canvas ratio. Later image_urls are style references only; borrow palette, lighting, material, atmosphere, and finish without copying their composition.",
+        "Reference binding order: image_urls[0] is the structure authority for layout, camera, perspective, scale, object positions, and canvas ratio only. Style reference images are the color authority for palette, color temperature, saturation, contrast, material color, lighting mood, atmosphere, and finish; they must not change composition. Do not inherit red warning lights, red glow, warm tint, or red/orange/magenta global color cast from the structure reference unless the style reference is clearly red-dominant.",
         String(prompt),
       ].filter(Boolean).join("\n");
     }
@@ -432,24 +433,40 @@ function buildRhartSubmitBody(body) {
 
 async function submitRhartImageTask(apiKey, body) {
   const endpoint = buildRhartEndpoint();
-  if (!endpoint) {
+  if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
     return {
       ok: false,
       status: 500,
       payload: {
-        error: "RHART_ENDPOINT_URL / RHART_BASE_URL is not configured",
-        message: "RHarT G31 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
+        error: "RHART_ENDPOINT_URL / RHART_BASE_URL is invalid",
+        message: endpoint
+          ? `RHarT G31 是独立生成后端，但当前 endpoint 不是完整 URL：${endpoint}。请把 RHART_ENDPOINT_URL 配成 https:// 开头的完整接口地址。`
+          : "RHarT G31 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
+        rhartEndpoint: endpoint || "",
       },
     };
   }
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      status: 500,
+      payload: {
+        error: "RHarT G31 request failed before reaching upstream",
+        message: error instanceof Error ? error.message : String(error),
+        rhartEndpoint: endpoint,
+      },
+    };
+  }
   const payload = await readJson(response);
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     payload.rhartEndpoint = endpoint;
