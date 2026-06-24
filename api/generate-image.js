@@ -220,17 +220,17 @@ module.exports = async function handler(req, res) {
     const styleUrls = Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [];
     const editBaseUrls = Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [];
     const orderedReferenceUrls = uniqueValues([
-      ...editBaseUrls,
       ...structureUrls,
       ...styleUrls,
       ...imageUrls,
+      ...editBaseUrls,
     ]).slice(0, 16);
     const bindingPrompt = String(referenceBindings || "").trim();
     if (orderedReferenceUrls.length) {
       submitBody.image_urls = orderedReferenceUrls;
       submitBody.prompt = [
         bindingPrompt,
-        "Reference binding order: image_urls[0] is the structure authority for layout, camera, perspective, scale, object positions, and canvas ratio only. Style reference images are the color authority for palette, color temperature, saturation, contrast, material color, lighting mood, atmosphere, and finish; they must not change composition. Do not inherit red warning lights, red glow, warm tint, or red/orange/magenta global color cast from the structure reference unless the style reference is clearly red-dominant.",
+        "Reference order: structure images control geometry and composition; style images control palette, lighting, materials, atmosphere, texture, and finish.",
         String(prompt),
       ].filter(Boolean).join("\n");
     }
