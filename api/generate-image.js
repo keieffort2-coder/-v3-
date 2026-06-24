@@ -743,6 +743,8 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   const baseUrl = getRayinAiBaseUrl();
   const headers = {
     Authorization: `Bearer ${apiKey}`,
+    "x-api-key": apiKey,
+    "x-goog-api-key": apiKey,
     "Content-Type": "application/json",
   };
   const imageBody = {
@@ -851,7 +853,7 @@ function normalizeRayinImageBody(body) {
   const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
   const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
   const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
-  const references = uniqueArray([...editUrls, ...structureUrls, ...styleUrls, ...imageUrls]).slice(0, 16);
+  const references = uniqueArray([...structureUrls, ...styleUrls, ...imageUrls, ...editUrls]).slice(0, 16);
   const next = {
     model: normalizeRayinModel(body.model),
     prompt: body.prompt,
@@ -924,8 +926,9 @@ function buildRayinResponsesBody(submitBody) {
   const prompt = imageUrls.length
     ? [
         "You must use the attached input images as visual references.",
-        "The generated image must preserve the referenced structure, camera, layout, perspective, object placement, palette, lighting, and material cues according to the user's role instructions.",
-        "Do not create an unrelated scene.",
+        "Use structure references for geometry, camera, layout, perspective, scale, and object placement only.",
+        "Use style references for global palette, color grade, lighting mood, atmosphere, material feel, texture, and finish.",
+        "Do not output a near-identical copy of any input image; re-render according to the user's role instructions.",
         submitBody.prompt,
       ].join("\n")
     : submitBody.prompt;
