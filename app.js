@@ -2879,7 +2879,7 @@ async function prepareReferencePlanForGeneration(plan, provider = "apimart", mod
   const normalizedProvider = normalizeImageProvider(provider);
   const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
   const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
-  if (!["apimart", "rayinai"].includes(normalizedProvider) || mode !== "structureStyle" || !hasStructure || !hasStyle) {
+  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
     return buildSubmissionReferencePlan(plan, provider, mode);
   }
 
