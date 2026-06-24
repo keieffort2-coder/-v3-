@@ -2970,7 +2970,7 @@ function buildReferenceBindingPrompt(plan) {
   if (hasStructure) {
     lines.push(
       `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
-      "@渲染结构图 controls only composition, camera, perspective, scale, object placement, scene layout, and canvas ratio.",
+      "@渲染结构图 controls composition, camera, perspective, scale, object placement, scene layout, canvas ratio, and local inherent colors on the original objects.",
     );
   }
 
@@ -2988,6 +2988,7 @@ function buildReferenceBindingPrompt(plan) {
   if (hasStructure && styleCount > 0) {
     lines.push(
       "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
+      "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
     );
   }
 
@@ -4165,8 +4166,9 @@ function buildImageEditPrompt(
     return [
       ...baseRules,
       "Image reference roles:",
-      "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, and canvas ratio.",
+      "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
       `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
+      "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
       "- User request decides the intended content. Structure decides geometry. Style decides look.",
       "- Do not copy composition from style references.",
     ].join("\n");
