@@ -101,6 +101,7 @@ let pendingCanvasDrag = null;
 let selectionBoxState = null;
 let wireState = null;
 let contextPoint = { x: 120, y: 120 };
+let canvasFileUploadMode = "ask";
 let contextNode = null;
 let contextUploadNode = null;
 let contextPort = null;
@@ -293,8 +294,9 @@ canvas?.addEventListener("contextmenu", (event) => {
 
 canvasContextMenu?.addEventListener("click", (event) => {
   const actionButton = event.target.closest("[data-canvas-action]");
-  if (actionButton?.dataset.canvasAction === "open-files") {
+  if (actionButton?.dataset.canvasAction === "open-files" || actionButton?.dataset.canvasAction === "open-files-split") {
     hideMenus();
+    canvasFileUploadMode = actionButton.dataset.canvasAction === "open-files-split" ? "split" : "ask";
     if (canvasFilePicker) {
       canvasFilePicker.value = "";
       canvasFilePicker.click();
@@ -751,6 +753,8 @@ document.addEventListener("change", (event) => {
 
 canvasFilePicker?.addEventListener("change", () => {
   const imageFiles = [...(canvasFilePicker.files || [])].filter((file) => file.type.startsWith("image/"));
+  const uploadMode = canvasFileUploadMode;
+  canvasFileUploadMode = "ask";
   canvasFilePicker.value = "";
   if (!imageFiles.length) return;
 
@@ -762,22 +766,31 @@ canvasFilePicker?.addEventListener("change", () => {
     return;
   }
 
+  if (uploadMode === "split") {
+    createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
   const mergeIntoOne = window.confirm("检测到多张图片。\n\n确定：上传到一个图片节点\n取消：每张图片分成单独节点");
   if (mergeIntoOne) {
     createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
     return;
   }
 
+  createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+});
+
+function createImageNodesFromFilesAtPoint(files, point, imageRole = "general") {
   const spacingX = 310;
   const spacingY = 290;
-  imageFiles.forEach((file, index) => {
-    const point = {
-      x: contextPoint.x + (index % 3) * spacingX,
-      y: contextPoint.y + Math.floor(index / 3) * spacingY,
+  files.forEach((file, index) => {
+    const nodePoint = {
+      x: point.x + (index % 3) * spacingX,
+      y: point.y + Math.floor(index / 3) * spacingY,
     };
-    createImageInputNodeFromFilesAtPoint([file], point, imageRole);
+    createImageInputNodeFromFilesAtPoint([file], nodePoint, imageRole);
   });
-});
+}
 
 canvas?.addEventListener("dragenter", (event) => {
   if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
@@ -4587,6 +4600,10 @@ function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general
 
 function createImageInputNodeFromDrop(files, clientX, clientY) {
   const point = clientPointToWorldPoint(clientX, clientY);
+  if (files.length > 1) {
+    createImageNodesFromFilesAtPoint(files, point);
+    return;
+  }
   createImageInputNodeFromFilesAtPoint(files, point);
 }
 
