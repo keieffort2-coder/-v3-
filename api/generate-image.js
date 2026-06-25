@@ -47,8 +47,12 @@ function getRayinAiBaseUrl() {
     .replace(/\/responses\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
-  if (/^https?:\/\/(?:www\.)?240423\.xyz\b/i.test(normalized)) return RAYINAI_DEFAULT_BASE;
+  if (isLegacyRayinAiBaseUrl(normalized)) return RAYINAI_DEFAULT_BASE;
   return normalized || RAYINAI_DEFAULT_BASE;
+}
+
+function isLegacyRayinAiBaseUrl(value) {
+  return /^(?:https?:\/\/)?(?:www\.)?240423\.xyz(?:[/:?#]|$)/i.test(String(value || "").trim());
 }
 
 function getRhartBaseUrl() {
@@ -317,6 +321,7 @@ module.exports = async function handler(req, res) {
       }
 
       if (!apiKey || preferredProvider === "rayinai") {
+        const rayinEndpoint = rayinResult.payload?.rayinEndpoint || rayinResult.payload?.endpoint || "";
         res.status(rayinResult.status || 502).json({
           error: "RayinAI submit failed",
           message: formatUpstreamError(rayinResult.payload),
@@ -326,6 +331,8 @@ module.exports = async function handler(req, res) {
             size: submitBody.size,
             quality: submitBody.quality,
             output_format: submitBody.output_format,
+            rayinEndpoint,
+            rayinBaseUrl: getRayinAiBaseUrl(),
             referenceCount: imageUrls.length,
           },
         });
