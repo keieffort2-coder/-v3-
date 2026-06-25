@@ -4390,6 +4390,7 @@ function formatApiErrorDiagnostic(result) {
   const parts = [];
   if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
   if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
+  if (request.rayinRequestType) parts.push(`type: ${request.rayinRequestType}`);
   if (request.upstreamStatus) parts.push(`status: ${request.upstreamStatus}`);
   if (request.upstreamMessage) parts.push(`upstream: ${String(request.upstreamMessage).slice(0, 160)}`);
   if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
