@@ -4597,7 +4597,7 @@ function buildImageEditPrompt(
       "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
       "- Red light must stay local: preserve red lamps, warning light spills, signs, and original red markings only where they physically exist. Do not turn the full scene, fog, shadows, walls, floor, or neutral materials reddish unless the style reference is globally red.",
       "- User request decides the intended content. Structure decides geometry. Style decides look.",
-      "- The output may stay very close to the structure reference. Re-render it with better clarity and the style reference's finish while keeping the same scene, camera, crop, and layout.",
+      "- Keep the structure reference's scene, camera, crop, and layout skeleton, but re-render surfaces, lighting, materials, edge definition, and fine details instead of copying pixels.",
       "- Do not copy composition from style references.",
     ].join("\n");
   }
