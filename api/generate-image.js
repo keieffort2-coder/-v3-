@@ -797,7 +797,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
-    if (extensionFailure?.payload) last.payload.extensionFailure = extensionFailure.payload;
   }
   return last;
 }
