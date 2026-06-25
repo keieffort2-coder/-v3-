@@ -28,6 +28,15 @@ function getRayinAiResponsesModel() {
   return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
 }
 
+function getRayinAiResponsesModels() {
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  const models = configured
+    .split(/[,\s;]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
+}
+
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYINAI_BASE_URL\s*=\s*/i, "");
@@ -244,7 +253,7 @@ module.exports = async function handler(req, res) {
           message: formatUpstreamError(rayinResult.payload),
           upstream: rayinResult.payload,
           request: {
-            model: getRayinAiResponsesModel(),
+            rayinResponsesModel: rayinResult.payload?.rayinRequest?.model || getRayinAiResponsesModel(),
             size: rayinSubmitBody.size,
             quality: rayinSubmitBody.quality,
             output_format: rayinSubmitBody.output_format,
@@ -252,6 +261,8 @@ module.exports = async function handler(req, res) {
             rayinBaseUrl: getRayinAiBaseUrl(),
             rayinApiKeyConfigured: Boolean(rayinAiKey),
             referenceCount: rayinSubmitBody.image_urls?.length || 0,
+            upstreamStatus: rayinResult.status || "",
+            upstreamMessage: findMessage(rayinResult.payload),
           },
         });
         return;
@@ -507,11 +518,18 @@ function formatUpstreamError(payload) {
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
   }
+  if (/selected model is at capacity|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙/i.test(message)) {
+    return `RayinAI 模型当前满载：${message}`;
+  }
   if (/service temporarily unavailable|temporarily unavailable|bad gateway|gateway timeout/i.test(message)) {
-    return "RayinAI 上游暂时不可用，请稍后重试，或临时切换到 ApiMart 通道。";
+    return message
+      ? `RayinAI 上游暂时不可用：${message}`
+      : "RayinAI 上游暂时不可用，请稍后重试，或临时切换到 ApiMart 通道。";
   }
   if (/internal server error|server_error/i.test(message)) {
-    return "上游图片生成服务内部错误，请稍后重试或切换通道。";
+    return message
+      ? `上游图片生成服务内部错误：${message}`
+      : "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
   return message || "Image generation request failed.";
 }
@@ -711,10 +729,11 @@ async function submitRayinImageTask(apiKey, submitBody) {
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  const responsesBody = buildRayinResponsesBody(rayinImageBody);
-  const attempts = [
-    { url: `${baseUrl}/v1/responses`, body: responsesBody },
-  ];
+  const models = getRayinAiResponsesModels();
+  const attempts = models.map((model) => ({
+    url: `${baseUrl}/v1/responses`,
+    body: buildRayinResponsesBody(rayinImageBody, model),
+  }));
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
@@ -736,7 +755,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
       };
     }
     if (response.ok) return last;
-    if (![404, 405, 502, 503, 504].includes(response.status)) return last;
+    const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
+    if (![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
   }
 
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
@@ -757,13 +777,17 @@ async function fetchRayinWithRetry(url, headers, body) {
     });
     payload = await readJson(response);
     const message = formatUpstreamError(payload);
-    if (![502, 503, 504].includes(response.status) || attempt === 2) return { response, payload };
-    if (!/RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout/i.test(message)) {
+    if (![429, 502, 503, 504].includes(response.status) || attempt === 2) return { response, payload };
+    if (!isRetryableRayinMessage(message)) {
       return { response, payload };
     }
     await sleep(1200 * (attempt + 1));
   }
   return { response, payload };
+}
+
+function isRetryableRayinMessage(message) {
+  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用/i.test(String(message || ""));
 }
 
 function normalizeRayinImageBody(body) {
@@ -839,7 +863,7 @@ function uniqueArray(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function buildRayinResponsesBody(submitBody) {
+function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel()) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
   const prompt = imageUrls.length
     ? [
@@ -860,7 +884,7 @@ function buildRayinResponsesBody(submitBody) {
     content.push({ type: "input_image", image_url: url });
   });
   return {
-    model: getRayinAiResponsesModel(),
+    model,
     input: [{ type: "message", role: "user", content }],
   };
 }
