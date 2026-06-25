@@ -761,7 +761,11 @@ async function submitRayinImageTask(apiKey, submitBody) {
         type: attempt.type,
         hasTools: Array.isArray(attempt.body?.tools),
         contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
-        referenceCount: Array.isArray(attempt.body?.image_urls) ? attempt.body.image_urls.length : 0,
+        referenceCount: Array.isArray(attempt.body?.inputs)
+          ? attempt.body.inputs.length
+          : Array.isArray(attempt.body?.image_urls)
+            ? attempt.body.image_urls.length
+            : 0,
         inputRoles: Array.isArray(attempt.body?.inputs) ? attempt.body.inputs.map((item) => item?.role).filter(Boolean) : [],
       };
     }
@@ -919,6 +923,16 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
   const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
   const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
   const structureAnchor = structureUrls[0] || editUrls[0] || imageUrls[0] || "";
+  const structureOnlyUrls = uniqueArray([
+    ...structureUrls,
+    ...editUrls,
+    structureAnchor,
+  ].filter(isImageReferenceValue));
+  const roleInputUrls = uniqueArray([
+    ...structureOnlyUrls,
+    ...styleUrls,
+    ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
+  ]).slice(0, 16);
   const body = {
     model,
     prompt: buildRayinStrictPrompt(submitBody, structureAnchor, styleUrls.length),
@@ -927,13 +941,15 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
   if (submitBody.output_format) body.output_format = submitBody.output_format;
   if (submitBody.quality) body.quality = submitBody.quality;
   if (submitBody.size) body.size = submitBody.size;
-  if (imageUrls.length) {
-    body.image_urls = imageUrls;
-    body.reference_image_urls = imageUrls;
-    body.input_image_urls = imageUrls;
-    body.images = imageUrls.map(toRayinInputImage);
-    body.input_images = imageUrls.map(toRayinInputImage);
-    body.inputs = buildRayinRoleInputs(submitBody, imageUrls);
+  if (structureOnlyUrls.length) {
+    body.image_urls = structureOnlyUrls;
+    body.reference_image_urls = structureOnlyUrls;
+    body.input_image_urls = structureOnlyUrls;
+    body.images = structureOnlyUrls.map(toRayinInputImage);
+    body.input_images = structureOnlyUrls.map(toRayinInputImage);
+  }
+  if (roleInputUrls.length) {
+    body.inputs = buildRayinRoleInputs(submitBody, roleInputUrls);
     body.references = body.inputs;
   }
   if (structureAnchor) {
