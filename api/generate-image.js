@@ -728,6 +728,13 @@ async function submitRayinImageTask(apiKey, submitBody) {
       return { ok: true, status: response.status, payload };
     }
     last = { ok: false, status: response.status, payload };
+    if (last.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
+      last.payload.rayinRequest = {
+        model: attempt.body?.model,
+        hasTools: Array.isArray(attempt.body?.tools),
+        contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
+      };
+    }
     if (response.ok) return last;
     if (![404, 405, 502, 503, 504].includes(response.status)) return last;
   }
@@ -843,6 +850,7 @@ function buildRayinResponsesBody(submitBody) {
         "Do not copy the STYLE reference composition, objects, camera, perspective, or scene layout.",
         "Do not let the STYLE reference replace or reinterpret the STRUCTURE reference content.",
         "Do not create an unrelated scene.",
+        "Generate the final image and return the resulting image URL or base64 image data when available.",
         submitBody.prompt,
       ].join("\n")
     : submitBody.prompt;
@@ -851,14 +859,10 @@ function buildRayinResponsesBody(submitBody) {
     content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
     content.push({ type: "input_image", image_url: url });
   });
-  const body = {
+  return {
     model: getRayinAiResponsesModel(),
     input: [{ type: "message", role: "user", content }],
-    tools: [{ type: "image_generation" }],
   };
-  if (submitBody.quality) body.quality = submitBody.quality;
-  if (submitBody.size) body.size = submitBody.size;
-  return body;
 }
 
 function getRayinReferenceLabel(submitBody, url, index) {
