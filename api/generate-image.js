@@ -955,9 +955,15 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
   ]).slice(0, 16);
   const body = {
+    key_id: getRayinAiKeyId(),
+    provider: "gpt",
+    operation: roleInputUrls.length ? "edit" : "generate",
     model,
     prompt: buildRayinStrictPrompt(submitBody, structureAnchor, styleUrls.length),
     n: 1,
+    aspect_ratio: "auto",
+    base_resolution: "auto",
+    moderation: "auto",
   };
   if (submitBody.output_format) body.output_format = submitBody.output_format;
   if (submitBody.quality) body.quality = submitBody.quality;
@@ -967,9 +973,10 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     body.reference_image_urls = structureOnlyUrls;
     body.input_image_urls = structureOnlyUrls;
     body.images = structureOnlyUrls.map(toRayinInputImage);
-    body.input_images = structureOnlyUrls.map(toRayinInputImage);
   }
   if (roleInputUrls.length) {
+    body.input_images = buildRayinGroupedInputImages(structureOnlyUrls, styleUrls, roleInputUrls);
+    body.input_image_groups = body.input_images;
     body.inputs = buildRayinRoleInputs(submitBody, roleInputUrls);
     body.references = body.inputs;
   }
@@ -990,6 +997,19 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     body.style_images = styleUrls.map(toRayinInputImage);
   }
   return body;
+}
+
+function buildRayinGroupedInputImages(structureUrls, styleUrls, allUrls) {
+  const groups = [];
+  const structureGroup = uniqueArray(structureUrls).filter(isImageReferenceValue).slice(0, 4);
+  const styleGroup = uniqueArray(styleUrls).filter(isImageReferenceValue).slice(0, 4);
+  if (structureGroup.length) groups.push(structureGroup.map(toRayinInputImage));
+  if (styleGroup.length) groups.push(styleGroup.map(toRayinInputImage));
+  allUrls
+    .filter((url) => !structureGroup.includes(url) && !styleGroup.includes(url))
+    .slice(0, 8)
+    .forEach((url) => groups.push([toRayinInputImage(url)]));
+  return groups;
 }
 
 function buildRayinRoleInputs(submitBody, imageUrls) {
