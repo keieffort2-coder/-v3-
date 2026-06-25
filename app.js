@@ -1,5757 +1,2600 @@
-const pages = document.querySelectorAll(".page");
-const appShell = document.querySelector(".app-shell");
-const navItems = document.querySelectorAll(".nav-item[data-page]");
-const pageButtons = document.querySelectorAll("[data-page]");
-const projectGrid = document.querySelector("#projectGrid");
-const projectNameInput = document.querySelector("#projectNameInput");
-const projectCodeInput = document.querySelector("#projectCodeInput");
-const createProjectButton = document.querySelector("#createProject");
-const cloneProjectButton = document.querySelector("#cloneProject");
-const workspaceProjectName = document.querySelector("#workspaceProjectName");
-const canvas = document.querySelector(".workspace-canvas");
-const canvasContent = document.querySelector(".canvas-content");
-const canvasToolbar = document.querySelector(".canvas-toolbar");
-const connectorSvg = document.querySelector(".connectors");
-const nodeTemplate = document.querySelector("#nodeTemplate");
-const canvasContextMenu = document.querySelector("#canvasContextMenu");
-const canvasFilePicker = document.querySelector("#canvasFilePicker");
-const nodeContextMenu = document.querySelector("#nodeContextMenu");
-const imageUploadContextMenu = document.querySelector("#imageUploadContextMenu");
-const portConnectionContextMenu = document.querySelector("#portConnectionContextMenu");
-const imageConfigPanel = document.querySelector("#imageConfigPanel");
-const configNodeName = document.querySelector("#configNodeName");
-const imagePromptInput = document.querySelector("#imagePromptInput");
-const submitImageConfig = document.querySelector("#submitImageConfig");
-const imageModelSelect = document.querySelector("#imageModelSelect");
-const imageProviderSelect = document.querySelector("#imageProviderSelect");
-const openImageOptions = document.querySelector("#openImageOptions");
-const imageOptionsPopover = document.querySelector("#imageOptionsPopover");
-const openReferencePicker = document.querySelector("#openReferencePicker");
-const referencePicker = document.querySelector("#referencePicker");
-const referenceList = document.querySelector("#referenceList");
-const addLocalReference = document.querySelector("#addLocalReference");
-const imageViewer = document.querySelector("#imageViewer");
-const imageViewerImg = document.querySelector("#imageViewerImg");
-const closeImageViewer = document.querySelector("#closeImageViewer");
-const arrangeCanvasNodes = document.querySelector("#arrangeCanvasNodes");
-const createFolderFromSelection = document.querySelector("#createFolderFromSelection");
-const exitFolderCanvas = document.querySelector("#exitFolderCanvas");
-const exportGeneratedImagesButton = document.querySelector("#exportGeneratedImages");
-const folderExitTop = document.querySelector("#folderExitTop");
-const resetCanvasView = document.querySelector("#resetCanvasView");
-const zoomCanvasOut = document.querySelector("#zoomCanvasOut");
-const zoomCanvasIn = document.querySelector("#zoomCanvasIn");
-const canvasZoomLabel = document.querySelector("#canvasZoomLabel");
-let memoryComposer = document.querySelector("#memoryComposer");
-let memoryInput = document.querySelector("#memoryInput");
-let memoryType = document.querySelector("#memoryType");
-let memoryList = document.querySelector("#memoryList");
-
-const PROJECT_LIST_KEY = "aivideobox.projects.v2";
-const PROJECT_CODE_INDEX_KEY = "aivideobox.projectCodes.v1";
-const SHARED_PROJECTS_API = "/api/shared-projects";
-const GLOBAL_MEMORY_KEY = "aivideobox.globalMemories.v1";
-const IMAGE_OPTIONS_KEY = "aivideobox.imageOptions.v1";
-const WORKSPACE_SIDE_STATE_KEY = "aivideobox.workspaceSidebarsHidden.v1";
-const IMAGE_DB_NAME = "aivideobox.images";
-const IMAGE_STORE_NAME = "images";
-const typeLabels = { text: "Text", image: "Image", video: "Video", folder: "Folder" };
-const typeNames = { text: "文本", image: "图片", video: "视频", folder: "文件夹" };
-const roleLabels = {
-  general: "普通图",
-  editBase: "编辑底图",
-  structure: "渲染结构图",
-  style: "风格参考图",
-  output: "输出图",
-};
-const videoModeLabels = {
-  "image-to-video": "图生视频",
-  "text-to-video": "文生视频",
-  "video-to-video": "视频参考转换",
-};
-const videoModelLabels = {
-  "doubao-seedance-2.0": "Seedance2",
-  "kling-motion-control": "kling3",
-  "happyhorse-1.0": "happyhorse",
-};
-const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
-const videoResolutions = ["480p", "720p", "1080p"];
-const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) {
-    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  }
-  return value >>> 0;
-});
-const nodeDefaults = {
-  text: "输入对话内容、brief 或 prompt。",
-  image: "",
-  video: "",
-  folder: "双击进入文件夹画布。",
-};
-
-let currentProject = "";
-let activeFolder = null;
-let selectedNode = null;
-let nodeCounter = 0;
-let viewport = { x: 0, y: 0, scale: 1 };
-let dragState = null;
-let panState = null;
-let pendingCanvasDrag = null;
-let selectionBoxState = null;
-let wireState = null;
-let contextPoint = { x: 120, y: 120 };
-let canvasFileUploadMode = "ask";
-let contextNode = null;
-let contextUploadNode = null;
-let contextPort = null;
-let configNode = null;
-let imageViewerScale = 1;
-let imageViewerSources = [];
-let imageViewerIndex = 0;
-let canvasDragDepth = 0;
-let exportImageSelection = new Set();
-const imageGenerationControllers = new Map();
-const selectedNodes = new Set();
-let conversationMemories = [];
-let pendingDeletedProjectNames = [];
-let imageOptions = {
-  purpose: "自定义",
-  referenceMode: "structureStyle",
-  imageRole: "general",
-  quality: "high",
-};
-let isRestoring = false;
-let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
-
-connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
-ensureMemoryUi();
-applyWorkspaceSidebarsState();
-
-pageButtons.forEach((button) => {
-  button.addEventListener("click", () => showPage(button.dataset.page));
-});
-
-document.addEventListener("click", (event) => {
-  const pageButton = event.target.closest("[data-page]");
-  if (!pageButton) return;
-  event.preventDefault();
-  showPage(pageButton.dataset.page);
-});
-
-createProjectButton?.addEventListener("click", () => {
-  const name = createFreshProject(projectNameInput.value.trim() || "未命名项目");
-  projectNameInput.value = "";
-  openProject(name);
-});
-
-cloneProjectButton?.addEventListener("click", async () => {
-  const code = normalizeProjectCode(projectCodeInput.value);
-  if (!code) {
-    markProjectCodeInput("请输入项目码");
-    return;
-  }
-  const clonedName = await cloneProjectByCode(code);
-  if (!clonedName) {
-    markProjectCodeInput("未找到项目码");
-    return;
-  }
-  projectCodeInput.value = "";
-  openProject(clonedName);
-});
-
-projectGrid?.addEventListener("click", (event) => {
-  const card = event.target.closest(".project-card");
-  if (!card) return;
-
-  const name = card.dataset.project;
-  if (event.target.closest(".project-name")) {
-    startProjectNameEdit(card);
-    return;
-  }
+:root {
+  color-scheme: dark;
+  --bg: #03070b;
+  --surface: #0b1018;
+  --surface-2: #101722;
+  --surface-3: #151d2a;
+  --line: #223044;
+  --line-soft: rgba(120, 145, 170, 0.18);
+  --text: #f3f7ff;
+  --muted: #8fa1b7;
+  --cyan: #16d9f5;
+  --green: #31dfb5;
+  --yellow: #f5b832;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
 
-  if (event.target.closest("[data-open-project]")) {
-    openProject(name);
-    return;
-  }
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.app-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.app-shell.workspace-sidebars-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: #090d13;
+}
+
+.app-shell.workspace-sidebars-hidden .sidebar {
+  overflow: hidden;
+  transform: translateX(-100%);
+}
+
+.brand {
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand-icon,
+.hero-links span,
+.asset-icon {
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(22, 217, 245, 0.12);
+  color: var(--cyan);
+}
+
+.brand-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.side-nav {
+  display: grid;
+  gap: 4px;
+  padding: 16px 10px;
+}
+
+.nav-item {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #c4cfdd;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.nav-item:hover,
+.nav-item.active {
+  border-color: var(--line-soft);
+  background: #0d131d;
+  color: var(--text);
+}
+
+.nav-divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nav-divider::before,
+.nav-divider::after {
+  content: "";
+  height: 1px;
+  background: var(--line);
+}
+
+.points {
+  margin: 0 10px;
+}
+
+.account {
+  margin: auto 10px 12px;
+  padding: 8px 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-area {
+  min-width: 0;
+  background:
+    radial-gradient(circle at 0 0, rgba(22, 217, 245, 0.12), transparent 24%),
+    linear-gradient(180deg, #070b10 0%, #03070b 45%);
+}
+
+.page {
+  display: none;
+  min-height: 100vh;
+  padding: 26px clamp(22px, 4vw, 58px) 48px;
+}
+
+.page.active {
+  display: block;
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.hero-card,
+.brief-card,
+.task-card,
+.node,
+.empty-assets,
+.asset-library-grid article,
+.placeholder-page,
+.project-board,
+.project-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(15, 21, 31, 0.86);
+  box-shadow: var(--shadow);
+}
+
+.project-board {
+  max-width: 1328px;
+  margin: 0 auto 26px;
+  padding: 26px;
+}
+
+.workspace-board {
+  margin-top: 16px;
+}
+
+.project-board-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.project-board-head h1 {
+  margin: 8px 0 8px;
+  font-size: 44px;
+}
+
+.project-board-head p {
+  max-width: 720px;
+  margin: 0;
+  color: #b8c9dc;
+  line-height: 1.7;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workspace-project-grid {
+  align-items: stretch;
+}
+
+.project-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  box-shadow: none;
+}
+
+.project-card.active {
+  border-color: rgba(22, 217, 245, 0.58);
+}
+
+.project-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-card button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b111a;
+  color: var(--text);
+}
+
+.project-thumb {
+  display: grid;
+  min-height: 118px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(120, 145, 170, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(22, 217, 245, 0.08), transparent),
+    #080d14;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-thumb img {
+  width: 100%;
+  height: 118px;
+  object-fit: cover;
+  display: block;
+}
+
+.project-thumb.has-image {
+  border-color: rgba(22, 217, 245, 0.28);
+}
+
+.project-create {
+  display: grid;
+  width: min(430px, 100%);
+  gap: 10px;
+}
+
+.create-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.create-row input {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0a0f16;
+  color: var(--text);
+  padding: 0 14px;
+  outline: none;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.folder-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(22, 217, 245, 0.22);
+  border-radius: 12px;
+  background: rgba(22, 217, 245, 0.12);
+  color: var(--cyan);
+}
+
+.project-row strong,
+.project-row span {
+  display: block;
+}
+
+.project-name {
+  cursor: text;
+  line-height: 1.25;
+}
+
+.project-name:hover {
+  color: var(--cyan);
+}
+
+.project-name-input {
+  display: block;
+  width: min(250px, 100%);
+  min-height: 28px;
+  border: 1px solid rgba(22, 217, 245, 0.45);
+  border-radius: 8px;
+  background: #070d14;
+  color: var(--text);
+  font: inherit;
+  font-weight: 900;
+  padding: 2px 8px;
+  outline: none;
+}
+
+.open-canvas {
+  border-color: rgba(22, 217, 245, 0.36) !important;
+  background: rgba(22, 217, 245, 0.1) !important;
+  font-weight: 900;
+}
+
+.project-code {
+  color: #d7e7f8 !important;
+}
+
+
+.delete-project {
+  border-color: rgba(255, 89, 120, 0.26) !important;
+  background: rgba(255, 89, 120, 0.08) !important;
+  color: #ffb2c0 !important;
+}
+
+.legacy-home-section {
+  display: none !important;
+}
+
+.hero-card {
+  max-width: 1328px;
+  margin: 0 auto 26px;
+  padding: 34px 30px 30px;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.hero-card h1 {
+  max-width: 860px;
+  margin: 22px 0 18px;
+  font-size: clamp(42px, 5vw, 66px);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.hero-card p,
+.brief-info p,
+.task-card p,
+.assets-header p,
+.my-assets p,
+.platform-assets p,
+.asset-library-grid p,
+.placeholder-page p {
+  color: #b8c9dc;
+  line-height: 1.7;
+}
+
+.hero-links {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.hero-links button {
+  display: grid;
+  gap: 10px;
+  min-height: 128px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #0a0f16;
+  color: var(--text);
+  text-align: left;
+}
+
+.hero-links span {
+  width: 36px;
+  height: 36px;
+}
+
+.hero-links strong,
+.hero-links small {
+  display: block;
+}
+
+.hero-links small {
+  color: var(--muted);
+}
+
+.brief-card {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1fr);
+  max-width: 1328px;
+  margin: 0 auto 30px;
+  overflow: hidden;
+}
+
+.visual-placeholder {
+  position: relative;
+  min-height: 348px;
+  padding: 22px;
+  background:
+    linear-gradient(100deg, rgba(245, 184, 50, 0.18), rgba(22, 217, 245, 0.08) 42%, transparent),
+    #090f15;
+}
+
+.tag,
+.badge,
+.deadline,
+.chips span,
+.task-meta span {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #b8c9dc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tag,
+.badge {
+  padding: 5px 9px;
+}
+
+.badge {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  letter-spacing: 0.14em;
+}
+
+.visual-footer {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(6, 10, 15, 0.76);
+}
+
+.visual-footer svg {
+  width: 32px;
+  height: 32px;
+  color: var(--cyan);
+}
+
+.visual-footer small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.brief-info {
+  padding: 30px;
+}
+
+.brief-top,
+.task-meta,
+.section-title,
+.assets-header,
+.assets-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.deadline,
+.task-meta span {
+  padding: 5px 9px;
+}
+
+.brief-info h2 {
+  margin: 16px 0 10px;
+  font-size: 28px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.chips span {
+  padding: 6px 10px;
+  background: rgba(22, 217, 245, 0.08);
+}
+
+.reward {
+  margin: 18px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 184, 50, 0.32);
+  border-radius: 8px;
+  background: rgba(245, 184, 50, 0.1);
+  color: var(--yellow);
+  font-weight: 900;
+}
+
+.yellow-button,
+.subtle-button,
+.node-head button,
+.asset-library-grid button,
+.chat-item {
+  min-height: 38px;
+  border-radius: 8px;
+}
+
+.yellow-button {
+  border: 0;
+  background: var(--yellow);
+  color: #1c1300;
+  padding: 0 18px;
+  font-weight: 900;
+}
+
+.subtle-button,
+.node-head button,
+.asset-library-grid button {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 13px;
+}
+
+.task-section {
+  max-width: 1328px;
+  margin: 0 auto;
+}
+
+.section-title {
+  margin-bottom: 16px;
+}
+
+.section-title h2,
+.assets-header h1,
+.my-assets h2,
+.platform-assets h2,
+.placeholder-page h1 {
+  margin: 8px 0 4px;
+}
+
+.task-grid,
+.asset-library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.task-card {
+  padding: 18px;
+  box-shadow: none;
+}
+
+.task-card h3 {
+  margin: 22px 0 10px;
+}
+
+.task-card strong {
+  color: var(--yellow);
+  font-size: 13px;
+}
+
+.workspace-page {
+  padding: 0;
+}
+
+.workspace-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.workspace-layout.sidebars-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.workspace-layout.sidebars-hidden .conversation-panel {
+  overflow: hidden;
+  transform: translateX(-100%);
+}
+
+.workspace-layout.sidebars-hidden .workspace-canvas {
+  grid-column: 2;
+}
+
+.conversation-panel {
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: #080c12;
+}
+
+.conversation-head {
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.conversation-head h2 {
+  margin: 8px 0 6px;
+}
+
+.conversation-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.memory-composer {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-composer textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #05080d;
+  color: var(--text);
+  padding: 10px;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.memory-actions {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+}
+
+.memory-actions select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #05080d;
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.fixed-api-channel {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #05080d;
+  color: #cfe4f5;
+  padding: 0 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.chat-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+}
+
+.chat-item {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 12px;
+  text-align: left;
+}
+
+.chat-item[draggable="true"] {
+  cursor: grab;
+}
+
+.chat-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.chat-item:hover,
+.chat-item.active {
+  border-color: rgba(22, 217, 245, 0.52);
+  background: #101923;
+}
+
+.chat-item strong {
+  font-size: 14px;
+}
+
+.chat-item small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.memory-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.memory-delete:hover {
+  border-color: rgba(255, 91, 91, 0.55);
+  color: #ff8a8a;
+}
+
+.workspace-canvas {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  cursor: default;
+  background:
+    radial-gradient(circle at 20px 20px, rgba(130, 152, 180, 0.18) 1px, transparent 1px),
+    #020508;
+  background-size: 22px 22px;
+}
+
+.workspace-canvas,
+.workspace-canvas .canvas-content {
+  cursor: default;
+}
+
+.workspace-canvas.panning {
+  cursor: grabbing;
+}
+
+.workspace-canvas.panning .canvas-content {
+  cursor: grabbing;
+}
+
+.workspace-canvas.drag-over {
+  outline: 2px solid rgba(22, 217, 245, 0.72);
+  outline-offset: -8px;
+  background:
+    radial-gradient(circle at 20px 20px, rgba(130, 152, 180, 0.18) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(22, 217, 245, 0.12), rgba(255, 194, 69, 0.08)),
+    #020508;
+}
+
+.folder-exit-top {
+  position: absolute;
+  z-index: 8;
+  top: 18px;
+  left: 18px;
+  min-height: 38px;
+  border: 1px solid rgba(255, 194, 69, 0.45);
+  border-radius: 8px;
+  background: rgba(11, 17, 26, 0.94);
+  color: var(--yellow);
+  padding: 0 14px;
+  font-weight: 900;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+}
+
+.folder-exit-top:hover {
+  border-color: rgba(255, 194, 69, 0.75);
+  background: rgba(255, 194, 69, 0.12);
+}
+
+.workspace-side-toggle {
+  position: fixed;
+  z-index: 30;
+  left: 232px;
+  bottom: 28px;
+  min-width: 82px;
+  width: auto !important;
+  border: 1px solid rgba(22, 217, 245, 0.42);
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.92);
+  color: var(--text);
+  padding: 0 12px;
+  white-space: nowrap;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+}
+
+.workspace-side-toggle.is-hidden-state {
+  left: 16px;
+}
+
+.workspace-side-toggle:hover {
+  border-color: rgba(22, 217, 245, 0.72);
+  background: rgba(22, 217, 245, 0.14);
+}
+
+.canvas-content {
+  position: relative;
+  width: 12000px;
+  height: 12000px;
+  transform-origin: top left;
+}
+
+.node {
+  position: absolute;
+  width: 258px;
+  padding: 10px;
+  box-shadow: none;
+}
+
+.input-node {
+  border-color: rgba(22, 217, 245, 0.28);
+}
+
+.output-node {
+  border-color: rgba(49, 223, 181, 0.34);
+}
+
+.node-kind {
+  display: inline-flex;
+  margin-bottom: 9px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.input-node .node-kind {
+  background: rgba(22, 217, 245, 0.1);
+  color: var(--cyan);
+}
+
+.output-node .node-kind {
+  background: rgba(49, 223, 181, 0.1);
+  color: var(--green);
+}
+
+.node-ref {
+  left: 92px;
+  top: 230px;
+}
+
+.node-mid-1 {
+  left: 430px;
+  top: 140px;
+}
+
+.node-mid-2 {
+  left: 430px;
+  top: 350px;
+}
+
+.node-mid-3 {
+  left: 430px;
+  top: 560px;
+}
+
+.node-right-1 {
+  left: 750px;
+  top: 80px;
+}
+
+.node-right-2 {
+  left: 750px;
+  top: 318px;
+}
+
+.node-right-3 {
+  left: 750px;
+  top: 556px;
+}
+
+.conversation-node {
+  left: 1030px;
+  top: 160px;
+  min-height: 210px;
+  border-color: rgba(49, 223, 181, 0.45);
+}
+
+.node-title,
+.node-head {
+  display: flex;
+  align-items: center;
+}
+
+.node-head {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.node-type-select {
+  width: 76px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #252832;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.node-type-select[data-node-type="video-mode"] {
+  width: 112px;
+  max-width: 42%;
+}
+
+.image-role-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.image-role-button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #252832;
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.image-role-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  display: none;
+  min-width: 116px;
+  border: 1px solid rgba(22, 217, 245, 0.28);
+  border-radius: 8px;
+  background: #0b111a;
+  padding: 4px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+}
+
+.image-role-picker.open .image-role-menu {
+  display: grid;
+}
+
+.image-role-option {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.image-role-option:hover {
+  background: rgba(22, 217, 245, 0.13);
+}
+
+.node-title {
+  gap: 8px;
+  min-width: 0;
+}
+
+.node-title span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6d7b8e;
+}
+
+.node-title .ok {
+  background: var(--green);
+}
+
+.node-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-title-input {
+  width: min(150px, 100%);
+  height: 26px;
+  border: 1px solid rgba(22, 217, 245, 0.5);
+  border-radius: 6px;
+  background: #080d14;
+  color: var(--text);
+  padding: 0 7px;
+  font-weight: 900;
+  outline: none;
+}
+
+.node-custom-button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: #2a2b31;
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.image-node-shell {
+  display: grid;
+}
+
+.node.folder-node {
+  width: 150px;
+  min-height: 120px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.node.folder-node.selected {
+  outline: 2px solid rgba(22, 217, 245, 0.68);
+  outline-offset: 8px;
+}
+
+.folder-canvas-entry {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+}
+
+.folder-title {
+  justify-content: center;
+  max-width: 150px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+.folder-title strong {
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.folder-canvas-entry small {
+  color: #ffd88a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.image-upload-window {
+  display: grid;
+  min-height: 170px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #1d1d1f;
+  cursor: pointer;
+}
+
+.image-upload-window:hover {
+  border-color: rgba(22, 217, 245, 0.45);
+  background: #20232a;
+}
+
+.image-upload-window input {
+  display: none;
+}
+
+.image-upload-window span {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: #2a2b31;
+  color: var(--text);
+  padding: 0 16px;
+}
+
+.image-upload-window .upload-name {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-config-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 18px;
+  left: 244px;
+  z-index: 80;
+  display: none;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(15, 15, 17, 0.96);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.node-config-panel.show {
+  display: grid;
+}
+
+.config-tabs {
+  display: flex;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.config-tab,
+.config-icon {
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: #141417;
+  color: var(--text);
+  padding: 0 18px;
+  font-size: 16px;
+}
+
+.config-tab {
+  min-width: 200px;
+  text-align: left;
+}
+
+.config-icon {
+  display: grid;
+  width: 58px;
+  place-items: center;
+  color: var(--muted);
+}
+
+#imagePromptInput {
+  min-height: 150px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0f0f11;
+  color: var(--text);
+  padding: 24px;
+  resize: vertical;
+  outline: none;
+}
+
+.config-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.config-footer select,
+.config-pill,
+.config-submit {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2d;
+  color: var(--text);
+  padding: 0 18px;
+}
+
+.config-submit {
+  margin-left: auto;
+  min-width: 160px;
+  background: #3a3a3e;
+  color: #bfc3ca;
+  font-weight: 900;
+}
+
+.config-submit.danger {
+  background: #5f2525;
+  color: #ffd9d9;
+}
+
+.image-options-popover {
+  position: fixed;
+  left: 244px;
+  bottom: 292px;
+  z-index: 92;
+  display: none;
+  width: min(470px, calc(100vw - 280px));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  background: #2e2e31;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  padding: 16px;
+}
+
+.image-options-popover.show {
+  display: grid;
+  gap: 16px;
+}
+
+.option-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.option-group {
+  display: grid;
+  gap: 10px;
+}
+
+.option-group > span {
+  color: #b9bac0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.option-grid {
+  display: grid;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #37373a;
+  padding: 5px;
+}
+
+.purpose-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.purpose-grid button:nth-child(4) {
+  grid-column: 1;
+}
+
+.quality-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.option-grid button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #aeb0b7;
+  font-weight: 900;
+}
+
+.option-grid button.active {
+  background: #5a5a5d;
+  color: #fff;
+}
+
+.reference-picker {
+  position: fixed;
+  right: 42px;
+  bottom: 250px;
+  z-index: 95;
+  display: none;
+  width: min(560px, calc(100vw - 280px));
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: #1b1b1d;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  padding: 28px;
+}
+
+.reference-picker.show {
+  display: block;
+}
+
+.reference-picker-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.reference-picker-head strong,
+.reference-picker-head span {
+  display: block;
+}
+
+.reference-picker-head strong {
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.reference-picker-head span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.upload-reference-button {
+  display: inline-flex;
+  min-height: 54px;
+  align-items: center;
+  border-radius: 10px;
+  background: #2a2a2d;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0 22px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.reference-list {
+  display: grid;
+  gap: 14px;
+}
+
+.reference-item {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.reference-thumb {
+  grid-row: span 2;
+  width: 76px;
+  height: 58px;
+  border-radius: 8px;
+}
+
+.reference-item span {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.reference-item small,
+.reference-empty {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.reference-item:hover span {
+  color: var(--cyan);
+}
+
+.node small {
+  display: inline-flex;
+  margin: 10px 0 8px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #a8c5e5;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.node p {
+  margin: 10px 2px 0;
+  color: #c0d0df;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.image-slot {
+  height: 134px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.text-slot,
+.video-slot {
+  display: grid;
+  min-height: 134px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: #080d14;
+}
+
+.text-input,
+.mini-textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #080d14;
+  color: #c8d8e8;
+  resize: vertical;
+  outline: none;
+}
+
+.text-input {
+  min-height: 134px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.text-brief-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.text-brief-grid label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-brief-field {
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #080d14;
+  color: #c8d8e8;
+  padding: 8px;
+  resize: vertical;
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.api-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.api-name {
+  padding: 8px 9px;
+  border: 1px solid rgba(22, 217, 245, 0.22);
+  border-radius: 8px;
+  background: rgba(22, 217, 245, 0.08);
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.api-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.api-panel .upload-control {
+  gap: 7px;
+}
+
+.node-file-input {
+  display: none;
+}
+
+.upload-box {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px dashed rgba(22, 217, 245, 0.42);
+  border-radius: 8px;
+  background: rgba(22, 217, 245, 0.08);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.upload-box strong {
+  color: var(--cyan);
+  font-size: 12px;
+}
+
+.upload-box small {
+  overflow: hidden;
+  color: #b8c9dc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.upload-preview:empty {
+  display: none;
+}
+
+.upload-preview img,
+.upload-preview video {
+  display: block;
+  width: 100%;
+  height: 112px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.24);
+  border-radius: 8px;
+}
+
+.upload-preview img {
+  cursor: zoom-in;
+}
+
+.broken-image-placeholder {
+  display: grid;
+  width: 100%;
+  min-height: 112px;
+  place-items: center;
+  border: 1px dashed rgba(255, 184, 50, 0.42);
+  border-radius: 8px;
+  background: rgba(245, 184, 50, 0.08);
+  color: var(--yellow);
+  font-size: 12px;
+  text-align: center;
+}
+
+.upload-preview.output-preview {
+  position: relative;
+  display: block;
+  overflow: visible;
+}
+
+.upload-preview.output-preview > img {
+  width: 100%;
+}
+
+.output-history-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 30;
+  border: 1px solid rgba(22, 217, 245, 0.42);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: rgba(3, 9, 15, 0.86);
+  color: var(--cyan);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.output-history-popover {
+  position: absolute;
+  top: 38px;
+  right: 8px;
+  z-index: 40;
+  display: none;
+  width: 300px;
+  max-height: 360px;
+  overflow: auto;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  border: 1px solid rgba(22, 217, 245, 0.38);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(5, 10, 16, 0.96);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+
+.output-history-popover.show {
+  display: grid;
+}
+
+.output-history-popover img {
+  height: 86px;
+}
+
+.generation-record {
+  position: relative;
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 7px;
+  align-items: start;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.generation-record.favorite {
+  border-color: rgba(245, 184, 50, 0.72);
+  background: rgba(245, 184, 50, 0.08);
+}
+
+.generation-record img {
+  grid-row: span 3;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+}
 
-  if (event.target.closest(".delete-project")) {
-    deleteProject(name);
-    return;
-  }
+.generation-record small {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: #9fb6cb;
+  font-size: 10px;
+  line-height: 1.3;
+}
 
-  const projectCodeButton = event.target.closest(".project-code");
-  if (projectCodeButton) {
-    projectCodeButton.disabled = true;
-    const oldText = projectCodeButton.textContent;
-    projectCodeButton.textContent = "正在生成...";
-    publishProjectCode(card)
-      .catch((error) => {
-        console.warn("Project code publish failed", error);
-        projectCodeButton.textContent = oldText || "生成项目码";
-      })
-      .finally(() => {
-        projectCodeButton.disabled = false;
-      });
-  }
-});
-
-document.addEventListener("submit", (event) => {
-  if (!event.target.matches("#memoryComposer")) return;
-  event.preventDefault();
-  const content = memoryInput?.value.trim() || "";
-  if (!currentProject) return;
-  const memory = selectedNode
-    ? createMemoryFromNode(selectedNode, content)
-    : {
-        id: createMemoryId(),
-        type: memoryType?.value || "image",
-        title: createMemoryTitle(content),
-        content,
-        createdAt: new Date().toISOString(),
-      };
-  if (!memory.content && !memory.nodeSnapshot) return;
-  conversationMemories.unshift(memory);
-  memoryInput.value = "";
-  renderConversationMemories();
-  saveGlobalMemories();
-});
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest("#memoryList")) return;
-  const deleteButton = event.target.closest(".memory-delete");
-  if (deleteButton) {
-    event.stopPropagation();
-    conversationMemories = conversationMemories.filter((memory) => memory.id !== deleteButton.dataset.memoryId);
-    renderConversationMemories();
-    saveGlobalMemories();
-    return;
-  }
+.generation-record p {
+  max-height: 44px;
+  overflow: hidden;
+  margin: 0;
+  color: #cbd8e6;
+  font-size: 10px;
+  line-height: 1.35;
+}
 
-  const item = event.target.closest(".chat-item");
-  if (!item) return;
-  memoryList.querySelectorAll(".chat-item").forEach((button) => button.classList.toggle("active", button === item));
-  const memory = getMemoryById(item.dataset.memoryId) || {
-    type: item.dataset.type || "text",
-    title: item.dataset.title || "对话记忆",
-    content: item.dataset.content || "",
-  };
-  createNodeFromMemory(memory);
-});
-
-document.addEventListener("dragstart", (event) => {
-  const item = event.target.closest("#memoryList .chat-item");
-  if (!item || !event.dataTransfer) return;
-  event.dataTransfer.effectAllowed = "copy";
-  event.dataTransfer.setData("application/x-aivideobox-memory", item.dataset.memoryId || "");
-});
-
-canvas?.addEventListener("contextmenu", (event) => {
-  event.preventDefault();
-  const port = event.target.closest(".node-port");
-  const portNode = port?.closest(".node");
-  if (portNode) {
-    contextPort = port;
-    contextNode = portNode;
-    if (!selectedNodes.has(portNode)) selectNode(portNode);
-    renderPortConnectionMenu(port);
-    showMenu(portConnectionContextMenu, event.clientX, event.clientY);
-    contextPort = port;
-    contextNode = portNode;
-    return;
-  }
+.generation-favorite-button {
+  justify-self: start;
+  border: 1px solid rgba(245, 184, 50, 0.64);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: rgba(5, 10, 16, 0.72);
+  color: var(--yellow);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+}
 
-  const uploadWindow = event.target.closest(".image-upload-window");
-  const uploadNode = uploadWindow?.closest(".node");
-  if (uploadNode?.dataset.type === "image") {
-    contextUploadNode = uploadNode;
-    contextNode = uploadNode;
-    if (!selectedNodes.has(uploadNode)) selectNode(uploadNode);
-    showMenu(imageUploadContextMenu, event.clientX, event.clientY);
-    contextUploadNode = uploadNode;
-    contextNode = uploadNode;
-    return;
-  }
+.generated-placeholder {
+  display: grid;
+  min-height: 132px;
+  place-items: center;
+  border: 1px dashed rgba(22, 217, 245, 0.35);
+  border-radius: 8px;
+  background: rgba(22, 217, 245, 0.08);
+  color: var(--cyan);
+  font-size: 13px;
+  font-weight: 900;
+}
 
-  const node = event.target.closest(".node");
-  const canvasRect = canvasContent.getBoundingClientRect();
-  contextPoint = {
-    x: (event.clientX - canvasRect.left) / viewport.scale,
-    y: (event.clientY - canvasRect.top) / viewport.scale,
-  };
-
-  if (node) {
-    contextNode = node;
-    if (!selectedNodes.has(node)) selectNode(node);
-    syncNodeContextMenu(node);
-    showMenu(nodeContextMenu, event.clientX, event.clientY);
-    return;
-  }
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: none;
+  place-items: center;
+  padding: 28px;
+  overflow: auto;
+  background: rgba(1, 8, 16, 0.86);
+}
 
-  contextNode = null;
-  showMenu(canvasContextMenu, event.clientX, event.clientY);
-});
-
-canvasContextMenu?.addEventListener("click", (event) => {
-  const actionButton = event.target.closest("[data-canvas-action]");
-  if (actionButton?.dataset.canvasAction === "open-files" || actionButton?.dataset.canvasAction === "open-files-split") {
-    hideMenus();
-    canvasFileUploadMode = actionButton.dataset.canvasAction === "open-files-split" ? "split" : "ask";
-    if (canvasFilePicker) {
-      canvasFilePicker.value = "";
-      canvasFilePicker.click();
-    }
-    return;
-  }
+.image-viewer.show {
+  display: grid;
+}
 
-  const button = event.target.closest("[data-create-type]");
-  if (!button) return;
-
-  const type = button.dataset.createType;
-  const node = createNode({
-    id: createNodeId(),
-    type,
-    title: `${typeNames[type]}节点`,
-    content: nodeDefaults[type],
-    x: contextPoint.x,
-    y: contextPoint.y,
-  });
-  selectNode(node);
-  hideMenus();
-  saveCurrentProject();
-});
-
-nodeContextMenu?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-menu-action]");
-  if (!button || !contextNode) return;
-
-  const action = button.dataset.menuAction;
-  if (action.startsWith("type-")) {
-    const nextType = action.replace("type-", "");
-    getActionNodes(contextNode).forEach((node) => setNodeType(node, nextType));
-    saveCurrentProject();
-  } else if (action === "delete") {
-    if (selectedNodes.size > 1 && selectedNodes.has(contextNode)) {
-      deleteSelectedNodes();
-    } else {
-      deleteNode(contextNode);
-    }
-  } else if (action === "duplicate") {
-    getActionNodes(contextNode).forEach(duplicateNode);
-  } else if (action === "ungroup-folder") {
-    ungroupFolderNode(contextNode);
-  } else if (action === "run") {
-    getActionNodes(contextNode).forEach(runNode);
-  }
-  hideMenus();
-});
+.image-viewer img {
+  max-width: min(92vw, 1400px);
+  max-height: 88vh;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  transform-origin: center center;
+  transition: transform 120ms ease;
+  cursor: zoom-in;
+}
 
-function syncNodeContextMenu(node) {
-  const ungroupButton = nodeContextMenu?.querySelector('[data-menu-action="ungroup-folder"]');
-  if (ungroupButton) ungroupButton.hidden = node?.dataset.type !== "folder" || Boolean(activeFolder);
+.image-viewer-toolbar {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 501;
+  display: flex;
+  gap: 8px;
 }
 
-imageUploadContextMenu?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-upload-action]");
-  if (!button || !contextUploadNode) return;
-  event.preventDefault();
-  event.stopPropagation();
+.image-viewer-toolbar button {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: #eaf6ff;
+  background: rgba(10, 22, 34, 0.9);
+  cursor: pointer;
+}
 
-  if (button.dataset.uploadAction === "replace") {
-    contextUploadNode.querySelector(".node-file-input")?.click();
-  }
-  if (button.dataset.uploadAction === "delete") {
-    clearUploadedImages(contextUploadNode);
-  }
-  hideMenus();
-});
-
-portConnectionContextMenu?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-connection-index]");
-  if (!button || !contextPort) return;
-  event.preventDefault();
-  event.stopPropagation();
-
-  const connections = getConnectionsForPort(contextPort);
-  const connection = connections[Number(button.dataset.connectionIndex)];
-  if (connection?.path) {
-    connection.path.remove();
-    updateConnections();
-    saveCurrentProject();
-    refreshConnectionsSoon();
-  }
-  hideMenus();
-});
-
-document.addEventListener("click", (event) => {
-  const roleButton = event.target.closest(".image-role-button");
-  if (roleButton) {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleImageRoleMenu(roleButton.closest(".node"));
-    return;
-  }
+.image-viewer-toolbar button:hover {
+  border-color: rgba(22, 217, 245, 0.58);
+  color: var(--cyan);
+}
 
-  const roleOption = event.target.closest(".image-role-option");
-  if (roleOption) {
-    event.preventDefault();
-    event.stopPropagation();
-    const node = roleOption.closest(".node");
-    setImageRole(node, roleOption.dataset.role);
-    closeImageRoleMenus();
-    return;
-  }
+.image-viewer-nav {
+  position: fixed;
+  top: 50%;
+  z-index: 501;
+  width: 46px;
+  height: 64px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(10, 22, 34, 0.78);
+  color: #eaf6ff;
+  cursor: pointer;
+  font-size: 42px;
+  line-height: 1;
+  transform: translateY(-50%);
+}
 
-  const previewImage = event.target.closest(".upload-preview img, .config-input-thumb img");
-  if (previewImage) {
-    event.preventDefault();
-    event.stopPropagation();
-    openImageViewer(previewImage.src, getViewerSourcesForImage(previewImage));
-    return;
-  }
+.image-viewer-nav.prev {
+  left: 22px;
+}
 
-  const historyButton = event.target.closest(".output-history-button");
-  if (historyButton) {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleOutputHistory(historyButton.closest(".node"));
-    return;
-  }
+.image-viewer-nav.next {
+  right: 22px;
+}
 
-  if (!event.target.closest(".output-history-popover")) {
-    closeOutputHistoryPopovers();
-  }
+.image-viewer-nav:hover {
+  border-color: rgba(22, 217, 245, 0.58);
+  color: var(--cyan);
+}
 
-  const customButton = event.target.closest(".node-custom-button");
-  if (!customButton) return;
-  const node = customButton.closest(".node");
-  if (node?.dataset.type === "image" || node?.dataset.type === "video") {
-    openImageConfig(node);
-  }
-});
-
-closeImageViewer?.addEventListener("click", closeImageViewerPanel);
-
-exportGeneratedImagesButton?.addEventListener("click", () => {
-  openGeneratedImageExportPanel();
-});
-
-imageViewer?.addEventListener("click", (event) => {
-  if (event.target === imageViewer) closeImageViewerPanel();
-});
-
-imageViewer?.addEventListener("click", (event) => {
-  const zoomButton = event.target.closest("[data-image-zoom]");
-  const stepButton = event.target.closest("[data-image-step]");
-  if (zoomButton) {
-    event.preventDefault();
-    if (zoomButton.dataset.imageZoom === "in") setImageViewerScale(imageViewerScale + 0.25);
-    if (zoomButton.dataset.imageZoom === "out") setImageViewerScale(imageViewerScale - 0.25);
-    if (zoomButton.dataset.imageZoom === "reset") setImageViewerScale(1);
-  }
-  if (stepButton) {
-    event.preventDefault();
-    stepImageViewer(Number(stepButton.dataset.imageStep));
-  }
-});
-
-imageViewer?.addEventListener(
-  "wheel",
-  (event) => {
-    if (!imageViewer.classList.contains("show")) return;
-    event.preventDefault();
-    setImageViewerScale(imageViewerScale + (event.deltaY < 0 ? 0.15 : -0.15));
-  },
-  { passive: false },
-);
-
-document.addEventListener("keydown", (event) => {
-  if (!imageViewer?.classList.contains("show")) return;
-  if (event.key === "Escape") {
-    closeImageViewerPanel();
-  }
-  if (event.key === "ArrowLeft") {
-    event.preventDefault();
-    stepImageViewer(-1);
-  }
-  if (event.key === "ArrowRight") {
-    event.preventDefault();
-    stepImageViewer(1);
-  }
-});
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".context-menu")) hideMenus();
-  if (!event.target.closest(".image-role-picker")) closeImageRoleMenus();
-  closeFloatingPanelsOnOutsideClick(event);
-
-  const title = event.target.closest(".node-title strong");
-  if (title) {
-    event.stopPropagation();
-    startTitleEdit(title);
-    return;
-  }
+.config-input-strip {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
 
-  const node = event.target.closest(".node");
-  if (node && !event.target.closest(".node-port")) {
-    selectNode(node);
-  }
-});
-
-document.addEventListener("dblclick", (event) => {
-  const folderNode = event.target.closest('.node[data-type="folder"]');
-  if (!folderNode) return;
-  event.preventDefault();
-  event.stopPropagation();
-  enterFolder(folderNode);
-});
-
-function closeFloatingPanelsOnOutsideClick(event) {
-  const clickedConfig =
-    event.target.closest("#imageConfigPanel") ||
-    event.target.closest("#imageOptionsPopover") ||
-    event.target.closest("#referencePicker") ||
-    event.target.closest(".node-custom-button");
-
-  if (!clickedConfig && imageConfigPanel.classList.contains("show")) {
-    closeImageConfig();
-    return;
-  }
+.config-input-strip-title {
+  color: #9fb7cb;
+  font-size: 12px;
+  font-weight: 800;
+}
 
-  if (
-    imageOptionsPopover.classList.contains("show") &&
-    !event.target.closest("#imageOptionsPopover") &&
-    !event.target.closest("#openImageOptions")
-  ) {
-    imageOptionsPopover.classList.remove("show");
-    imageOptionsPopover.setAttribute("aria-hidden", "true");
-  }
+.config-input-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
 
-  if (
-    referencePicker.classList.contains("show") &&
-    !event.target.closest("#referencePicker") &&
-    !event.target.closest("#openReferencePicker")
-  ) {
-    referencePicker.classList.remove("show");
-    referencePicker.setAttribute("aria-hidden", "true");
-  }
+.config-input-thumb {
+  width: 76px;
+  border: 1px solid rgba(22, 217, 245, 0.28);
+  border-radius: 8px;
+  padding: 4px;
+  background: rgba(8, 16, 26, 0.92);
+  color: #dcecff;
+  cursor: zoom-in;
 }
 
-document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-video-setting]")) {
-    if (configNode?.dataset.type === "video") {
-      persistVideoSettingsFromPanel(configNode);
-      saveCurrentProject();
-    }
-    return;
-  }
+.config-input-thumb img,
+.config-input-thumb video {
+  display: block;
+  width: 66px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.32);
+}
 
-  if (event.target.matches("[data-video-asset]")) {
-    handleVideoAssetUpload(event.target);
-    return;
-  }
+.config-audio-thumb {
+  display: grid;
+  width: 66px;
+  height: 48px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(22, 217, 245, 0.12);
+  color: #dcecff;
+  font-size: 11px;
+  font-weight: 900;
+}
 
-  if (event.target.matches(".node-type-select")) {
-    const node = event.target.closest(".node");
-    if (node?.dataset.type === "image" && event.target.dataset.roleSelect === "true") {
-      setImageRole(node, event.target.value);
-    } else if (node?.dataset.type === "video" && event.target.dataset.videoModeSelect === "true") {
-      setVideoMode(node, event.target.value);
-    } else {
-      setNodeType(node, event.target.value);
-    }
-    saveCurrentProject();
-  }
-});
-
-submitImageConfig?.addEventListener("click", () => {
-  if (!configNode) return;
-  if (configNode.dataset.type === "video") {
-    const description = configNode.querySelector(".node-description");
-    description.textContent = imagePromptInput.value;
-    persistVideoSettingsFromPanel(configNode);
-    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect?.value);
-    saveCurrentProject();
-    runVideoGeneration(configNode);
-    return;
-  }
-  if (imageGenerationControllers.has(configNode.id)) {
-    cancelImageGeneration(configNode);
-    return;
-  }
-  const description = configNode.querySelector(".node-description");
-  description.textContent = imagePromptInput.value;
-  configNode.dataset.imagePurpose = imageOptions.purpose;
-  configNode.dataset.referenceMode = imageOptions.referenceMode;
-  configNode.dataset.imageRole = imageOptions.imageRole;
-  delete configNode.dataset.imageRatio;
-  delete configNode.dataset.imageResolution;
-  configNode.dataset.imageQuality = imageOptions.quality;
-  configNode.dataset.imageModel = imageModelSelect?.value || "gpt-image-2-official";
-  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || "apimart");
-  configNode.dataset.apimartChannel = "b";
-  saveCurrentProject();
-  runImageGeneration(configNode);
-});
-
-openImageOptions?.addEventListener("click", () => {
-  imageOptionsPopover.classList.toggle("show");
-  imageOptionsPopover.setAttribute("aria-hidden", imageOptionsPopover.classList.contains("show") ? "false" : "true");
-});
-
-imageOptionsPopover?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-value]");
-  if (!button) return;
-  const group = button.closest("[data-option-group]").dataset.optionGroup;
-  imageOptions[group] = button.dataset.value;
-  button.closest(".option-grid").querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
-  persistImageConfigOptions();
-  syncImageOptionsSummary();
-  saveImageOptions();
-});
-
-
-imageModelSelect?.addEventListener("change", () => {
-  if (!configNode) return;
-  if (configNode.dataset.type === "video") {
-    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect.value);
-    saveCurrentProject();
-    return;
-  }
-  configNode.dataset.imageModel = imageModelSelect.value || "gpt-image-2-official";
-  syncImageOptionsUi();
-  saveCurrentProject();
-});
-
-imageProviderSelect?.addEventListener("change", () => {
-  if (!configNode || configNode.dataset.type !== "image") return;
-  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
-  if (configNode.dataset.imageProvider === "rhart") {
-    configNode.dataset.imageModel = "gpt-image-2";
-    if (imageModelSelect) imageModelSelect.value = "gpt-image-2";
-  }
-  syncImageOptionsUi();
-  saveCurrentProject();
-});
-
-openReferencePicker?.addEventListener("click", () => {
-  if (!configNode) return;
-  renderReferencePicker();
-  referencePicker.classList.add("show");
-  referencePicker.setAttribute("aria-hidden", "false");
-});
-
-referenceList?.addEventListener("click", (event) => {
-  const item = event.target.closest("[data-reference-node]");
-  if (!item) return;
-  imagePromptInput.value += `\n引用画布节点：${item.dataset.referenceNode}`;
-  const sourceNode = [...canvasContent.querySelectorAll(".node")].find((node) => {
-    return node.querySelector(".node-title strong")?.textContent === item.dataset.referenceNode;
-  });
-  const sourceImages = getNodeImageSources(sourceNode);
-  const sourceInlineImages = getNodeImageSources(sourceNode, { preferData: true }).filter((value) => /^data:image\//i.test(value));
-  if (configNode && sourceImages.length) {
-    configNode.dataset.referenceImageUrls = JSON.stringify(sourceImages);
-    configNode.dataset.referenceImageDataUrl = sourceImages[0];
-    if (sourceInlineImages.length) {
-      configNode.dataset.referenceImageDataUrls = JSON.stringify(sourceInlineImages);
-      configNode.dataset.referenceImageDataInlineUrl = sourceInlineImages[0];
-    }
-    configNode.dataset.referenceFileName = item.dataset.referenceNode;
-  }
-  referencePicker.classList.remove("show");
-  referencePicker.setAttribute("aria-hidden", "true");
-  saveCurrentProject();
-});
-
-addLocalReference?.addEventListener("change", async () => {
-  const file = addLocalReference.files?.[0];
-  if (!file) return;
-  imagePromptInput.value += `\n参考本地文件：${file.name}`;
-  if (configNode && file.type.startsWith("image/")) {
-    configNode.dataset.referenceFileName = file.name;
-    const url = await uploadImageFile(file);
-    const inlineDataUrl = await fileToDataUrl(file);
-    const current = parseJsonArray(configNode.dataset.referenceImageUrls);
-    const next = uniqueValues([...current, url]);
-    configNode.dataset.referenceImageUrls = JSON.stringify(next);
-    configNode.dataset.referenceImageDataUrl = next[0] || "";
-    const currentInline = parseJsonArray(configNode.dataset.referenceImageDataUrls);
-    const nextInline = uniqueValues([...currentInline, inlineDataUrl]);
-    configNode.dataset.referenceImageDataUrls = JSON.stringify(nextInline);
-    configNode.dataset.referenceImageDataInlineUrl = nextInline[0] || "";
-  } else if (configNode && file.type.startsWith("video/")) {
-    configNode.dataset.referenceFileName = file.name;
-    const url = await uploadMediaFile(file);
-    const current = parseJsonArray(configNode.dataset.referenceVideoUrls);
-    const next = uniqueValues([...current, url]);
-    configNode.dataset.referenceVideoUrls = JSON.stringify(next);
-    configNode.dataset.referenceVideoUrl = next[0] || "";
-  }
-  referencePicker.classList.remove("show");
-  referencePicker.setAttribute("aria-hidden", "true");
-  saveCurrentProject();
-});
-
-async function handleVideoAssetUpload(input) {
-  if (!configNode || configNode.dataset.type !== "video") return;
-  const file = input.files?.[0];
-  if (!file) return;
-  const slot = input.dataset.videoAsset;
-  const label = input.closest(".video-asset-picker")?.querySelector("small");
-  if (label) label.textContent = "上传中...";
-
-  try {
-    const url = file.type.startsWith("image/") ? await uploadImageFile(file) : await uploadMediaFile(file);
-    if (slot === "firstFrame") {
-      configNode.dataset.videoFirstFrameUrl = url;
-      configNode.dataset.referenceImageUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceImageUrls)]));
-    } else if (slot === "lastFrame") {
-      configNode.dataset.videoLastFrameUrl = url;
-      configNode.dataset.referenceImageUrls = JSON.stringify(uniqueValues([...parseJsonArray(configNode.dataset.referenceImageUrls), url]));
-    } else if (slot === "referenceVideo") {
-      configNode.dataset.referenceVideoUrl = url;
-      configNode.dataset.referenceVideoUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceVideoUrls)]));
-    } else if (slot === "referenceAudio") {
-      configNode.dataset.videoReferenceAudioUrl = url;
-      configNode.dataset.videoReferenceAudioUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.videoReferenceAudioUrls)]));
-    }
-    if (label) label.textContent = file.name;
-    renderConfigInputThumbnails(configNode);
-    saveCurrentProject();
-  } catch (error) {
-    if (label) label.textContent = `上传失败：${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    input.value = "";
-  }
+.config-input-thumb span {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-document.addEventListener("input", (event) => {
-  if (!event.target.matches(".text-input, .mini-textarea, .text-brief-field")) return;
-  const node = event.target.closest(".node");
-  const description = node?.querySelector(".node-description");
-  if (description) description.textContent = getNodeContent(node);
-  saveCurrentProject();
-});
-
-document.addEventListener("change", (event) => {
-  if (!event.target.matches(".node-file-input")) return;
-  const node = event.target.closest(".node");
-  const files = [...(event.target.files || [])];
-  if (!node || !files.length) return;
-
-  if (node.dataset.type === "image") {
-    uploadFilesToImageNode(node, files);
-    return;
-  }
+.api-panel select {
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #080d14;
+  color: var(--text);
+}
 
-  if (node.dataset.type === "video") {
-    uploadFilesToVideoNode(node, files);
-    return;
-  }
-});
-
-canvasFilePicker?.addEventListener("change", () => {
-  const imageFiles = [...(canvasFilePicker.files || [])].filter((file) => file.type.startsWith("image/"));
-  const uploadMode = canvasFileUploadMode;
-  canvasFileUploadMode = "ask";
-  canvasFilePicker.value = "";
-  if (!imageFiles.length) return;
-
-  const imageRole = askCanvasUploadImageRole();
-  if (!imageRole) return;
-
-  if (imageFiles.length === 1) {
-    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
+.video-config-hidden {
+  display: none !important;
+}
 
-  if (uploadMode === "split") {
-    createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
+.video-settings-panel {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #111114;
+  padding: 14px 20px 16px;
+}
 
-  const mergeIntoOne = window.confirm("检测到多张图片。\n\n确定：上传到一个图片节点\n取消：每张图片分成单独节点");
-  if (mergeIntoOne) {
-    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
+.video-settings-grid,
+.video-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
 
-  createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-});
-
-function createImageNodesFromFilesAtPoint(files, point, imageRole = "general") {
-  const spacingX = 310;
-  const spacingY = 290;
-  files.forEach((file, index) => {
-    const nodePoint = {
-      x: point.x + (index % 3) * spacingX,
-      y: point.y + Math.floor(index / 3) * spacingY,
-    };
-    createImageInputNodeFromFilesAtPoint([file], nodePoint, imageRole);
-  });
-}
-
-canvas?.addEventListener("dragenter", (event) => {
-  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
-  event.preventDefault();
-  canvasDragDepth += 1;
-  canvas.classList.add("drag-over");
-});
-
-canvas?.addEventListener("dragover", (event) => {
-  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-  canvas.classList.add("drag-over");
-});
-
-canvas?.addEventListener("dragleave", (event) => {
-  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
-  canvasDragDepth = Math.max(0, canvasDragDepth - 1);
-  if (!canvasDragDepth) canvas.classList.remove("drag-over");
-});
-
-canvas?.addEventListener("drop", (event) => {
-  const memoryId = event.dataTransfer?.getData("application/x-aivideobox-memory");
-  if (memoryId) {
-    const memory = getMemoryById(memoryId);
-    if (memory) {
-      event.preventDefault();
-      canvasDragDepth = 0;
-      canvas.classList.remove("drag-over");
-      const point = clientPointToWorldPoint(event.clientX, event.clientY);
-      createNodeFromMemory(memory, point);
-    }
-    return;
-  }
-  const imageFiles = getImageFilesFromDataTransfer(event.dataTransfer);
-  const videoFiles = getVideoFilesFromDataTransfer(event.dataTransfer);
-  if (!imageFiles.length && !videoFiles.length) return;
-  event.preventDefault();
-  canvasDragDepth = 0;
-  canvas.classList.remove("drag-over");
-  if (videoFiles.length) {
-    createVideoInputNodeFromDrop(videoFiles, event.clientX, event.clientY);
-    return;
-  }
-  createImageInputNodeFromDrop(imageFiles, event.clientX, event.clientY);
-});
-
-document.addEventListener(
-  "mousedown",
-  (event) => {
-    if (event.button !== 0) return;
-    const port = event.target.closest(".node-port");
-    if (!port) return;
-    const node = port.closest(".node");
-    if (!node) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    startWire(node, port, event);
-  },
-  true,
-);
-
-canvas?.addEventListener("mousedown", (event) => {
-  if (event.target.closest(".node-port, button, select, textarea")) return;
-  if (event.button === 1) {
-    event.preventDefault();
-    panState = {
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: viewport.x,
-      originY: viewport.y,
-    };
-    canvas.classList.add("panning");
-    return;
-  }
-  if (event.button !== 0) return;
-
-  const node = event.target.closest(".node");
-  if (!node) {
-    pendingCanvasDrag = {
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: viewport.x,
-      originY: viewport.y,
-      startedAt: Date.now(),
-      mode: "",
-    };
-    return;
-  }
+.video-settings-grid label,
+.video-asset-picker {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: #18181b;
+  padding: 10px;
+}
 
-  const rect = node.getBoundingClientRect();
-  if (!selectedNodes.has(node)) selectNode(node);
-  dragState = {
-    node,
-    nodes: selectedNodes.size ? [...selectedNodes] : [node],
-    offsetX: (event.clientX - rect.left) / viewport.scale,
-    offsetY: (event.clientY - rect.top) / viewport.scale,
-    startX: event.clientX,
-    startY: event.clientY,
-    origins: new Map((selectedNodes.size ? [...selectedNodes] : [node]).map((item) => [
-      item,
-      {
-        x: Number(item.dataset.x) || 0,
-        y: Number(item.dataset.y) || 0,
-      },
-    ])),
-  };
-});
-
-canvas?.addEventListener("auxclick", (event) => {
-  if (event.button === 1) event.preventDefault();
-});
-
-document.addEventListener("mousemove", (event) => {
-  if (wireState) {
-    updateTempWire(event);
-    highlightNearestPort(event);
-    return;
-  }
+.video-settings-grid span,
+.video-asset-picker span {
+  overflow: hidden;
+  color: #aeb8c6;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-  if (panState) {
-    viewport.x = panState.originX + event.clientX - panState.startX;
-    viewport.y = panState.originY + event.clientY - panState.startY;
-    applyViewport();
-    return;
-  }
+.video-settings-grid input,
+.video-settings-grid select {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #0c0c0f;
+  color: var(--text);
+  padding: 0 9px;
+}
 
-  if (pendingCanvasDrag) {
-    const dx = event.clientX - pendingCanvasDrag.startX;
-    const dy = event.clientY - pendingCanvasDrag.startY;
-    const distance = Math.hypot(dx, dy);
-    if (!pendingCanvasDrag.mode && distance > 4) {
-      pendingCanvasDrag.mode = "select";
-      startSelectionBoxFromPoint(pendingCanvasDrag.startX, pendingCanvasDrag.startY);
-    }
-    if (pendingCanvasDrag.mode === "pan") {
-      viewport.x = pendingCanvasDrag.originX + dx;
-      viewport.y = pendingCanvasDrag.originY + dy;
-      applyViewport();
-      return;
-    }
-    if (pendingCanvasDrag.mode === "select") {
-      updateSelectionBox(event);
-      return;
-    }
-  }
+.video-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
-  if (selectionBoxState) {
-    updateSelectionBox(event);
-    return;
-  }
+.video-toggle-row label {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: #242428;
+  color: #d5d8df;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
 
-  if (!dragState) return;
-  const dx = (event.clientX - dragState.startX) / viewport.scale;
-  const dy = (event.clientY - dragState.startY) / viewport.scale;
-  dragState.nodes.forEach((node) => {
-    const origin = dragState.origins.get(node);
-    moveNode(node, origin.x + dx, origin.y + dy);
-  });
-  updateConnections();
-});
-
-document.addEventListener("mouseup", (event) => {
-  if (wireState) {
-    finishWire(event);
-    return;
-  }
+.video-asset-picker {
+  cursor: pointer;
+}
 
-  const finishedSelection = pendingCanvasDrag?.mode === "select" && selectionBoxState;
-  if (finishedSelection) finishSelectionBox(event);
-  if (pendingCanvasDrag && !pendingCanvasDrag.mode) selectNode(null);
-  pendingCanvasDrag = null;
-  if (!finishedSelection && selectionBoxState) finishSelectionBox(event);
-  if (dragState) saveCurrentProject();
-  dragState = null;
-  panState = null;
-  canvas?.classList.remove("panning");
-});
-
-canvas?.addEventListener(
-  "wheel",
-  (event) => {
-    event.preventDefault();
-    zoomCanvas(event.deltaY > 0 ? 0.9 : 1.1, event.clientX, event.clientY);
-  },
-  { passive: false },
-);
-
-canvasToolbar?.addEventListener("mousedown", (event) => {
-  event.stopPropagation();
-});
-
-arrangeCanvasNodes?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  arrangeNodes();
-});
-
-createFolderFromSelection?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  createFolderFromSelectedNodes();
-});
-
-exitFolderCanvas?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  exitFolder();
-});
-
-folderExitTop?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  exitFolder();
-});
-
-resetCanvasView?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  resetViewport();
-});
-
-zoomCanvasOut?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  zoomCanvas(0.9);
-});
-
-zoomCanvasIn?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  zoomCanvas(1.1);
-});
-
-window.addEventListener(
-  "keydown",
-  (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      saveCurrentProject();
-      saveProjectList();
-    }
-
-  if (event.key === "Escape") {
-    hideMenus();
-    closeImageConfig();
-    selectNode(null);
-  }
+.video-asset-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
 
-    if ((event.key === "Backspace" || event.key === "Delete") && selectedNodes.size) {
-      if (isTextEditingTarget(event.target)) return;
-      event.preventDefault();
-      deleteSelectedNodes();
-    }
-  },
-  true,
-);
-
-window.addEventListener("beforeunload", () => {
-  saveCurrentProject();
-  saveProjectList();
-});
-
-function showPage(name) {
-  if (!name) return;
-  pages.forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
-  navItems.forEach((item) => item.classList.toggle("active", item.dataset.page === name));
-  applyWorkspaceSidebarsState();
-}
-
-function upsertProject(name) {
-  if (!projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`)) {
-    addProjectCard(name);
-  }
-  updateProjectGridState();
-  saveProjectList();
-}
-
-function createFreshProject(baseName) {
-  const name = uniqueProjectName(baseName);
-  localStorage.removeItem(projectKey(name));
-  localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [] }));
-  addProjectCard(name);
-  updateProjectGridState();
-  saveProjectList();
-  setTimeout(saveProjectList, 800);
-  return name;
-}
-
-function uniqueProjectName(baseName) {
-  const existing = new Set([...projectGrid.querySelectorAll(".project-card")].map((card) => card.dataset.project));
-  if (!existing.has(baseName)) return baseName;
-  let index = 2;
-  while (existing.has(`${baseName} ${index}`)) index += 1;
-  return `${baseName} ${index}`;
-}
-
-function startProjectNameEdit(card) {
-  const titleEl = card.querySelector(".project-name");
-  if (!titleEl || card.querySelector(".project-name-input")) return;
-
-  const oldName = card.dataset.project || titleEl.textContent.trim();
-  const input = document.createElement("input");
-  input.className = "project-name-input";
-  input.value = oldName;
-  titleEl.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const commit = () => {
-    const rawName = input.value.trim();
-    let nextName = rawName || oldName;
-    if (nextName !== oldName) {
-      nextName = uniqueProjectNameExcept(nextName, oldName);
-      renameProject(oldName, nextName, card);
-    }
-
-    const strong = document.createElement("strong");
-    strong.className = "project-name";
-    strong.title = "点击重命名";
-    strong.textContent = nextName;
-    input.replaceWith(strong);
-  };
-
-  input.addEventListener("blur", commit, { once: true });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      input.blur();
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      input.value = oldName;
-      input.blur();
-    }
-  });
-}
-
-function uniqueProjectNameExcept(baseName, ignoredName) {
-  const existing = new Set(
-    [...projectGrid.querySelectorAll(".project-card")]
-      .map((card) => card.dataset.project)
-      .filter((name) => name !== ignoredName),
-  );
-  if (!existing.has(baseName)) return baseName;
-  let index = 2;
-  while (existing.has(`${baseName} ${index}`)) index += 1;
-  return `${baseName} ${index}`;
-}
-
-function renameProject(oldName, nextName, card) {
-  if (!oldName || !nextName || oldName === nextName) return;
-  const oldKey = projectKey(oldName);
-  const nextKey = projectKey(nextName);
-  const savedProject = localStorage.getItem(oldKey);
-  if (savedProject !== null) {
-    localStorage.setItem(nextKey, savedProject);
-    localStorage.removeItem(oldKey);
-  }
-  card.dataset.project = nextName;
-  const openButton = card.querySelector("[data-open-project]");
-  if (openButton) openButton.dataset.openProject = nextName;
-  if (currentProject === oldName) {
-    currentProject = nextName;
-    workspaceProjectName.textContent = nextName;
-  }
-  if (card.dataset.code) {
-    const index = readProjectCodeIndex();
-    index[card.dataset.code] = nextName;
-    writeProjectCodeIndex(index);
-  }
-  saveProjectList();
-}
-
-function addProjectCard(name, date = new Date().toLocaleDateString("zh-CN"), code = "") {
-  const projectCode = normalizeProjectCode(code);
-  const thumbnail = getProjectThumbnailFromLocal(name);
-  const stats = getProjectStorageStats(name);
-  const card = document.createElement("article");
-  card.className = "project-card";
-  card.dataset.project = name;
-  if (projectCode) card.dataset.code = projectCode;
-  card.innerHTML = `
-    <div class="project-row">
-      <div class="folder-icon"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z" /></svg></div>
-      <div>
-        <strong class="project-name" title="点击重命名">${escapeHtml(name)}</strong>
-        <span>${escapeHtml(date)}</span>
-        <small>${escapeHtml(`节点 ${stats.nodes} / 备份 ${stats.backupNodes}`)}</small>
-      </div>
-    </div>
-    <div class="project-thumb ${thumbnail ? "has-image" : ""}" data-project-thumb>
-      ${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="">` : `<span>暂无预览图</span>`}
-    </div>
-    <button class="open-canvas" data-open-project="${escapeHtml(name)}" type="button">开始项目</button>
-    <button class="project-code" type="button">${escapeHtml(projectCode ? `项目码 ${projectCode}` : "生成项目码")}</button>
-    <button class="delete-project" type="button">删除</button>
-  `;
-  projectGrid.prepend(card);
-  updateProjectGridState();
-}
-
-function getProjectStorageStats(name) {
-  const data = readJson(projectKey(name), null);
-  const backup = readJson(`${projectKey(name)}.backup`, null);
-  return {
-    nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
-    backupNodes: Array.isArray(backup?.nodes) ? backup.nodes.length : 0,
-  };
-}
-
-function getProjectThumbnailFromLocal(name) {
-  return getProjectThumbnail(readJson(projectKey(name), null));
-}
-
-function getProjectThumbnail(data) {
-  if (!data || !Array.isArray(data.nodes)) return "";
-  const candidates = [];
-  data.nodes.forEach((node) => collectNodeThumbnailCandidates(node, candidates));
-  return candidates.find(isRemoteImageUrl) || candidates.find((value) => typeof value === "string" && value.startsWith("data:image/")) || "";
-}
-
-function collectNodeThumbnailCandidates(node, candidates) {
-  if (!node) return;
-  candidates.push(
-    node.generatedImageUrl,
-    ...arrayOrEmpty(node.generatedImageUrls),
-    ...arrayOrEmpty(node.imageUrls),
-    node.imageDataUrl,
-    ...arrayOrEmpty(node.referenceImageUrls),
-    node.referenceImageDataUrl,
-  );
-  arrayOrEmpty(node.folderNodes).forEach((child) => collectNodeThumbnailCandidates(child, candidates));
-}
-
-function arrayOrEmpty(value) {
-  return Array.isArray(value) ? value.filter(Boolean) : [];
-}
-
-function updateProjectCardThumbnail(name, data) {
-  const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
-  const thumb = card?.querySelector("[data-project-thumb]");
-  if (!thumb) return;
-  const image = getProjectThumbnail(data);
-  thumb.classList.toggle("has-image", Boolean(image));
-  thumb.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="">` : "<span>暂无预览图</span>";
-}
-
-function saveProjectList() {
-  const projects = [...projectGrid.querySelectorAll(".project-card")].map((card) => ({
-    name: card.dataset.project,
-    date: card.querySelector(".project-row span")?.textContent || "",
-    code: card.dataset.code || normalizeProjectCode(card.querySelector(".project-code")?.textContent) || "",
-  }));
-  try {
-    localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects));
-  } catch (error) {
-    console.error("Project list save failed", error);
-  }
+.video-asset-picker small {
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  color: #d5d8df;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-function loadProjectList() {
-  const saved = readJson(PROJECT_LIST_KEY, []);
-  const projects = repairProjectListFromStorage(Array.isArray(saved) ? saved : []);
-  projectGrid.innerHTML = "";
-  projects.reverse().forEach((project) => addProjectCard(project.name, project.date, project.code));
-  try {
-    localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects.slice().reverse()));
-  } catch (error) {
-    console.warn("Project list repair save failed", error);
-  }
-  rebuildProjectCodeIndex();
-  updateProjectGridState();
-}
-
-function repairProjectListFromStorage(projects) {
-  const byName = new Map(projects.map((project) => [String(project?.name || ""), project]));
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("aivideobox.project.v2:")) continue;
-    const name = key.slice("aivideobox.project.v2:".length).replace(/\.backup$/, "");
-    if (!name || byName.has(name)) continue;
-    const data = readJson(key, null);
-    if (!data || !Array.isArray(data.nodes)) continue;
-    byName.set(name, {
-      name,
-      date: new Date().toLocaleDateString("zh-CN"),
-      code: "",
-    });
-  }
-  return [...byName.values()].filter((project) => project?.name);
+.mini-textarea {
+  min-height: 62px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
+.node-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
 
-async function loadSharedProjectList() { return; }
+.node-actions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0b111a;
+  color: #b8c9dc;
+  font-size: 12px;
+}
 
-function refreshProjectThumbnails(projects) { return; }
+.node-port {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid #9fb2c8;
+  border-radius: 999px;
+  background: #111a25;
+  transform: translateY(-50%);
+  z-index: 5;
+  cursor: crosshair;
+  touch-action: none;
+}
 
-async function loadSharedProjectThumbnail(name) { return; }
+.node-port.in {
+  left: -10px;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 4px rgba(22, 217, 245, 0.12);
+}
 
-async function saveSharedProjectList(projects) { return; }
+.node-port.out {
+  right: -10px;
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px rgba(49, 223, 181, 0.12);
+}
 
-function mergeProjectLists(localProjects = [], sharedProjects = [], deletedNames = []) {
-  const deleted = new Set(deletedNames.map((name) => String(name || "")));
-  const byName = new Map();
-  [...sharedProjects, ...localProjects].forEach((project) => {
-    const name = String(project?.name || "").trim();
-    if (!name || deleted.has(name)) return;
-    byName.set(name, {
-      name,
-      date: project.date || new Date().toLocaleDateString("zh-CN"),
-      code: project.code || "",
-    });
-  });
-  return [...byName.values()];
+.node-port:hover {
+  transform: translateY(-50%) scale(1.18);
+  box-shadow: 0 0 0 7px rgba(22, 217, 245, 0.16);
 }
 
-function deleteProject(name) {
-  const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
-  const code = card?.dataset.code;
-  card?.remove();
-  localStorage.removeItem(projectKey(name));
-  if (code) removeProjectCode(code);
-  if (currentProject === name) {
-    currentProject = "";
-    clearCanvas();
-  }
-  updateProjectGridState();
-  saveProjectList();
-}
-
-async function publishProjectCode(card) {
-  if (!card) return "";
-  const name = card.dataset.project;
-  if (currentProject === name) saveCurrentProject();
-  const code = card.dataset.code || createUniqueProjectCode();
-  card.dataset.code = code;
-  const button = card.querySelector(".project-code");
-  if (button) button.textContent = `项目码 ${code}`;
-  const index = readProjectCodeIndex();
-  index[code] = name;
-  writeProjectCodeIndex(index);
-  saveProjectList();
-
-  const data = readJson(projectKey(name), null);
-  if (hasProjectNodes(data)) {
-    const shareableData = await ensureSharedProjectImages(name, data);
-    await saveSharedProject(code, name, shareableData || data);
-  }
-  return code;
-}
-
-async function cloneProjectByCode(code) {
-  const normalized = normalizeProjectCode(code);
-  if (!normalized) return "";
-  const localName = findProjectNameByCode(normalized);
-  let sourceName = localName;
-  let sourceData = localName ? localStorage.getItem(projectKey(localName)) : "";
-
-  if (!sourceData) {
-    const shared = await loadSharedProjectByCode(normalized);
-    if (!shared?.data || !hasProjectNodes(shared.data)) return "";
-    sourceName = shared.name || `项目 ${normalized}`;
-    sourceData = JSON.stringify(shared.data);
-  }
+.node-port.connect-target {
+  transform: translateY(-50%) scale(1.28);
+  box-shadow: 0 0 0 8px rgba(245, 184, 50, 0.2);
+  border-color: var(--yellow);
+}
 
-  const name = uniqueProjectName(`${sourceName} 副本`);
-  localStorage.setItem(projectKey(name), sourceData);
-  addProjectCard(name, new Date().toLocaleDateString("zh-CN"));
-  updateProjectGridState();
-  saveProjectList();
-  return name;
-}
-
-function findProjectNameByCode(code) {
-  const normalized = normalizeProjectCode(code);
-  if (!normalized) return "";
-  const card = [...projectGrid.querySelectorAll(".project-card")].find((item) => item.dataset.code === normalized);
-  if (card) return card.dataset.project || "";
-  return readProjectCodeIndex()[normalized] || "";
-}
-
-function createUniqueProjectCode() {
-  const used = new Set([
-    ...Object.keys(readProjectCodeIndex()),
-    ...[...projectGrid.querySelectorAll(".project-card")].map((card) => card.dataset.code).filter(Boolean),
-  ]);
-  let code = "";
-  do {
-    code = Math.random().toString(36).slice(2, 8).toUpperCase();
-  } while (used.has(code));
-  return code;
-}
-
-function normalizeProjectCode(value = "") {
-  return String(value).replace(/^项目码\s*/i, "").replace(/\s+/g, "").toUpperCase();
-}
-
-function markProjectCodeInput(message) {
-  if (!projectCodeInput) return;
-  projectCodeInput.value = "";
-  projectCodeInput.placeholder = message;
-  projectCodeInput.classList.add("invalid");
-  setTimeout(() => {
-    projectCodeInput.classList.remove("invalid");
-    projectCodeInput.placeholder = "输入项目码";
-  }, 1400);
-}
-
-function readProjectCodeIndex() {
-  const index = readJson(PROJECT_CODE_INDEX_KEY, {});
-  return index && typeof index === "object" && !Array.isArray(index) ? index : {};
-}
-
-function writeProjectCodeIndex(index) {
-  try {
-    localStorage.setItem(PROJECT_CODE_INDEX_KEY, JSON.stringify(index));
-  } catch (error) {
-    console.error("Project code index save failed", error);
-  }
+.node.selected {
+  outline: 2px solid rgba(22, 217, 245, 0.58);
+  outline-offset: 2px;
 }
 
-function removeProjectCode(code) {
-  const index = readProjectCodeIndex();
-  delete index[normalizeProjectCode(code)];
-  writeProjectCodeIndex(index);
-}
-
-function rebuildProjectCodeIndex() {
-  const index = readProjectCodeIndex();
-  [...projectGrid.querySelectorAll(".project-card")].forEach((card) => {
-    if (card.dataset.code) index[card.dataset.code] = card.dataset.project;
-  });
-  writeProjectCodeIndex(index);
-}
-
-function updateProjectGridState() {
-  projectGrid?.classList.toggle("empty", !projectGrid.querySelector(".project-card"));
-}
-
-function openProject(name) {
-  if (currentProject) saveCurrentProject();
-  activeFolder = null;
-  ensureMemoryUi();
-  loadGlobalMemories();
-  currentProject = name;
-  workspaceProjectName.textContent = name;
-  document.querySelectorAll(".project-card").forEach((card) => {
-    card.classList.toggle("active", card.dataset.project === name);
-  });
-  clearCanvas();
-  restoreProject(name);
-  syncFolderUi();
-  showPage("workspace");
-  refreshConnectionsSoon();
-}
-
-function ensureMemoryUi() {
-  const panel = document.querySelector(".conversation-panel");
-  if (!panel) return;
-  panel.style.display = "flex";
-
-  if (!memoryComposer) {
-    memoryComposer = document.createElement("form");
-    memoryComposer.className = "memory-composer";
-    memoryComposer.id = "memoryComposer";
-    memoryComposer.innerHTML = `
-      <textarea id="memoryInput" placeholder="记录一条对话、需求或提示词..."></textarea>
-      <div class="memory-actions">
-        <select id="memoryType">
-          <option value="image">图片</option>
-          <option value="text">文本</option>
-          <option value="video">视频</option>
-        </select>
-        <button class="yellow-button" type="submit">保存记忆</button>
-      </div>
-    `;
-    const chatList = panel.querySelector(".chat-list");
-    panel.insertBefore(memoryComposer, chatList || null);
-  }
+.selection-box {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  border: 1px solid rgba(22, 217, 245, 0.85);
+  background: rgba(22, 217, 245, 0.12);
+  box-shadow: 0 0 0 1px rgba(22, 217, 245, 0.18) inset;
+}
 
-  if (!memoryList) {
-    memoryList = panel.querySelector(".chat-list") || document.createElement("div");
-    memoryList.classList.add("chat-list");
-    memoryList.id = "memoryList";
-    if (!memoryList.parentElement) panel.appendChild(memoryList);
-  }
+.node.linking {
+  outline: 2px solid rgba(245, 184, 50, 0.75);
+  outline-offset: 2px;
+}
 
-  memoryInput = document.querySelector("#memoryInput");
-  memoryType = document.querySelector("#memoryType");
-  ensureWorkspaceSidebarsToggle();
-}
-
-function ensureWorkspaceSidebarsToggle() {
-  if (!appShell || appShell.querySelector("#toggleWorkspaceSidebars")) return;
-  const button = document.createElement("button");
-  button.id = "toggleWorkspaceSidebars";
-  button.type = "button";
-  button.className = "workspace-side-toggle";
-  appShell.appendChild(button);
-  button.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  button.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    workspaceSidebarsHidden = !workspaceSidebarsHidden;
-    localStorage.setItem(WORKSPACE_SIDE_STATE_KEY, String(workspaceSidebarsHidden));
-    applyWorkspaceSidebarsState();
-    refreshConnectionsSoon();
-  });
-  applyWorkspaceSidebarsState();
-}
-
-function applyWorkspaceSidebarsState() {
-  const layout = document.querySelector(".workspace-layout");
-  const workspaceActive = document.querySelector("#page-workspace")?.classList.contains("active");
-  appShell?.classList.toggle("workspace-sidebars-hidden", workspaceSidebarsHidden && workspaceActive);
-  layout?.classList.toggle("sidebars-hidden", workspaceSidebarsHidden);
-  const toggle = document.querySelector("#toggleWorkspaceSidebars");
-  if (toggle) {
-    toggle.classList.toggle("is-hidden-state", workspaceSidebarsHidden);
-    toggle.hidden = !workspaceActive;
-    toggle.textContent = workspaceSidebarsHidden ? "显示左侧" : "隐藏左侧";
-    toggle.title = workspaceSidebarsHidden ? "显示目录和保存记忆" : "隐藏目录和保存记忆";
-  }
+.node.running {
+  border-color: rgba(245, 184, 50, 0.85);
 }
 
-function createNodeFromMemory(memory, point = null) {
-  const offset = Math.min(420, conversationMemories.length * 18);
-  const center = point || getCanvasViewportCenterPoint();
-  if (memory.nodeSnapshot) {
-    const snapshot = {
-      ...memory.nodeSnapshot,
-      id: createNodeId(),
-      title: memory.title || memory.nodeSnapshot.title || "记忆节点",
-      x: center.x - 129,
-      y: center.y - 110,
-    };
-    const node = createNode(snapshot);
-    hydrateRestoredNodeData(node, snapshot);
-    selectNode(node);
-    saveCurrentProject();
-    refreshConnectionsSoon();
-    return node;
-  }
-  const node = createNode({
-    id: createNodeId(),
-    type: memory.type || "text",
-    title: memory.title || `${typeNames[memory.type] || "文本"}记忆`,
-    content: memory.content || "",
-    x: center.x - 129 + offset,
-    y: center.y - 110 + offset,
-  });
-  selectNode(node);
-  saveCurrentProject();
-  return node;
-}
-
-function createMemoryFromNode(node, note = "") {
-  const snapshot = stripMediaFromNodeSnapshot(serializeNodes([node])[0]);
-  const title = note.trim() || snapshot.title || node.querySelector(".node-title strong")?.textContent || "节点记忆";
-  return {
-    id: createMemoryId(),
-    type: snapshot.type || node.dataset.type || "text",
-    title: createMemoryTitle(title),
-    content: note.trim() || snapshot.content || snapshot.title || "",
-    nodeSnapshot: snapshot,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function stripMediaFromNodeSnapshot(snapshot) {
-  const clean = { ...snapshot };
-  delete clean.fileName;
-  delete clean.imageUrls;
-  delete clean.imageDataKey;
-  delete clean.imageDataUrl;
-  delete clean.referenceImageUrls;
-  delete clean.referenceImageDataKey;
-  delete clean.referenceImageDataUrl;
-  delete clean.referenceFileName;
-  delete clean.generatedImageUrl;
-  delete clean.generatedImageUrls;
-  delete clean.folderNodes;
-  delete clean.folderConnections;
-  return clean;
-}
-
-function hydrateRestoredNodeData(node, saved) {
-  node.dataset.imagePurpose = saved.imagePurpose || "自定义";
-  node.dataset.referenceMode = saved.referenceMode || "structureStyle";
-  node.dataset.imageRole = saved.imageRole || "general";
-  node.dataset.imageQuality = saved.imageQuality || "high";
-  node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
-  node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-  node.dataset.apimartChannel = "b";
-  if (saved.fileName) node.dataset.fileName = saved.fileName;
-  if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
-  if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
-  if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
-  if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
-  if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
-  if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
-  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
-  if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
-  if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
-  if (saved.tone) node.dataset.tone = saved.tone;
-  setNodeType(node, saved.type, saved.content);
-  renderNodeImagePreview(node);
-  if (saved.imageDataKey) {
-    loadProjectImage(saved.imageDataKey).then((value) => {
-      if (!value) return;
-      node.dataset.imageDataUrl = value;
-      renderNodeImagePreview(node);
-    });
-  }
-  if (saved.referenceImageDataKey) {
-    loadProjectImage(saved.referenceImageDataKey).then((value) => {
-      if (value) node.dataset.referenceImageDataUrl = value;
-    });
-  }
+.node-status {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(245, 184, 50, 0.1);
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-function getCanvasViewportCenterPoint() {
-  const rect = canvas?.getBoundingClientRect();
-  if (!rect) return { x: 180, y: 160 };
-  return {
-    x: (rect.width / 2 - viewport.x) / viewport.scale,
-    y: (rect.height / 2 - viewport.y) / viewport.scale,
-  };
-}
-
-function renderConversationMemories() {
-  if (!memoryList) return;
-  const memories = conversationMemories.length ? conversationMemories : getDefaultMemories();
-  memoryList.innerHTML = memories
-    .map((memory, index) => {
-      const isSaved = conversationMemories.some((item) => item.id === memory.id);
-      const typeLabel = typeNames[memory.type] || "文本";
-      const memoryKind = memory.nodeSnapshot ? "节点配置" : typeLabel;
-      return `
-        <button class="chat-item ${index === 0 ? "active" : ""}" type="button" draggable="true" data-memory-id="${escapeHtml(memory.id || "")}" data-type="${escapeHtml(memory.type)}" data-title="${escapeHtml(memory.title)}" data-content="${escapeHtml(memory.content)}">
-          <strong>${escapeHtml(memory.title)}</strong>
-          <small>${escapeHtml(memoryKind)} / ${escapeHtml(memory.content || memory.nodeSnapshot?.content || "")}</small>
-          ${isSaved ? `<span class="memory-delete" role="button" tabindex="0" data-memory-id="${escapeHtml(memory.id)}">×</span>` : ""}
-        </button>
-      `;
-    })
-    .join("");
-}
-
-function getMemoryById(id) {
-  return conversationMemories.find((memory) => memory.id === id) || getDefaultMemories().find((memory) => memory.id === id) || null;
-}
-
-function loadGlobalMemories() {
-  const saved = readJson(GLOBAL_MEMORY_KEY, []);
-  conversationMemories = Array.isArray(saved) ? saved : [];
-}
-
-function saveGlobalMemories() {
-  try {
-    localStorage.setItem(GLOBAL_MEMORY_KEY, JSON.stringify(conversationMemories));
-  } catch (error) {
-    console.error("Global memory save failed", error);
-  }
+.text-slot {
+  align-content: start;
+  padding: 12px;
+  color: #c8d8e8;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
-function migrateProjectMemoriesToGlobal(memories) {
-  if (!Array.isArray(memories) || !memories.length) return;
-  const existing = readJson(GLOBAL_MEMORY_KEY, []);
-  const merged = uniqueMemories([...(Array.isArray(existing) ? existing : []), ...memories]);
-  conversationMemories = merged;
-  saveGlobalMemories();
-}
-
-function uniqueMemories(memories) {
-  const seen = new Set();
-  return memories.filter((memory) => {
-    const key = memory.id || `${memory.type}:${memory.title}:${memory.content}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function getDefaultMemories() {
-  return [
-    {
-      id: "default-scene-image",
-      type: "image",
-      title: "场景重建图片",
-      content: "完全参考输入图的破碎地面、墙体结构和红色光源，生成一张更清晰的场景参考图。",
-    },
-    {
-      id: "default-brief",
-      type: "text",
-      title: "官方 brief 拆解",
-      content: "拆解任务目标、不可出现内容、交付比例、镜头节奏和素材依赖。",
-    },
-  ];
-}
-
-function createMemoryTitle(content) {
-  const clean = content.replace(/\s+/g, " ").trim();
-  return clean.length > 18 ? `${clean.slice(0, 18)}...` : clean || "对话记忆";
-}
-
-function createMemoryId() {
-  return `memory-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createNode({
-  id,
-  type,
-  title,
-  content,
-  x,
-  y,
-  fileName,
-  imageDataUrl,
-  imageUrls,
-  referenceImageDataUrl,
-  referenceImageUrls,
-  referenceFileName,
-  generatedImageUrl,
-  generatedImageUrls,
-  videoDataUrl,
-  videoUrls,
-  referenceVideoUrl,
-  referenceVideoUrls,
-  generatedVideoUrl,
-  generatedVideoUrls,
-  videoMode,
-  videoDuration,
-  videoModel,
-  videoAspectRatio,
-  videoResolution,
-  videoSeed,
-  videoGenerateAudio,
-  videoReturnLastFrame,
-  videoWebSearch,
-  videoFirstFrameUrl,
-  videoLastFrameUrl,
-  videoReferenceAudioUrl,
-  videoReferenceAudioUrls,
-  imagePurpose,
-  referenceMode,
-  imageRole,
-  imageQuality,
-  imageModel,
-  imageProvider,
-  apimartChannel,
-  folderNodes,
-  folderConnections,
-}) {
-  const node = nodeTemplate.content.cloneNode(true).querySelector(".node");
-  node.id = id || createNodeId();
-  node.dataset.type = type;
-  node.dataset.kind = "output";
-  node.dataset.tone = `slot-${["a", "b", "c", "d"][nodeCounter % 4]}`;
-  if (fileName) node.dataset.fileName = fileName;
-  if (Array.isArray(imageUrls)) node.dataset.imageUrls = JSON.stringify(imageUrls);
-  if (imageDataUrl) node.dataset.imageDataUrl = imageDataUrl;
-  if (Array.isArray(referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(referenceImageUrls);
-  if (referenceImageDataUrl) node.dataset.referenceImageDataUrl = referenceImageDataUrl;
-  if (referenceFileName) node.dataset.referenceFileName = referenceFileName;
-  if (generatedImageUrl) node.dataset.generatedImageUrl = generatedImageUrl;
-  if (Array.isArray(generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(generatedImageUrls);
-  if (Array.isArray(videoUrls)) node.dataset.videoUrls = JSON.stringify(videoUrls);
-  if (videoDataUrl) node.dataset.videoDataUrl = videoDataUrl;
-  if (Array.isArray(referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(referenceVideoUrls);
-  if (referenceVideoUrl) node.dataset.referenceVideoUrl = referenceVideoUrl;
-  if (generatedVideoUrl) node.dataset.generatedVideoUrl = generatedVideoUrl;
-  if (Array.isArray(generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(generatedVideoUrls);
-  if (videoMode) node.dataset.videoMode = videoMode;
-  if (videoDuration) node.dataset.videoDuration = videoDuration;
-  if (videoModel) node.dataset.videoModel = videoModel;
-  if (videoAspectRatio) node.dataset.videoAspectRatio = videoAspectRatio;
-  if (videoResolution) node.dataset.videoResolution = videoResolution;
-  if (videoSeed) node.dataset.videoSeed = videoSeed;
-  if (videoGenerateAudio !== undefined) node.dataset.videoGenerateAudio = String(videoGenerateAudio);
-  if (videoReturnLastFrame !== undefined) node.dataset.videoReturnLastFrame = String(videoReturnLastFrame);
-  if (videoWebSearch !== undefined) node.dataset.videoWebSearch = String(videoWebSearch);
-  if (videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = videoFirstFrameUrl;
-  if (videoLastFrameUrl) node.dataset.videoLastFrameUrl = videoLastFrameUrl;
-  if (videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = videoReferenceAudioUrl;
-  if (Array.isArray(videoReferenceAudioUrls)) node.dataset.videoReferenceAudioUrls = JSON.stringify(videoReferenceAudioUrls);
-  if (imagePurpose) node.dataset.imagePurpose = imagePurpose;
-  if (referenceMode) node.dataset.referenceMode = referenceMode;
-  if (imageRole) node.dataset.imageRole = imageRole;
-  if (imageQuality) node.dataset.imageQuality = imageQuality;
-  if (imageModel) node.dataset.imageModel = imageModel;
-  node.dataset.imageProvider = normalizeImageProvider(imageProvider || node.dataset.imageProvider || "apimart");
-  if (apimartChannel) node.dataset.apimartChannel = apimartChannel;
-  if (Array.isArray(folderNodes)) node.dataset.folderNodes = JSON.stringify(folderNodes);
-  if (Array.isArray(folderConnections)) node.dataset.folderConnections = JSON.stringify(folderConnections);
-  node.querySelector(".node-title strong").textContent = title || `${typeNames[type]}节点`;
-  node.querySelector(".node-description").textContent = content !== undefined ? content : nodeDefaults[type];
-  node.querySelector(".node-type-select").value = type;
-  canvasContent.appendChild(node);
-  hydrateNode(node);
-  moveNode(node, x ?? 120, y ?? 120);
-  setNodeType(node, type, content);
-  nodeCounter += 1;
-  return node;
-}
-
-function startTitleEdit(titleEl) {
-  const node = titleEl.closest(".node");
-  selectNode(node);
-  const original = titleEl.textContent;
-  const input = document.createElement("input");
-  input.className = "node-title-input";
-  input.value = original;
-  titleEl.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const commit = () => {
-    const next = input.value.trim() || original;
-    const strong = document.createElement("strong");
-    strong.textContent = next;
-    input.replaceWith(strong);
-    saveCurrentProject();
-  };
-
-  input.addEventListener("blur", commit, { once: true });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      input.blur();
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      input.value = original;
-      input.blur();
-    }
-  });
-}
-
-function hydrateNode(node) {
-  node.querySelector(".node-kind")?.remove();
-  if (!node.querySelector(".node-port.in")) {
-    const port = document.createElement("button");
-    port.type = "button";
-    port.className = "node-port in";
-    port.title = "输入端口";
-    node.appendChild(port);
-  }
-  if (!node.querySelector(".node-port.out")) {
-    const port = document.createElement("button");
-    port.type = "button";
-    port.className = "node-port out";
-    port.title = "输出端口";
-    node.appendChild(port);
-  }
+.video-slot {
+  position: relative;
+  place-items: center;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(22, 217, 245, 0.12), transparent),
+    linear-gradient(315deg, rgba(245, 184, 50, 0.16), transparent),
+    #081018;
 }
 
-function setNodeType(node, type, content) {
-  node.dataset.type = type;
-  node.classList.toggle("folder-node", type === "folder");
-  if (type === "folder") {
-    renderFolderNode(node);
-    return;
-  }
-  node.querySelector(".node-type-label").textContent = typeLabels[type];
-  configureNodeTypeSelect(node, type);
-  ensureCustomButton(node, type);
-  const description = node.querySelector(".node-description");
-  if (content !== undefined) description.textContent = content;
-  const value = description.textContent || nodeDefaults[type] || "";
-  const body = node.querySelector(".node-body");
-
-  if (type === "text") {
-    const fields = parseTextNodeFields(value);
-    body.innerHTML = `
-      <div class="text-brief-grid">
-        <label>需求<textarea class="text-brief-field" data-text-field="requirement" placeholder="保存核心需求">${escapeHtml(fields.requirement)}</textarea></label>
-        <label>修改意见<textarea class="text-brief-field" data-text-field="revision" placeholder="保存要修改的地方">${escapeHtml(fields.revision)}</textarea></label>
-        <label>场景描述<textarea class="text-brief-field" data-text-field="scene" placeholder="保存空间、镜头、氛围、材质等描述">${escapeHtml(fields.scene)}</textarea></label>
-        <label>禁用项<textarea class="text-brief-field" data-text-field="negative" placeholder="保存不要出现的内容">${escapeHtml(fields.negative)}</textarea></label>
-      </div>
-    `;
-    description.textContent = formatTextNodeFields(fields);
-  } else if (type === "image") {
-    if (description.textContent === "ApiMart / gpt-image-2-official 图片生成节点。") {
-      description.textContent = "";
-    }
-    node.dataset.imagePurpose ||= imageOptions.purpose || "自定义";
-    node.dataset.referenceMode ||= imageOptions.referenceMode || "structureStyle";
-    node.dataset.imageRole ||= imageOptions.imageRole || "general";
-    node.dataset.imageQuality ||= imageOptions.quality || "high";
-    body.innerHTML = `
-      <div class="image-node-shell">
-        <label class="image-upload-window">
-          <input class="node-file-input" type="file" accept="image/*" multiple>
-          <span>上传</span>
-          <small class="upload-name">${escapeHtml(node.dataset.fileName || "")}</small>
-          <div class="upload-preview"></div>
-        </label>
-      </div>
-    `;
-  } else if (type === "video") {
-    if (description.textContent === "Seedance 视频生成项目节点。") {
-      description.textContent = "";
-    }
-    node.dataset.videoMode ||= "image-to-video";
-    node.dataset.videoMode = normalizeVideoModeValue(node.dataset.videoMode);
-    node.dataset.videoDuration ||= "5";
-    node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel);
-    body.innerHTML = `
-      <div class="image-node-shell video-node-shell">
-        <label class="image-upload-window video-upload-window">
-          <input class="node-file-input" type="file" accept="video/*">
-          <span>上传</span>
-          <small class="upload-name">${escapeHtml(node.dataset.fileName || "")}</small>
-          <div class="upload-preview video-preview"></div>
-        </label>
-      </div>
-    `;
-  } else {
-    body.innerHTML = "";
-  }
-  renderNodeImagePreview(node);
-}
-
-function configureNodeTypeSelect(node, type) {
-  const select = node.querySelector(".node-type-select");
-  if (!select) return;
-  if (type === "image") {
-    select.dataset.roleSelect = "true";
-    select.dataset.videoModeSelect = "false";
-    select.dataset.nodeType = "image-role";
-    select.hidden = true;
-    ensureImageRolePicker(node);
-    select.value = node.dataset.imageRole || "general";
-    updateImageRoleSelectLabel(node);
-    return;
-  }
+.video-slot span {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+}
 
-  if (type === "video") {
-    select.dataset.roleSelect = "false";
-    select.dataset.videoModeSelect = "true";
-    select.dataset.nodeType = "video-mode";
-    select.hidden = false;
-    node.querySelector(".image-role-picker")?.remove();
-    select.innerHTML = Object.entries(videoModeLabels)
-      .map(([value, label]) => `<option value="${value}">${label}</option>`)
-      .join("");
-    select.value = normalizeVideoModeValue(node.dataset.videoMode);
-    return;
-  }
+.video-slot span::before {
+  content: "";
+  width: 0;
+  height: 0;
+  margin-left: 3px;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 14px solid #081018;
+}
 
-  select.dataset.roleSelect = "false";
-  select.dataset.videoModeSelect = "false";
-  select.dataset.nodeType = "node-type";
-  select.hidden = false;
-  node.querySelector(".image-role-picker")?.remove();
-  select.innerHTML = `
-    <option value="text">文本</option>
-    <option value="image">图片</option>
-    <option value="video">视频</option>
-    <option value="folder">文件夹</option>
-  `;
-  select.value = type;
-}
-
-function normalizeVideoModeValue(value) {
-  return videoModeLabels[value] ? value : "image-to-video";
-}
-
-function normalizeVideoModelValue(value) {
-  const model = String(value || "").trim();
-  if (model === "kling3" || model === "kling-motion-control") return "kling-motion-control";
-  if (model === "happyhorse" || model === "happyhorse-1.0") return "happyhorse-1.0";
-  return "doubao-seedance-2.0";
-}
-
-function setVideoMode(node, mode) {
-  if (!node || !videoModeLabels[mode]) return;
-  node.dataset.videoMode = mode;
-  const select = node.querySelector(".node-type-select");
-  if (select && select.dataset.videoModeSelect === "true") select.value = mode;
-  saveCurrentProject();
-}
-
-function renderFolderNode(node) {
-  const count = parseJsonArray(node.dataset.folderNodes).length;
-  const title = node.querySelector(".node-title strong")?.textContent || "文件夹";
-  node.innerHTML = `
-    <div class="folder-canvas-entry">
-      <span class="folder-large-icon" aria-hidden="true"></span>
-      <div class="node-title folder-title"><strong title="点击重命名">${escapeHtml(title)}</strong></div>
-      <small>${count} 个节点</small>
-    </div>
-  `;
-}
-
-function updateImageRoleSelectLabel(node) {
-  const select = node.querySelector(".node-type-select");
-  const button = node.querySelector(".image-role-button");
-  const value = node.dataset.imageRole || "general";
-  if (!roleLabels[value]) {
-    node.dataset.imageRole = "general";
-  }
-  if (select && select.dataset.roleSelect === "true") select.value = node.dataset.imageRole || "general";
-  if (button) button.textContent = roleLabels[node.dataset.imageRole || "general"];
-}
-
-function ensureImageRolePicker(node) {
-  const head = node.querySelector(".node-head");
-  if (!head || node.querySelector(".image-role-picker")) return;
-  const picker = document.createElement("div");
-  picker.className = "image-role-picker";
-  picker.innerHTML = `
-    <button class="image-role-button" type="button">${roleLabels[node.dataset.imageRole || "general"]}</button>
-    <div class="image-role-menu">
-      ${Object.entries(roleLabels)
-        .map(([value, label]) => `<button class="image-role-option" type="button" data-role="${value}">${label}</button>`)
-        .join("")}
-    </div>
-  `;
-  const customButton = node.querySelector(".node-custom-button");
-  head.insertBefore(picker, customButton || null);
-}
-
-function toggleImageRoleMenu(node) {
-  if (!node) return;
-  const picker = node.querySelector(".image-role-picker");
-  if (!picker) return;
-  const shouldOpen = !picker.classList.contains("open");
-  closeImageRoleMenus();
-  picker.classList.toggle("open", shouldOpen);
-}
-
-function closeImageRoleMenus() {
-  document.querySelectorAll(".image-role-picker.open").forEach((picker) => picker.classList.remove("open"));
-}
-
-function setImageRole(node, role) {
-  if (!node || !roleLabels[role]) return;
-  node.dataset.imageRole = role;
-    if (configNode === node) {
-      imageOptions.imageRole = role;
-      syncImageOptionsUi();
-      saveImageOptions();
-    }
-  updateImageRoleSelectLabel(node);
-  saveCurrentProject();
-}
-
-function renderNodeImagePreview(node) {
-  if (node.dataset.type === "video") {
-    renderNodeVideoPreview(node);
-    return;
-  }
-  if (node.dataset.type !== "image") return;
-  const preview = node.querySelector(".upload-preview");
-  if (!preview) return;
-  const uploaded = parseJsonArray(node.dataset.imageUrls);
-  const generated = getGeneratedImageHistory(node);
-  if (node.dataset.generatedImageUrl) {
-    const historyCount = Math.max(0, generated.length - 1);
-    preview.classList.add("output-preview");
-    preview.innerHTML = `
-      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">
-      ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
-      <div class="output-history-popover" aria-hidden="true">
-        ${generated.slice(1).map((src) => `<img src="${src}" alt="">`).join("")}
-      </div>
-    `;
-    bindPreviewDimensionCapture(node, preview);
-    refreshConnectionsAfterImages(preview);
-    return;
-  }
-  preview.classList.remove("output-preview");
-  const sources = [...uploaded, node.dataset.imageDataUrl].filter(Boolean);
-  const uniqueSources = uniqueValues(sources);
-  if (uniqueSources.length) {
-    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`).join("");
-    bindPreviewDimensionCapture(node, preview);
-    refreshConnectionsAfterImages(preview);
-  }
+.video-slot strong {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: #dce9f7;
+  font-size: 11px;
+  letter-spacing: 0.08em;
 }
 
-function bindPreviewDimensionCapture(node, preview) {
-  preview.querySelectorAll("img").forEach((image) => {
-    const capture = () => {
-      if (!image.naturalWidth || !image.naturalHeight) return;
-      if (node.dataset.generatedImageUrl && image.src === node.dataset.generatedImageUrl) {
-        node.dataset.generatedImageNaturalWidth = String(image.naturalWidth);
-        node.dataset.generatedImageNaturalHeight = String(image.naturalHeight);
-      } else {
-        node.dataset.imageNaturalWidth = String(image.naturalWidth);
-        node.dataset.imageNaturalHeight = String(image.naturalHeight);
-      }
-      saveCurrentProject();
-    };
-    if (image.complete) {
-      capture();
-    } else {
-      image.addEventListener("load", capture, { once: true });
-    }
-  });
-}
-
-function renderNodeVideoPreview(node) {
-  const preview = node.querySelector(".upload-preview");
-  if (!preview) return;
-  const uploaded = parseJsonArray(node.dataset.videoUrls);
-  const generated = getGeneratedVideoHistory(node);
-  if (node.dataset.generatedVideoUrl) {
-    const historyCount = Math.max(0, generated.length - 1);
-    preview.classList.add("output-preview");
-    preview.innerHTML = `
-      <video src="${node.dataset.generatedVideoUrl}" controls muted playsinline onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'视频链接失效'}))"></video>
-      ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
-      <div class="output-history-popover" aria-hidden="true">
-        ${generated.slice(1).map((src) => `<video src="${src}" controls muted playsinline></video>`).join("")}
-      </div>
-    `;
-    refreshConnectionsAfterImages(preview);
-    return;
-  }
-  preview.classList.remove("output-preview");
-  const sources = uniqueValues([...uploaded, node.dataset.videoDataUrl].filter(Boolean));
-  if (sources.length) {
-    preview.innerHTML = sources
-      .map((src) => `<video src="${src}" controls muted playsinline onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'视频链接失效'}))"></video>`)
-      .join("");
-    refreshConnectionsAfterImages(preview);
-  }
+.pulse {
+  animation: pulse-node 0.52s ease-out;
 }
 
-function clearUploadedImages(node) {
-  if (!node || node.dataset.type !== "image") return;
-  delete node.dataset.imageUrls;
-  delete node.dataset.imageDataUrl;
-  delete node.dataset.fileName;
-  const nameEl = node.querySelector(".upload-name");
-  if (nameEl) nameEl.textContent = "";
-  const fileInput = node.querySelector(".node-file-input");
-  if (fileInput) fileInput.value = "";
-  const preview = node.querySelector(".upload-preview");
-  if (preview) {
-    preview.classList.remove("output-preview");
-    preview.innerHTML = "";
-  }
-  ensureNodeStatus(node).textContent = "已删除上传图片。";
-  saveCurrentProject();
-  refreshConnectionsSoon();
-}
-
-function addGeneratedImageHistory(node, imageUrl) {
-  return uniqueValues([
-    imageUrl,
-    node.dataset.generatedImageUrl,
-    ...parseJsonArray(node.dataset.generatedImageUrls),
-  ].filter(Boolean)).slice(0, 12);
-}
-
-function getGeneratedImageHistory(node) {
-  return uniqueValues([
-    node.dataset.generatedImageUrl,
-    ...parseJsonArray(node.dataset.generatedImageUrls),
-  ].filter(Boolean));
-}
-
-function addGeneratedVideoHistory(node, videoUrl) {
-  return uniqueValues([
-    videoUrl,
-    node.dataset.generatedVideoUrl,
-    ...parseJsonArray(node.dataset.generatedVideoUrls),
-  ].filter(Boolean)).slice(0, 12);
-}
-
-function getGeneratedVideoHistory(node) {
-  return uniqueValues([
-    node.dataset.generatedVideoUrl,
-    ...parseJsonArray(node.dataset.generatedVideoUrls),
-  ].filter(Boolean));
-}
-
-function toggleOutputHistory(node) {
-  const popover = node?.querySelector(".output-history-popover");
-  if (!popover) return;
-  const wasOpen = popover.classList.contains("show");
-  closeOutputHistoryPopovers();
-  if (wasOpen) return;
-  const isOpen = popover.classList.toggle("show");
-  popover.setAttribute("aria-hidden", isOpen ? "false" : "true");
-}
-
-function closeOutputHistoryPopovers() {
-  document.querySelectorAll(".output-history-popover.show").forEach((popover) => {
-    popover.classList.remove("show");
-    popover.setAttribute("aria-hidden", "true");
-  });
-}
-
-function refreshConnectionsAfterImages(scope) {
-  refreshConnectionsSoon();
-  scope.querySelectorAll("img").forEach((image) => {
-    if (image.complete) return;
-    image.addEventListener("load", refreshConnectionsSoon, { once: true });
-    image.addEventListener("error", refreshConnectionsSoon, { once: true });
-  });
-}
-
-function refreshConnectionsSoon() {
-  requestAnimationFrame(updateConnections);
-  setTimeout(updateConnections, 60);
-  setTimeout(updateConnections, 180);
-}
-
-function ensureCustomButton(node, type) {
-  const head = node.querySelector(".node-head");
-  let button = node.querySelector(".node-custom-button");
-  if (type !== "image" && type !== "video") {
-    button?.remove();
-    return;
+@keyframes pulse-node {
+  0% {
+    box-shadow: 0 0 0 0 rgba(49, 223, 181, 0.46);
   }
 
-  if (!button) {
-    button = document.createElement("button");
-    button.className = "node-custom-button";
-    button.type = "button";
-    head.appendChild(button);
-  }
-  button.textContent = type === "video" ? "设置" : "设置";
-}
-
-function openImageConfig(node) {
-  configNode = node;
-  const isVideo = node.dataset.type === "video";
-  configNodeName.textContent = node.querySelector(".node-title strong")?.textContent || (isVideo ? "视频节点" : "图片节点");
-  imagePromptInput.value = node.querySelector(".node-description")?.textContent || "";
-  imagePromptInput.placeholder = isVideo
-    ? "输入视频提示词：镜头运动、主体动作、节奏、时长、风格..."
-    : "输入提示词描述...";
-  if (imageModelSelect) {
-    imageModelSelect.innerHTML = isVideo
-      ? `
-          <option value="doubao-seedance-2.0" selected>Seedance2</option>
-          <option value="kling-motion-control">kling3</option>
-          <option value="happyhorse-1.0">happyhorse</option>
-        `
-      : `
-          <option value="gpt-image-2">GPT图像2</option>
-          <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
-          <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
-        `;
-  }
-  imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
-  openImageOptions?.classList.toggle("video-config-hidden", isVideo);
-  imageProviderSelect?.classList.toggle("video-config-hidden", isVideo);
-  removeVideoSettingsPanel();
-  if (isVideo) {
-    ensureVideoDefaults(node);
-    if (imageModelSelect) imageModelSelect.value = normalizeVideoModelValue(node.dataset.videoModel);
-    openImageOptions?.classList.remove("video-config-hidden");
-    renderVideoSettingsPanel(node);
-    syncVideoOptionsSummary(node);
-    renderConfigInputThumbnails(node);
-    syncImageSubmitButton(node);
-    imageConfigPanel.classList.add("show");
-    imageConfigPanel.setAttribute("aria-hidden", "false");
-    return;
-  }
-  imageOptions = {
-    purpose: node.dataset.imagePurpose || imageOptions.purpose || "自定义",
-    referenceMode: node.dataset.referenceMode || imageOptions.referenceMode || "structureStyle",
-    imageRole: node.dataset.imageRole || imageOptions.imageRole || "general",
-    quality: node.dataset.imageQuality || imageOptions.quality || "high",
-  };
-  if (imageModelSelect) {
-    imageModelSelect.value = node.dataset.imageModel || "gpt-image-2-official";
-  }
-  if (imageProviderSelect) {
-    imageProviderSelect.value = normalizeImageProvider(node.dataset.imageProvider || "apimart");
-  }
-  if (imageProviderSelect?.value === "rhart" && imageModelSelect) {
-    imageModelSelect.value = "gpt-image-2";
-    node.dataset.imageModel = "gpt-image-2";
-  }
-  syncImageOptionsUi();
-  renderConfigInputThumbnails(node);
-  syncImageSubmitButton(node);
-  imageConfigPanel.classList.add("show");
-  imageConfigPanel.setAttribute("aria-hidden", "false");
-}
-
-function closeImageConfig() {
-  syncImageSubmitButton(null);
-  configNode = null;
-  imageConfigPanel.classList.remove("show");
-  imageConfigPanel.setAttribute("aria-hidden", "true");
-  imageOptionsPopover.classList.remove("show");
-  imageOptionsPopover.classList.remove("video-config-hidden");
-  imageOptionsPopover.setAttribute("aria-hidden", "true");
-  openImageOptions?.classList.remove("video-config-hidden");
-  removeVideoSettingsPanel();
-  referencePicker.classList.remove("show");
-  referencePicker.setAttribute("aria-hidden", "true");
-}
-
-function syncImageOptionsSummary() {
-  const modeLabel = {
-    structureStyle: "结构+风格",
-    strict: "严格重绘",
-    style: "风格参考",
-    creative: "创意扩展",
-  }[imageOptions.referenceMode] || "严格重绘";
-  const roleLabel = {
-    general: "普通图片",
-    editBase: "编辑底图",
-    structure: "结构图",
-    style: "风格图",
-    output: "输出图",
-  }[imageOptions.imageRole] || "普通图片";
-  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = provider === "rhart"
-    ? "gpt-image-2"
-    : normalizeImageModel(configNode?.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
-  const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
-  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
-}
-
-function syncImageOptionsUi() {
-  syncImageQualityOptionLabels();
-  Object.entries(imageOptions).forEach(([group, value]) => {
-    const grid = imageOptionsPopover.querySelector(`[data-option-group="${group}"]`);
-    grid?.querySelectorAll("button").forEach((button) => {
-      button.classList.toggle("active", button.dataset.value === value);
-    });
-  });
-  if (configNode) {
-    configNode.dataset.imageRole = imageOptions.imageRole || configNode.dataset.imageRole || "general";
-    updateImageRoleSelectLabel(configNode);
+  100% {
+    box-shadow: 0 0 0 18px rgba(49, 223, 181, 0);
   }
-  syncImageOptionsSummary();
-}
-
-function syncImageQualityOptionLabels() {
-  const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
-  if (!qualityGrid) return;
-  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = provider === "rhart"
-    ? "gpt-image-2"
-    : configNode?.dataset.type === "image"
-      ? normalizeImageModel(configNode.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official")
-      : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
-  const labels = model === "gpt-image-2"
-    ? { low: "1k", medium: "2k", high: "4k" }
-    : { low: "low", medium: "medium", high: "high" };
-  qualityGrid.querySelectorAll("[data-value]").forEach((button) => {
-    button.textContent = labels[button.dataset.value] || button.dataset.value;
-  });
-}
-
-function ensureVideoDefaults(node) {
-  if (!node) return;
-  node.dataset.videoMode = normalizeVideoModeValue(node.dataset.videoMode);
-  node.dataset.videoDuration ||= "5";
-  node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel);
-  node.dataset.videoAspectRatio ||= "16:9";
-  node.dataset.videoResolution ||= "1080p";
-  node.dataset.videoGenerateAudio ||= "false";
-  node.dataset.videoReturnLastFrame ||= "false";
-  node.dataset.videoWebSearch ||= "false";
-}
-
-function renderVideoSettingsPanel(node) {
-  removeVideoSettingsPanel();
-  ensureVideoDefaults(node);
-  const panel = document.createElement("div");
-  panel.className = "video-settings-panel";
-  panel.innerHTML = `
-    <div class="video-settings-grid">
-      <label>
-        <span>生成模式</span>
-        <select data-video-setting="videoMode">
-          ${Object.entries(videoModeLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
-        </select>
-      </label>
-      <label>
-        <span>时长</span>
-        <input data-video-setting="videoDuration" type="number" min="1" max="30" step="1" value="${escapeHtml(node.dataset.videoDuration || "5")}">
-      </label>
-      <label>
-        <span>宽高比</span>
-        <select data-video-setting="videoAspectRatio">
-          ${videoAspectRatios.map((value) => `<option value="${value}">${value}</option>`).join("")}
-        </select>
-      </label>
-      <label>
-        <span>分辨率</span>
-        <select data-video-setting="videoResolution">
-          ${videoResolutions.map((value) => `<option value="${value}">${value}</option>`).join("")}
-        </select>
-      </label>
-      <label>
-        <span>随机种子</span>
-        <input data-video-setting="videoSeed" type="number" min="0" step="1" placeholder="自动" value="${escapeHtml(node.dataset.videoSeed || "")}">
-      </label>
-    </div>
-    <div class="video-toggle-row">
-      <label><input data-video-setting="videoGenerateAudio" type="checkbox"> 生成音频</label>
-      <label><input data-video-setting="videoReturnLastFrame" type="checkbox"> 返回尾帧</label>
-      <label><input data-video-setting="videoWebSearch" type="checkbox"> 联网搜索</label>
-    </div>
-    <div class="video-upload-grid">
-      ${renderVideoAssetPicker("firstFrame", "首帧图", "image/*", node.dataset.videoFirstFrameUrl)}
-      ${renderVideoAssetPicker("lastFrame", "尾帧图", "image/*", node.dataset.videoLastFrameUrl)}
-      ${renderVideoAssetPicker("referenceVideo", "参考视频", "video/*", node.dataset.referenceVideoUrl)}
-      ${renderVideoAssetPicker("referenceAudio", "参考音频", "audio/*", node.dataset.videoReferenceAudioUrl)}
-    </div>
-  `;
-  imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
-  panel.querySelector('[data-video-setting="videoMode"]').value = normalizeVideoModeValue(node.dataset.videoMode);
-  panel.querySelector('[data-video-setting="videoAspectRatio"]').value = node.dataset.videoAspectRatio || "16:9";
-  panel.querySelector('[data-video-setting="videoResolution"]').value = node.dataset.videoResolution || "1080p";
-  panel.querySelector('[data-video-setting="videoGenerateAudio"]').checked = node.dataset.videoGenerateAudio === "true";
-  panel.querySelector('[data-video-setting="videoReturnLastFrame"]').checked = node.dataset.videoReturnLastFrame === "true";
-  panel.querySelector('[data-video-setting="videoWebSearch"]').checked = node.dataset.videoWebSearch === "true";
-}
-
-function renderVideoAssetPicker(slot, label, accept, url = "") {
-  return `
-    <label class="video-asset-picker">
-      <span>${label}</span>
-      <input data-video-asset="${slot}" type="file" accept="${accept}">
-      <small>${url ? "已上传" : "点击上传"}</small>
-    </label>
-  `;
-}
-
-function removeVideoSettingsPanel() {
-  imageConfigPanel?.querySelector(".video-settings-panel")?.remove();
-}
-
-function persistVideoSettingsFromPanel(node) {
-  if (!node) return;
-  const panel = imageConfigPanel.querySelector(".video-settings-panel");
-  if (!panel) return;
-  panel.querySelectorAll("[data-video-setting]").forEach((input) => {
-    const key = input.dataset.videoSetting;
-    if (!key) return;
-    if (input.type === "checkbox") {
-      node.dataset[key] = String(input.checked);
-    } else {
-      node.dataset[key] = input.value.trim();
-    }
-  });
-  ensureVideoDefaults(node);
-  setVideoMode(node, normalizeVideoModeValue(node.dataset.videoMode));
-  syncVideoOptionsSummary(node);
-}
-
-function syncVideoOptionsSummary(node) {
-  if (!openImageOptions || !node) return;
-  const modeLabel = videoModeLabels[normalizeVideoModeValue(node.dataset.videoMode)] || "图生视频";
-  const flags = [
-    node.dataset.videoGenerateAudio === "true" ? "音频" : "",
-    node.dataset.videoReturnLastFrame === "true" ? "尾帧" : "",
-    node.dataset.videoWebSearch === "true" ? "联网" : "",
-  ].filter(Boolean);
-  openImageOptions.textContent = [
-    modeLabel,
-    videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || node.dataset.videoModel || "Seedance2",
-    `${node.dataset.videoDuration || "5"} 秒`,
-    node.dataset.videoAspectRatio || "16:9",
-    node.dataset.videoResolution || "1080p",
-    flags.length ? flags.join("+") : "参数面板",
-  ].join(" / ");
-}
-
-function persistImageConfigOptions() {
-  if (!configNode) return;
-  configNode.dataset.imagePurpose = imageOptions.purpose;
-  configNode.dataset.referenceMode = imageOptions.referenceMode;
-  configNode.dataset.imageRole = imageOptions.imageRole;
-  delete configNode.dataset.imageRatio;
-  delete configNode.dataset.imageResolution;
-  configNode.dataset.imageQuality = imageOptions.quality;
-  saveCurrentProject();
-}
-
-function saveImageOptions() {
-  try {
-    localStorage.setItem(IMAGE_OPTIONS_KEY, JSON.stringify(imageOptions));
-  } catch (error) {
-    console.error("Image options save failed", error);
-  }
 }
 
-function loadImageOptions() {
-  const saved = readJson(IMAGE_OPTIONS_KEY, null);
-  if (!saved || typeof saved !== "object") return;
-  imageOptions = {
-    ...imageOptions,
-    ...saved,
-  };
+.slot-a {
+  background: linear-gradient(145deg, #192333, #050709 54%, #364155);
 }
 
-function normalizeImageModel(value) {
-  const model = String(value || "").trim();
-  if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (model === "rhart-image-n-g31-flash/image-to-image" || model === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
-  if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
-  return "gpt-image-2-official";
+.slot-b {
+  background: linear-gradient(160deg, #263240, #101824 58%, #c14652 59%, #251012);
 }
 
-function normalizeImageProvider(value) {
-  const provider = String(value || "").trim().toLowerCase();
-  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
-  return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
+.slot-c {
+  background: linear-gradient(170deg, #1f2c36, #121820 60%, #d05d6a 62%, #15191e);
 }
 
-function getImageProviderLabel(value) {
-  const provider = normalizeImageProvider(value);
-  if (provider === "rayinai") return "RayinAI";
-  if (provider === "rhart") return "RHarT G31";
-  return "ApiMart";
+.slot-d {
+  background: linear-gradient(150deg, #526171, #1b2632 48%, #80766a 50%, #26313a);
 }
 
-function normalizeImageQualityForModel(quality, model) {
-  const value = String(quality || "high").trim().toLowerCase();
-  if (normalizeImageModel(model) === "gpt-image-2") {
-    if (value === "low" || value === "standard" || value === "1k") return "1k";
-    if (value === "medium" || value === "hd" || value === "2k") return "2k";
-    if (value === "high" || value === "4k") return "4k";
-    return value;
-  }
-  if (value === "medium") return "standard";
-  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
-  return "high";
-}
-
-function shouldSendImageSize(model) {
-  const normalized = normalizeImageModel(model);
-  return normalized !== "gemini-3-pro-image-preview";
-}
-
-function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
-  const normalized = normalizeImageModel(model);
-  if (normalized !== "gpt-image-2") return prompt;
-  const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
-  return [
-    prompt,
-    "GPT Image 2 binding rules:",
-    requestedSize
-      ? `- Output canvas must use the exact requested size ${requestedSize} unless the API rejects it. Match the structure reference's pixel aspect ratio and visible framing.`
-      : "- Keep the output canvas aspect ratio aligned with the structure reference whenever a structure reference is attached.",
-    hasStructure
-      ? "- The structure reference is the geometry authority: preserve its crop, framing, camera angle, perspective grid, major silhouettes, object placement, and scene proportions."
-      : "- If no structure reference is attached, follow the user's requested framing and avoid arbitrary crop changes.",
-    "- The style reference is the palette authority only: transfer its color temperature, contrast curve, saturation level, atmospheric haze, shadow tint, highlight color, material finish, and render texture.",
-    "- Do not let the style reference override the structure reference's composition, camera, crop, geometry, or scene layout.",
-  ].join("\n");
-}
-
-function renderReferencePicker() {
-  const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node !== configNode);
-  if (!nodes.length) {
-    referenceList.innerHTML = '<div class="reference-empty">当前画布暂无其他节点</div>';
-    return;
-  }
+.connectors {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5000px;
+  height: 5000px;
+  overflow: visible;
+  pointer-events: none;
+}
 
-  referenceList.innerHTML = nodes
-    .map((node) => {
-      const title = node.querySelector(".node-title strong")?.textContent || "节点";
-      const type = typeNames[node.dataset.type] || "绱犳潗";
-      return `
-        <button type="button" class="reference-item" data-reference-node="${escapeHtml(title)}">
-          <div class="reference-thumb ${node.dataset.tone || "slot-a"}"></div>
-          <span>${escapeHtml(title)}</span>
-          <small>${type}</small>
-        </button>
-      `;
-    })
-    .join("");
-}
-
-function renderConfigInputThumbnails(node) {
-  const old = imageConfigPanel.querySelector(".config-input-strip");
-  old?.remove();
-
-  const ownVideoAssets = node?.dataset.type === "video"
-    ? [
-        node.dataset.videoFirstFrameUrl ? { title: "首帧图", src: node.dataset.videoFirstFrameUrl, kind: "image" } : null,
-        node.dataset.videoLastFrameUrl ? { title: "尾帧图", src: node.dataset.videoLastFrameUrl, kind: "image" } : null,
-        node.dataset.referenceVideoUrl ? { title: "参考视频", src: node.dataset.referenceVideoUrl, kind: "video" } : null,
-        node.dataset.videoReferenceAudioUrl ? { title: "参考音频", src: node.dataset.videoReferenceAudioUrl, kind: "audio" } : null,
-      ].filter(Boolean)
-    : [];
-
-  const sourcePreviewItems = getConnectedInputNodes(node)
-    .flatMap((sourceNode) => {
-      const title = sourceNode.querySelector(".node-title strong")?.textContent || "输入节点";
-      const role = sourceNode.dataset.type === "image" ? sourceNode.dataset.imageRole || inferImageRole(sourceNode) : "";
-      return [
-        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image", role })),
-        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video", role: "" })),
-      ];
-    })
-    .filter((item) => item.src);
-  const imageRolePriority = { structure: 0, editBase: 1, style: 2, general: 3, output: 4 };
-  const orderedPreviewItems = sourcePreviewItems
-    .map((item, index) => ({ ...item, index }))
-    .sort((a, b) => (imageRolePriority[a.role] ?? 5) - (imageRolePriority[b.role] ?? 5) || a.index - b.index);
-  const inputs = [
-    ...ownVideoAssets,
-    ...orderedPreviewItems,
-  ];
-
-  if (!inputs.length) return;
-
-  const strip = document.createElement("div");
-  strip.className = "config-input-strip";
-  strip.innerHTML = `
-    <div class="config-input-strip-title">输入参考</div>
-    <div class="config-input-thumbs">
-      ${inputs
-        .map(
-          (item) => `
-            <button class="config-input-thumb" type="button" title="${escapeHtml(item.title)}">
-              ${
-                item.kind === "video"
-                  ? `<video src="${item.src}" muted playsinline></video>`
-                  : item.kind === "audio"
-                    ? `<div class="config-audio-thumb">Audio</div>`
-                  : `<img src="${item.src}" alt="">`
-              }
-              <span>${escapeHtml(item.title)}</span>
-            </button>
-          `,
-        )
-        .join("")}
-    </div>
-  `;
-  imageConfigPanel.insertBefore(strip, imagePromptInput);
-}
-
-function getIncomingNodes(node) {
-  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")]
-    .filter((path) => path.dataset.to === node.id)
-    .map((path) => document.getElementById(path.dataset.from))
-    .filter(Boolean);
-}
-
-function getConnectedInputNodes(node) {
-  const incoming = getIncomingNodes(node);
-  const undirected = [...connectorSvg.querySelectorAll("path:not(.temp-wire)")]
-    .filter((path) => path.dataset.from === node.id || path.dataset.to === node.id)
-    .map((path) => document.getElementById(path.dataset.from === node.id ? path.dataset.to : path.dataset.from))
-    .filter(Boolean);
-  return uniqueValues([...incoming, ...undirected]).filter((item) => item !== node);
-}
-
-function getIncomingReferenceImages(node) {
-  return getConnectedInputNodes(node).map(getNodeImageSource).filter(Boolean);
-}
-
-function getReferenceSourceNodes(node) {
-  const root = node;
-  const visited = new Set([root?.id].filter(Boolean));
-  const ordered = [];
-  const walk = (current, depth = 0) => {
-    if (!current || depth > 4) return;
-    getIncomingNodes(current).forEach((sourceNode) => {
-      if (!sourceNode?.id || visited.has(sourceNode.id)) return;
-      visited.add(sourceNode.id);
-      ordered.push(sourceNode);
-      walk(sourceNode, depth + 1);
-    });
-  };
-  walk(root);
-  return ordered;
-}
-
-function buildPromptWithIncomingText(node, ownPrompt) {
-  const textInputs = getReferenceSourceNodes(node)
-    .filter((sourceNode) => sourceNode.dataset.type === "text")
-    .map(getNodeContent)
-    .filter(Boolean);
-  return [...textInputs, ownPrompt].filter(Boolean).join("\n\n");
-}
-
-function collectRoleReferenceImages(node) {
-  const ownRole = node.dataset.imageRole || "output";
-  const ownImages = ownRole === "output" || ownRole === "editBase"
-    ? getNodeImageSources(node)
-    : getNodeUploadedImageSources(node);
-  const ownApiMartImages = ownRole === "output" || ownRole === "editBase"
-    ? getNodeImageSources(node, { preferData: true })
-    : getNodeUploadedImageSources(node, { preferData: true });
-  const incomingNodes = getReferenceSourceNodes(node);
-  const editBaseImages = [];
-  const structureImages = [];
-  const styleImages = [];
-  const generalImages = [];
-  const apimartEditBaseImages = [];
-  const apimartStructureImages = [];
-  const apimartStyleImages = [];
-  const apimartGeneralImages = [];
-  const imageDimensions = {};
-  const roleTitles = {
-    editBase: [],
-    structure: [],
-    style: [],
-    general: [],
-  };
-
-  const rememberDimensions = (url, sourceNode, aliases = []) => {
-    if (!url || !sourceNode) return;
-    const domDimensions = getPreviewImageDimensions(sourceNode, url) || aliases.map((alias) => getPreviewImageDimensions(sourceNode, alias)).find(Boolean);
-    const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || domDimensions?.width || 0);
-    const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || domDimensions?.height || 0);
-    if (width > 0 && height > 0) {
-      [url, ...aliases].filter(Boolean).forEach((key) => {
-        imageDimensions[key] = { width, height };
-      });
-    }
-  };
-
-  if (ownRole === "editBase" && ownImages.length) {
-    editBaseImages.push(...ownImages);
-    apimartEditBaseImages.push(...ownApiMartImages);
-    roleTitles.editBase.push(getNodeTitle(node));
-    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
-  } else if (ownRole !== "output" && ownImages.length) {
-    structureImages.push(...ownImages);
-    apimartStructureImages.push(...ownApiMartImages);
-    roleTitles.structure.push(getNodeTitle(node));
-    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
-  }
+.connectors path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.26);
+  stroke-width: 2;
+}
 
-  incomingNodes.forEach((sourceNode) => {
-    const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
-    const useGenerated = role === "output" || role === "editBase";
-    const images = (useGenerated ? getNodeImageSources(sourceNode) : getNodeUploadedImageSources(sourceNode)).filter(isRemoteImageUrl);
-    const apiMartImages = (useGenerated ? getNodeImageSources(sourceNode, { preferData: true }) : getNodeUploadedImageSources(sourceNode, { preferData: true })).filter(isImageReferenceValue);
-    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
-    if (role === "editBase") {
-      editBaseImages.push(...images);
-      apimartEditBaseImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
-    } else if (role === "structure") {
-      structureImages.push(...images);
-      apimartStructureImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.structure.push(getNodeTitle(sourceNode));
-    } else if (role === "style") {
-      styleImages.push(...images);
-      apimartStyleImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.style.push(getNodeTitle(sourceNode));
-    } else if (role === "output") {
-      editBaseImages.push(...images);
-      apimartEditBaseImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
-    } else if (role !== "output") {
-      generalImages.push(...images);
-      apimartGeneralImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.general.push(getNodeTitle(sourceNode));
-    }
-  });
-
-  return {
-    editBase: uniqueValues(editBaseImages.filter(isRemoteImageUrl)),
-    structure: uniqueValues(structureImages.filter(isRemoteImageUrl)),
-    style: uniqueValues(styleImages.filter(isRemoteImageUrl)),
-    general: uniqueValues(generalImages.filter(isRemoteImageUrl)),
-    apimartEditBase: uniqueValues(apimartEditBaseImages.filter(isImageReferenceValue)),
-    apimartStructure: uniqueValues(apimartStructureImages.filter(isImageReferenceValue)),
-    apimartStyle: uniqueValues(apimartStyleImages.filter(isImageReferenceValue)),
-    apimartGeneral: uniqueValues(apimartGeneralImages.filter(isImageReferenceValue)),
-    dimensions: imageDimensions,
-    titles: {
-      editBase: uniqueValues(roleTitles.editBase),
-      structure: uniqueValues(roleTitles.structure),
-      style: uniqueValues(roleTitles.style),
-      general: uniqueValues(roleTitles.general),
-    },
-  };
-}
-
-function getNodeTitle(node) {
-  return node?.querySelector(".node-title strong")?.textContent || "未命名节点";
-}
-
-function inferImageRole(node) {
-  const title = node?.querySelector(".node-title strong")?.textContent || "";
-  if (/原图|渲染|结构|结构图/i.test(title)) return "structure";
-  if (/参考|风格|样式|画风/i.test(title)) return "style";
-  if (/编辑|底图|上一版|上一张|输出|生成|结果/i.test(title)) return "editBase";
-  return "general";
-}
-
-function getPreviewImageDimensions(node, url = "") {
-  if (!node) return null;
-  const images = [...node.querySelectorAll(".upload-preview img")];
-  const image = images.find((item) => !url || item.src === url || item.currentSrc === url) || images[0];
-  if (!image?.naturalWidth || !image?.naturalHeight) return null;
-  return { width: image.naturalWidth, height: image.naturalHeight };
-}
-
-function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
-  return buildReferencePlan(mode, roleImages, provider).images;
-}
-
-function getProviderRoleImages(roleImages, provider = "apimart") {
-  const normalizedProvider = normalizeImageProvider(provider);
-  if (normalizedProvider !== "apimart") return roleImages;
-  return {
-    ...roleImages,
-    editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
-    structure: roleImages.apimartStructure?.length ? roleImages.apimartStructure : roleImages.structure,
-    style: roleImages.apimartStyle?.length ? roleImages.apimartStyle : roleImages.style,
-    general: roleImages.apimartGeneral?.length ? roleImages.apimartGeneral : roleImages.general,
-  };
-}
-
-function buildReferencePlan(mode, roleImages, provider = "apimart") {
-  const providerImages = getProviderRoleImages(roleImages, provider);
-  const editBase = providerImages.editBase?.[0] || "";
-  const explicitStructure = providerImages.structure[0] || "";
-  const fallbackStructure = providerImages.general[0] || "";
-  const structure = mode === "structureStyle"
-    ? explicitStructure || fallbackStructure || editBase || ""
-    : editBase || explicitStructure || fallbackStructure || "";
-  const structureDimensions = roleImages.dimensions?.[structure] || null;
-  const remainingGeneral = structure ? providerImages.general.filter((url) => url !== structure) : providerImages.general;
-
-  if (mode === "structureStyle") {
-    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral)
-      .filter((url) => url !== structure)
-      .slice(0, 1);
-    const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
-    const images = uniqueValues(structure
-      ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
-      : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
-    return {
-      images,
-      editBaseImages: [],
-      structureImages: structure ? [structure] : [],
-      styleImages: styles,
-      editBaseCount: 0,
-      structureCount: structure ? 1 : 0,
-      hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
-      styleCount: styles.length,
-      generalCount: generalFallback.length,
-      structureDimensions,
-    };
-  }
-  if (mode === "strict") {
-    const images = uniqueValues([structure, ...providerImages.structure, ...providerImages.general, ...providerImages.style].filter(Boolean)).slice(0, 1);
-    return {
-      images,
-      editBaseImages: editBase && images.length ? [editBase] : [],
-      structureImages: !editBase && images.length ? images : [],
-      styleImages: [],
-      editBaseCount: editBase && images.length ? 1 : 0,
-      structureCount: !editBase && images.length ? 1 : 0,
-      styleCount: 0,
-      generalCount: 0,
-      structureDimensions: roleImages.dimensions?.[images[0]] || null,
-    };
-  }
+.connectors path.temp-wire {
+  stroke: var(--yellow);
+  stroke-dasharray: 6 5;
+}
 
-  const styles = uniqueValues([...providerImages.style, ...providerImages.general, ...providerImages.structure]).slice(0, 4);
-  return {
-    images: styles,
-    editBaseImages: [],
-    structureImages: [],
-    styleImages: styles,
-    structureCount: 0,
-    styleCount: styles.length,
-    generalCount: 0,
-    structureDimensions: null,
-  };
-}
-
-function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "structureStyle") {
-  return plan;
-}
-
-async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
-  const normalizedProvider = normalizeImageProvider(provider);
-  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
-  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
-  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
-    return buildSubmissionReferencePlan(plan, provider, mode);
-  }
+.canvas-toolbar {
+  position: fixed;
+  left: calc(220px + 320px + 18px);
+  bottom: 18px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #0b111a;
+}
 
-  const styleSwatches = await Promise.all(
-    plan.styleImages.map((url) => makeStyleReferenceSwatch(url).catch(() => url)),
-  );
-  const nextStyleImages = uniqueValues(styleSwatches.filter(isImageReferenceValue));
-  const nextImages = uniqueValues([
-    ...(plan.editBaseImages || []),
-    ...(plan.structureImages || []),
-    ...nextStyleImages,
-  ]).slice(0, 4);
-
-  return buildSubmissionReferencePlan({
-    ...plan,
-    images: nextImages,
-    styleImages: nextStyleImages,
-    styleCount: nextStyleImages.length,
-    styleSwatchMode: true,
-  }, provider, mode);
-}
-
-function makeStyleReferenceSwatch(src) {
-  return new Promise((resolve, reject) => {
-    if (!src || !isImageReferenceValue(src)) {
-      reject(new Error("Invalid style reference"));
-      return;
-    }
-
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      try {
-        const sampleSize = 24;
-        const outputSize = 512;
-        const sourceCanvas = document.createElement("canvas");
-        const sourceContext = sourceCanvas.getContext("2d");
-        sourceCanvas.width = sampleSize;
-        sourceCanvas.height = sampleSize;
-        sourceContext.drawImage(image, 0, 0, sampleSize, sampleSize);
-        const pixels = sourceContext.getImageData(0, 0, sampleSize, sampleSize).data;
-        const palette = [];
-        let redDominantCount = 0;
-        const step = 4 * 12;
-        for (let index = 0; index < pixels.length; index += step) {
-          const color = [pixels[index], pixels[index + 1], pixels[index + 2]];
-          if (isRedEmissiveColor(color)) redDominantCount += 1;
-          palette.push(color);
-        }
-        const redRatio = palette.length ? redDominantCount / palette.length : 0;
-        const stylePalette = redRatio > 0 && redRatio < 0.35
-          ? palette.filter((color) => !isRedEmissiveColor(color))
-          : palette;
-
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-        canvas.width = outputSize;
-        canvas.height = outputSize;
-        const gradient = context.createLinearGradient(0, 0, outputSize, outputSize);
-        const stops = stylePalette.length ? stylePalette : palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
-        stops.slice(0, 18).forEach((color, index) => {
-          gradient.addColorStop(index / Math.max(1, Math.min(stops.length, 18) - 1), `rgb(${color[0]}, ${color[1]}, ${color[2]})`);
-        });
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, outputSize, outputSize);
-        context.globalAlpha = 0.28;
-        for (let y = 0; y < 4; y += 1) {
-          for (let x = 0; x < 4; x += 1) {
-            const color = stops[(x + y * 4) % stops.length];
-            context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-            context.fillRect(x * 128, y * 128, 128, 128);
-          }
-        }
-        context.globalAlpha = 1;
-        resolve(canvas.toDataURL("image/jpeg", 0.9));
-      } catch (error) {
-        reject(error);
-      }
-    };
-    image.onerror = () => reject(new Error("Style reference load failed"));
-    image.src = src;
-  });
-}
-
-function isRedEmissiveColor(color) {
-  const [red, green, blue] = color.map((value) => Number(value || 0));
-  const max = Math.max(red, green, blue);
-  const min = Math.min(red, green, blue);
-  const saturation = max ? (max - min) / max : 0;
-  return red > 80 && saturation > 0.32 && red > green * 1.28 && red > blue * 1.12;
-}
-
-function formatReferencePlan(plan) {
-  const parts = [];
-  if (plan.editBaseCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
-  if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
-  if (plan.styleCount) parts.push(plan.styleSwatchMode ? `${plan.styleCount} 张风格色板` : `${plan.styleCount} 张风格图`);
-  if (plan.structureLocked && plan.lockedStyleCount) parts.push(`已启用结构锁，${plan.lockedStyleCount} 张风格图不作为构图输入`);
-  if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
-  if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
-  return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
-}
-
-function formatReferenceSourceTitles(roleImages) {
-  const structure = roleImages?.titles?.structure?.[0] || roleImages?.titles?.editBase?.[0] || "";
-  const style = roleImages?.titles?.style?.[0] || "";
-  const parts = [];
-  if (structure) parts.push(`结构源：${structure}`);
-  if (style) parts.push(`风格源：${style}`);
-  return parts.join("，");
-}
-
-function buildReferenceBindingPrompt(plan) {
-  const imageCount = Array.isArray(plan?.images) ? plan.images.length : 0;
-  if (!imageCount) return "";
-
-  const structureCount = Number(plan.structureCount || 0);
-  const styleCount = Number(plan.styleCount || 0);
-  const editBaseCount = Number(plan.editBaseCount || 0);
-  const hasStructure = structureCount > 0 || editBaseCount > 0;
-  const structureSize = plan.structureDimensions?.width && plan.structureDimensions?.height
-    ? `${Math.round(plan.structureDimensions.width)}x${Math.round(plan.structureDimensions.height)}`
-    : "";
-
-  const lines = [
-    "Reference binding tags:",
-  ];
-
-  if (hasStructure) {
-    lines.push(
-      `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
-      "@渲染结构图 controls composition, camera, perspective, scale, object placement, scene layout, canvas ratio, and local inherent colors on the original objects.",
-    );
-  }
+#page-workspace.active .canvas-toolbar {
+  display: flex;
+}
 
-  if (styleCount > 0) {
-    const start = hasStructure ? 2 : 1;
-    const end = start + styleCount - 1;
-    const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
-    lines.push(
-      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
-      "@风格参考图 controls only palette, color temperature, material color, lighting mood, atmosphere, texture, and render finish.",
-      plan.styleSwatchMode ? "@风格参考图 is a non-spatial color/material swatch." : "",
-    );
-  }
+.canvas-toolbar button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #b8c9dc;
+}
 
-  if (hasStructure && styleCount > 0) {
-    lines.push(
-      "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
-      "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
-      "Red light rule: red must remain localized to visible lamps, warning glows, signs, or original red materials only. Do not spread red into the overall color temperature, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
-    );
-  }
+.canvas-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
 
-  return lines.join("\n");
-}
-
-function getNodeImageSource(node) {
-  return getNodeImageSources(node)[0] || "";
-}
-
-function getNodeImageSources(node, options = {}) {
-  if (!node) return [];
-  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
-  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
-  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
-  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
-  const primaryImageData = node.dataset.imageDataInlineUrl || "";
-  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
-  const persistent = [
-    node.dataset.generatedImageUrl,
-    ...parseJsonArray(node.dataset.generatedImageUrls),
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ];
-  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
-  return uniqueValues([
-    node.dataset.generatedImageUrl,
-    ...parseJsonArray(node.dataset.generatedImageUrls),
-    ...uploadedDataUrls,
-    primaryImageData,
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceDataUrls,
-    primaryReferenceData,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ].filter(Boolean));
-}
-
-function getNodeUploadedImageSources(node, options = {}) {
-  if (!node) return [];
-  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
-  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
-  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
-  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
-  const primaryImageData = node.dataset.imageDataInlineUrl || "";
-  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
-  const persistent = [
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ];
-  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
-  return uniqueValues([
-    ...uploadedDataUrls,
-    primaryImageData,
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceDataUrls,
-    primaryReferenceData,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ].filter(Boolean));
-}
-
-function getNodeVideoSource(node) {
-  return getNodeVideoSources(node)[0] || "";
-}
-
-function getNodeVideoSources(node) {
-  if (!node) return [];
-  return uniqueValues([
-    node.dataset.generatedVideoUrl,
-    ...parseJsonArray(node.dataset.generatedVideoUrls),
-    ...parseJsonArray(node.dataset.videoUrls),
-    node.dataset.videoDataUrl,
-    ...parseJsonArray(node.dataset.referenceVideoUrls),
-    node.dataset.referenceVideoUrl,
-  ].filter(Boolean));
-}
-
-function getNodeMediaSources(node) {
-  return {
-    images: getNodeImageSources(node),
-    videos: getNodeVideoSources(node),
-  };
-}
-
-function isRemoteImageUrl(value) {
-  return typeof value === "string" && /^https?:\/\//i.test(value);
-}
-
-function isImageReferenceValue(value) {
-  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
-}
-
-function uniqueValues(values) {
-  return [...new Set(values)];
-}
-
-function parseJsonArray(value) {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
+.canvas-toolbar strong {
+  min-width: 48px;
+  text-align: center;
 }
 
-function parseTextNodeFields(value = "") {
-  const text = String(value || "");
-  const fields = {
-    requirement: "",
-    revision: "",
-    scene: "",
-    negative: "",
-  };
-  const labels = [
-    ["requirement", "需求"],
-    ["revision", "修改意见"],
-    ["scene", "场景描述"],
-    ["negative", "禁用项"],
-  ];
-
-  labels.forEach(([key, label], index) => {
-    const nextLabel = labels[index + 1]?.[1];
-    const pattern = nextLabel
-      ? new RegExp(`${label}[：:]\\s*([\\s\\S]*?)(?=\\n${nextLabel}[：:])`)
-      : new RegExp(`${label}[：:]\\s*([\\s\\S]*)`);
-    const match = text.match(pattern);
-    if (match) fields[key] = match[1].trim();
-  });
-
-  if (!Object.values(fields).some(Boolean)) fields.requirement = text.trim();
-  return fields;
-}
-
-function formatTextNodeFields(fields) {
-  return [
-    ["需求", fields.requirement],
-    ["修改意见", fields.revision],
-    ["场景描述", fields.scene],
-    ["禁用项", fields.negative],
-  ]
-    .filter(([, value]) => String(value || "").trim())
-    .map(([label, value]) => `${label}：${String(value).trim()}`)
-    .join("\n");
-}
-
-function renderUploadControl(type, fileName = "") {
-  const accept = type === "image" ? "image/*" : "video/*";
-  const label = type === "image" ? "上传图片" : "上传视频";
-  return `
-    <label class="upload-control">
-      <span>${label}</span>
-      <input class="node-file-input" type="file" accept="${accept}">
-      <div class="upload-box">
-        <strong>${fileName ? "已选择文件" : label}</strong>
-        <small class="upload-name">${escapeHtml(fileName || "点击选择本地文件")}</small>
-      </div>
-      <div class="upload-preview"></div>
-    </label>
-  `;
-}
-
-function duplicateNode(node) {
-  const clone = createNode({
-    type: node.dataset.type,
-    title: `${node.querySelector(".node-title strong").textContent} 副本`,
-    content: getNodeContent(node),
-    imagePurpose: node.dataset.imagePurpose || "自定义",
-    referenceMode: node.dataset.referenceMode || "structureStyle",
-    imageRole: node.dataset.imageRole || "general",
-    imageQuality: node.dataset.imageQuality || "low",
-    imageModel: node.dataset.imageModel || "gpt-image-2-official",
-    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
-    apimartChannel: "b",
-    fileName: node.dataset.fileName || "",
-    imageNaturalWidth: node.dataset.imageNaturalWidth || "",
-    imageNaturalHeight: node.dataset.imageNaturalHeight || "",
-    imageUrls: parseJsonArray(node.dataset.imageUrls),
-    imageDataUrl: node.dataset.imageDataUrl || "",
-    imageDataUrls: parseJsonArray(node.dataset.imageDataUrls),
-    imageDataInlineUrl: node.dataset.imageDataInlineUrl || "",
-    referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
-    referenceImageDataUrl: node.dataset.referenceImageDataUrl || "",
-    referenceImageDataUrls: parseJsonArray(node.dataset.referenceImageDataUrls),
-    referenceImageDataInlineUrl: node.dataset.referenceImageDataInlineUrl || "",
-    referenceFileName: node.dataset.referenceFileName || "",
-    generatedImageUrl: node.dataset.generatedImageUrl || "",
-    generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
-    generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
-    generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
-    videoUrls: parseJsonArray(node.dataset.videoUrls),
-    videoDataUrl: node.dataset.videoDataUrl || "",
-    referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
-    referenceVideoUrl: node.dataset.referenceVideoUrl || "",
-    generatedVideoUrl: node.dataset.generatedVideoUrl || "",
-    generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
-    videoMode: normalizeVideoModeValue(node.dataset.videoMode),
-    videoDuration: node.dataset.videoDuration || "5",
-    videoModel: normalizeVideoModelValue(node.dataset.videoModel),
-    videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
-    videoResolution: node.dataset.videoResolution || "1080p",
-    videoSeed: node.dataset.videoSeed || "",
-    videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
-    videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
-    videoWebSearch: node.dataset.videoWebSearch === "true",
-    videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
-    videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
-    videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
-    videoReferenceAudioUrls: parseJsonArray(node.dataset.videoReferenceAudioUrls),
-    folderNodes: parseJsonArray(node.dataset.folderNodes),
-    folderConnections: parseJsonArray(node.dataset.folderConnections),
-    x: Number(node.dataset.x) + 36,
-    y: Number(node.dataset.y) + 36,
-  });
-  selectNode(clone);
-  saveCurrentProject();
-}
-
-function deleteNode(node) {
-  connectorSvg
-    .querySelectorAll(`[data-from="${node.id}"], [data-to="${node.id}"]`)
-    .forEach((path) => path.remove());
-  node.remove();
-  selectNode(null);
-  saveCurrentProject();
-}
-
-function deleteSelectedNodes() {
-  const nodes = [...selectedNodes];
-  if (!nodes.length) return;
-  nodes.forEach((node) => {
-    connectorSvg
-      .querySelectorAll(`[data-from="${node.id}"], [data-to="${node.id}"]`)
-      .forEach((path) => path.remove());
-    node.remove();
-  });
-  selectNode(null);
-  saveCurrentProject();
-}
-
-function ungroupFolderNode(folderNode) {
-  if (!folderNode || folderNode.dataset.type !== "folder" || activeFolder) return;
-  const folderNodes = parseJsonArray(folderNode.dataset.folderNodes);
-  const folderConnections = parseJsonArray(folderNode.dataset.folderConnections);
-  if (!folderNodes.length) {
-    deleteNode(folderNode);
-    return;
-  }
+.canvas-toolbar .active {
+  background: rgba(22, 217, 245, 0.14);
+  color: var(--cyan);
+}
 
-  const originX = Number(folderNode.dataset.x) || 0;
-  const originY = Number(folderNode.dataset.y) || 0;
-  const restoredNodes = folderNodes.map((saved) => {
-    const node = createNode({
-      ...saved,
-      x: originX + (Number(saved.x) || 0) - 120,
-      y: originY + (Number(saved.y) || 0) - 120,
-    });
-    node.dataset.imagePurpose = saved.imagePurpose || "自定义";
-    node.dataset.referenceMode = saved.referenceMode || "structureStyle";
-    node.dataset.imageRole = saved.imageRole || "general";
-    node.dataset.imageQuality = saved.imageQuality || "high";
-    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
-    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-    node.dataset.apimartChannel = "b";
-    if (saved.tone) node.dataset.tone = saved.tone;
-    if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
-    if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
-    setNodeType(node, saved.type, saved.content);
-    renderNodeImagePreview(node);
-    if (saved.imageDataKey) {
-      loadProjectImage(saved.imageDataKey).then((value) => {
-        if (!value) return;
-        node.dataset.imageDataUrl = value;
-        renderNodeImagePreview(node);
-      });
-    }
-    if (saved.referenceImageDataKey) {
-      loadProjectImage(saved.referenceImageDataKey).then((value) => {
-        if (value) node.dataset.referenceImageDataUrl = value;
-      });
-    }
-    return node;
-  });
-
-  folderNode.remove();
-  folderConnections.forEach((saved) => {
-    const from = document.getElementById(saved.from);
-    const to = document.getElementById(saved.to);
-    if (from && to) addConnection(from, to, saved.fromSide || "right", saved.toSide || "left");
-  });
-  selectNodes(restoredNodes);
-  saveCurrentProject();
-  refreshConnectionsSoon();
-}
-
-function createFolderFromSelectedNodes() {
-  const nodes = [...selectedNodes].filter((node) => node.isConnected);
-  if (!nodes.length || activeFolder) return;
-  const ids = new Set(nodes.map((node) => node.id));
-  const minX = Math.min(...nodes.map((node) => Number(node.dataset.x) || 0));
-  const minY = Math.min(...nodes.map((node) => Number(node.dataset.y) || 0));
-  const folderNodes = serializeNodes(nodes).map((node) => ({
-    ...node,
-    x: (Number(node.x) || 0) - minX + 120,
-    y: (Number(node.y) || 0) - minY + 120,
-  }));
-  const folderConnections = serializeConnections((path) => ids.has(path.dataset.from) && ids.has(path.dataset.to));
-
-  connectorSvg.querySelectorAll("path:not(.temp-wire)").forEach((path) => {
-    if (ids.has(path.dataset.from) || ids.has(path.dataset.to)) path.remove();
-  });
-  nodes.forEach((node) => node.remove());
-  clearSelectedNodes();
-
-  const folder = createNode({
-    type: "folder",
-    title: `文件夹 ${folderNodes.length}`,
-    content: `文件夹内包含 ${folderNodes.length} 个节点。`,
-    x: minX,
-    y: minY,
-    folderNodes,
-    folderConnections,
-  });
-  selectNode(folder);
-  saveCurrentProject();
-  refreshConnectionsSoon();
-}
-
-function enterFolder(folderNode) {
-  if (!folderNode || folderNode.dataset.type !== "folder" || activeFolder) return;
-  saveCurrentProject();
-  activeFolder = {
-    id: folderNode.id,
-    title: folderNode.querySelector(".node-title strong")?.textContent || "文件夹",
-  };
-  const data = {
-    nodes: parseJsonArray(folderNode.dataset.folderNodes),
-    connections: parseJsonArray(folderNode.dataset.folderConnections),
-  };
-  clearCanvas();
-  restoreCanvasData(data);
-  syncFolderUi();
-}
-
-function exitFolder() {
-  if (!activeFolder) return;
-  saveActiveFolder();
-  activeFolder = null;
-  clearCanvas();
-  restoreProject(currentProject);
-  syncFolderUi();
-}
-
-function saveActiveFolder() {
-  if (!activeFolder || !currentProject) return;
-  const root = readJson(projectKey(currentProject), { nodes: [], connections: [], memories: conversationMemories });
-  const folder = root.nodes?.find((node) => node.id === activeFolder.id);
-  if (!folder) return;
-  const data = serializeCanvasData();
-  folder.folderNodes = data.nodes;
-  folder.folderConnections = data.connections;
-  folder.content = `文件夹内包含 ${data.nodes.length} 个节点。`;
-  try {
-    localStorage.setItem(projectKey(currentProject), JSON.stringify(root));
-  } catch (error) {
-    console.error("Folder save failed", error);
-  }
+.generated-export-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: none;
+  place-items: center;
+  background: rgba(1, 5, 10, 0.72);
+  padding: 24px;
 }
 
-function syncFolderUi() {
-  if (exitFolderCanvas) exitFolderCanvas.hidden = !activeFolder;
-  if (folderExitTop) folderExitTop.hidden = !activeFolder;
-  if (createFolderFromSelection) createFolderFromSelection.hidden = Boolean(activeFolder);
-  if (workspaceProjectName) {
-    workspaceProjectName.textContent = activeFolder ? `${currentProject} / ${activeFolder.title}` : currentProject;
-  }
+.generated-export-modal.show {
+  display: grid;
 }
 
-function getActionNodes(fallbackNode) {
-  if (fallbackNode && selectedNodes.size > 1 && selectedNodes.has(fallbackNode)) {
-    return [...selectedNodes];
-  }
-  return fallbackNode ? [fallbackNode] : [];
+.generated-export-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(980px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  border: 1px solid rgba(22, 217, 245, 0.32);
+  border-radius: 8px;
+  background: #0b111a;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
+  overflow: hidden;
 }
 
-function runNode(node) {
-  if (node.dataset.type === "image") {
-    runImageGeneration(node);
-    return;
-  }
-  if (node.dataset.type === "video") {
-    runVideoGeneration(node);
-    return;
-  }
+.generated-export-panel header,
+.generated-export-panel footer,
+.generated-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
 
-  node.classList.add("running");
-  let status = node.querySelector(".node-status");
-  if (!status) {
-    status = document.createElement("div");
-    status.className = "node-status";
-    node.appendChild(status);
-  }
-  status.textContent =
-    node.dataset.type === "image"
-      ? `正在提交 ${getImageProviderLabel(node.dataset.imageProvider || "apimart")} ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
-      : node.dataset.type === "video"
-        ? `正在提交 ApiMart ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || "Seedance2"} 视频项目...`
-        : "正在处理文本对话...";
-  setTimeout(() => {
-    node.classList.remove("running");
-    status.textContent = "任务已保存到当前画布。";
-  }, 800);
-}
-
-async function runVideoGeneration(node) {
-  const status = ensureNodeStatus(node);
-  const preview = node.querySelector(".upload-preview");
-  ensureVideoDefaults(node);
-  const prompt = buildPromptWithIncomingText(node, node.querySelector(".node-description")?.textContent || "");
-  const connectedNodes = getConnectedInputNodes(node);
-  const imageUrls = uniqueValues([
-    ...getNodeImageSources(node),
-    ...connectedNodes.flatMap(getNodeImageSources),
-  ].filter(isRemoteImageUrl));
-  const videoUrls = uniqueValues([
-    ...getNodeVideoSources(node),
-    ...connectedNodes.flatMap(getNodeVideoSources),
-  ].filter(isRemoteImageUrl));
-
-  node.classList.add("running");
-  status.textContent = "正在提交 ApiMart 视频任务...";
-  if (preview && !preview.innerHTML.trim()) {
-    preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
-  }
+.generated-export-panel header {
+  justify-content: space-between;
+}
 
-  try {
-    const payload = {
-      model: normalizeVideoModelValue(node.dataset.videoModel),
-      mode: normalizeVideoModeValue(node.dataset.videoMode),
-      prompt,
-      imageUrls,
-      videoUrls,
-      duration: node.dataset.videoDuration || "5",
-      aspectRatio: node.dataset.videoAspectRatio || "16:9",
-      resolution: node.dataset.videoResolution || "1080p",
-      seed: node.dataset.videoSeed || "",
-      generateAudio: node.dataset.videoGenerateAudio === "true",
-      returnLastFrame: node.dataset.videoReturnLastFrame === "true",
-      webSearch: node.dataset.videoWebSearch === "true",
-      firstFrameUrl: node.dataset.videoFirstFrameUrl || "",
-      lastFrameUrl: node.dataset.videoLastFrameUrl || "",
-      referenceAudioUrls: uniqueValues([
-        node.dataset.videoReferenceAudioUrl,
-        ...parseJsonArray(node.dataset.videoReferenceAudioUrls),
-      ].filter(isRemoteImageUrl)),
-      apimartChannel: "b",
-    };
-    node.dataset.lastVideoPayload = JSON.stringify(payload);
-    const result = await submitAndPollVideoTask(payload, status);
-    if (!result.videoUrl) throw new Error("任务完成但没有返回视频地址");
-    node.dataset.generatedVideoUrl = result.videoUrl;
-    node.dataset.generatedVideoUrls = JSON.stringify(addGeneratedVideoHistory(node, result.videoUrl));
-    renderNodeVideoPreview(node);
-    status.textContent = "视频生成完成。";
-  } catch (error) {
-    status.textContent = `视频生成失败：${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    node.classList.remove("running");
-    saveCurrentProject();
-  }
+.generated-export-panel header div {
+  display: grid;
+  gap: 3px;
 }
 
-async function submitAndPollVideoTask(payload, status) {
-  const response = await fetch("/api/generate-video", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const result = await readResponseJson(response);
-  if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
-  if (!result.taskId) throw new Error("后端没有返回 video taskId");
-  status.textContent = "视频任务已提交，正在生成...";
-  return pollVideoTask(result.taskId, status, payload.apimartChannel);
-}
-
-async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
-  const deadline = Date.now() + 1800000;
-  let lastStatus = "submitted";
-  let attempts = 0;
-  while (Date.now() < deadline) {
-    await sleep(5000);
-    attempts += 1;
-    const response = await fetch(
-      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}`,
-    );
-    const result = await readResponseJson(response);
-    if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
-    lastStatus = result.status || lastStatus;
-    const minutes = Math.floor((attempts * 5) / 60);
-    if (statusEl) statusEl.textContent = `视频生成中：${lastStatus}，已等待约 ${minutes} 分钟`;
-    if (result.videoUrl) return result;
-    if (["failed", "error", "cancelled"].includes(lastStatus)) {
-      throw new Error(formatApiError(result, `ApiMart 视频任务失败：${lastStatus}`));
-    }
-  }
-  throw new Error(`等待视频生成超过 30 分钟，最后状态：${lastStatus}`);
+.generated-export-panel header strong {
+  font-size: 18px;
 }
 
-async function runImageGeneration(node) {
-  if (imageGenerationControllers.has(node.id)) {
-    cancelImageGeneration(node);
-    return;
-  }
+.generated-export-panel header span,
+.generated-export-panel footer span {
+  color: var(--muted);
+  font-size: 13px;
+}
 
-  const controller = new AbortController();
-  imageGenerationControllers.set(node.id, controller);
-  syncImageSubmitButton(node);
-
-  const prompt = buildPromptWithIncomingText(node, node.querySelector(".node-description")?.textContent || "");
-  const preview = node.querySelector(".upload-preview");
-  const uploadName = node.dataset.fileName || "";
-  const status = ensureNodeStatus(node);
-  const referenceMode = node.dataset.referenceMode || "structureStyle";
-  const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const selectedModel = selectedProvider === "rhart"
-    ? "gpt-image-2"
-    : normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
-  const roleImages = collectRoleReferenceImages(node);
-  const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
-  const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
-  const referenceImages = referencePlan.images;
-  const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
-  const brokenReferenceCount = [...node.querySelectorAll(".broken-image-placeholder")].length;
-  const referenceBindings = buildReferenceBindingPrompt(referencePlan);
-  const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
-    [referenceBindings, prompt].filter(Boolean).join("\n\n"),
-    referenceMode,
-    roleImages,
-    referencePlan,
-    node.dataset.imagePurpose || imageOptions.purpose,
-  ), selectedModel, requestedSize, referencePlan));
-
-  node.classList.add("running");
-  status.textContent = brokenReferenceCount
-    ? `检测到 ${brokenReferenceCount} 个失效图片链接，建议重新上传参考图；仍在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`
-    : `正在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`;
-
-    const payload = {
-      model: selectedModel,
-      prompt: enhancedPrompt,
-      imageName: safeAsciiFileName(uploadName, "image.png"),
-      imageDataUrls: referenceImages,
-      structureImageUrls: referencePlan.structureImages || [],
-      styleImageUrls: referencePlan.styleImages || [],
-      editBaseImageUrls: referencePlan.editBaseImages || [],
-      referenceBindings,
-      purpose: node.dataset.imagePurpose || imageOptions.purpose,
-      referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
-      quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
-      size: requestedSize,
-      provider: selectedProvider,
-      apimartChannel: "b",
-  };
-  exposeImagePromptDebug(node, {
-    userPrompt: prompt,
-    referenceBindings,
-    finalPrompt: enhancedPrompt,
-    referenceMode,
-    referencePlan,
-    roleImages,
-    payload,
-  });
-
-  try {
-    const hasLocalOnlyReferences = [
-      ...parseJsonArray(node.dataset.imageUrls),
-      node.dataset.imageDataUrl,
-      ...parseJsonArray(node.dataset.referenceImageUrls),
-      node.dataset.referenceImageDataUrl,
-      ...getConnectedInputNodes(node).flatMap(getNodeImageSources),
-    ].some((value) => value && !isRemoteImageUrl(value));
-
-    const sizeStatus = requestedSize || (referenceImages.length ? "按结构图/自动" : "自动");
-    const sourceStatus = formatReferenceSourceTitles(roleImages);
-    status.textContent = referenceImages.length
-      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}${sourceStatus ? `，${sourceStatus}` : ""}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
-      : hasLocalOnlyReferences
-        ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
-      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
-    node.dataset.lastImagePayload = JSON.stringify(payload);
-
-    const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
-    if (!finalResult.imageUrl) {
-      throw new Error("任务完成但没有返回图片地址");
-    }
-
-    if (preview) {
-      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="">`;
-    }
-    node.dataset.generatedImageUrl = finalResult.imageUrl;
-    node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
-    getImageDimensions(finalResult.imageUrl).then((dimensions) => {
-      if (!dimensions) return;
-      node.dataset.generatedImageNaturalWidth = String(dimensions.width);
-      node.dataset.generatedImageNaturalHeight = String(dimensions.height);
-      saveCurrentProject();
-    });
-    renderNodeImagePreview(node);
-    status.textContent = "图片生成完成。";
-  } catch (error) {
-    if (isAbortError(error)) {
-      status.textContent = "生成已取消，可以修改后重新提交。";
-    } else {
-      status.textContent = `生成失败：${error instanceof Error ? error.message : "请确认已部署后端并配置 APIMART_API_KEY。"}`;
-    }
-    if (preview && !preview.innerHTML.trim()) {
-      preview.innerHTML = '<div class="generated-placeholder">后端未连接</div>';
-    }
-  } finally {
-    imageGenerationControllers.delete(node.id);
-    syncImageSubmitButton(node);
-    node.classList.remove("running");
-    saveCurrentProject();
-  }
+.generated-export-panel button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: #111927;
+  color: var(--text);
+  padding: 0 12px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
-function exposeImagePromptDebug(node, debug) {
-  if (!node || !debug) return;
-  const payload = debug.payload || {};
-  const summary = {
-    provider: payload.provider,
-    model: payload.model,
-    size: payload.size,
-    quality: payload.quality,
-    referenceMode: debug.referenceMode,
-    purpose: payload.purpose,
-    imageCount: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.length : 0,
-    structureCount: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.length : 0,
-    styleCount: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.length : 0,
-    editBaseCount: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.length : 0,
-  };
-  const report = {
-    summary,
-    userPrompt: debug.userPrompt || "",
-    referenceBindings: debug.referenceBindings || "",
-    finalPrompt: debug.finalPrompt || "",
-    payload,
-    referencePlan: debug.referencePlan || null,
-  };
-  try {
-    node.dataset.lastImagePrompt = String(debug.finalPrompt || "").slice(0, 20000);
-    node.dataset.lastImagePromptDebug = JSON.stringify({
-      ...report,
-      payload: {
-        ...payload,
-        imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
-        structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
-        styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
-        editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
-      },
-    });
-  } catch (error) {
-    console.warn("[AI Video Box] Failed to store image prompt debug data.", error);
-  }
-  if (typeof window === "undefined") return;
-  window.__lastImagePromptDebug = report;
-  console.groupCollapsed("[AI Video Box] Image prompt sent to backend");
-  console.log("Summary:", summary);
-  console.log("User prompt:", report.userPrompt);
-  console.log("Reference bindings:", report.referenceBindings);
-  console.log("Final prompt:", report.finalPrompt);
-  console.log("Payload:", payload);
-  console.groupEnd();
-}
-
-function summarizeImageSource(value) {
-  const text = String(value || "");
-  if (!text) return "";
-  if (text.startsWith("data:")) {
-    const commaIndex = text.indexOf(",");
-    const header = commaIndex >= 0 ? text.slice(0, commaIndex) : text.slice(0, 64);
-    return `${header};base64...(${estimateDataUrlBytes(text)} bytes)`;
-  }
-  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
-}
-
-async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", provider = "apimart") {
-  const deadline = Date.now() + 1800000;
-  let lastStatus = "submitted";
-  let attempts = 0;
-
-  while (Date.now() < deadline) {
-    await sleep(5000, signal);
-    attempts += 1;
-    const query = new URLSearchParams({
-      taskId: String(taskId),
-      apimartChannel: String(apimartChannel || "b"),
-      provider: String(provider || "apimart"),
-    });
-    const response = await fetch(
-      `/api/generate-image?${query.toString()}`,
-      { signal },
-    );
-    const result = await readResponseJson(response);
-    if (!response.ok) {
-      throw new Error(formatApiError(result, `HTTP ${response.status}`));
-    }
-    lastStatus = result.status || lastStatus;
-    if (statusEl) {
-      const minutes = Math.floor((attempts * 5) / 60);
-      const endpointHint = result.rayinEndpoint ? "，RayinAI扩展接口" : "";
-      statusEl.textContent = `生成中：${lastStatus}${endpointHint}，已等待约 ${minutes} 分钟`;
-    }
-    if (result.imageUrl) {
-      return result;
-    }
-    if (["failed", "error", "cancelled"].includes(lastStatus)) {
-      throw new Error(formatApiError(result, `ApiMart 任务失败：${lastStatus}`));
-    }
-  }
+.generated-export-panel button:hover {
+  border-color: rgba(22, 217, 245, 0.45);
+}
 
-  throw new Error(`等待图片生成超过 30 分钟，最后状态：${lastStatus}`);
-}
-
-async function submitAndPollImageTask(payload, status, preview, node, signal) {
-  try {
-    return await submitAndPollImageTaskOnce(payload, status, preview, node, signal);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/prohibited|flagged|safety|policy|moderation|敏感|违规|拦截/i.test(message)) throw error;
-    status.textContent = "提示词或参考图触发上游拦截，正在移除参考图并安全重试一次...";
-    const saferPayload = {
-      ...payload,
-      prompt: makePromptSafer(payload.prompt),
-      imageDataUrls: [],
-      imageName: "",
-    };
-    node.dataset.lastImagePayload = JSON.stringify(saferPayload);
-    return submitAndPollImageTaskOnce(saferPayload, status, preview, node, signal);
-  }
+.generated-export-panel button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
-async function submitAndPollImageTaskOnce(payload, status, preview, node, signal) {
-  let response = await fetchImageGenerationApi(payload, signal);
+.generated-export-actions {
+  border-bottom-color: rgba(22, 217, 245, 0.14);
+}
 
-  let result = await readResponseJson(response);
-  if (!response.ok && shouldRetryWithSaferPrompt(result)) {
-    status.textContent = "提示词触发上游拦截，正在安全改写后重试提交...";
-    payload.prompt = makePromptSafer(payload.prompt);
-    node.dataset.lastImagePayload = JSON.stringify(payload);
-    response = await fetchImageGenerationApi(payload, signal);
-    result = await readResponseJson(response);
-  }
-  if (!response.ok) {
-    throw new Error(formatApiError(result, `HTTP ${response.status}`));
-  }
-  if (result.imageUrl) {
-    status.textContent = result.provider === "rayinai"
-      ? "RayinAI 已直接返回图片。"
-      : result.provider === "rhart"
-        ? "RHarT G31 图片生成完成。"
-        : "图片生成完成。";
-    return result;
-  }
-  if (!result.taskId) {
-    throw new Error("后端没有返回 taskId");
-  }
+.generated-export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
 
-  node.dataset.lastImageTaskId = result.taskId;
-  if (result.rayinEndpoint) node.dataset.lastRayinEndpoint = result.rayinEndpoint;
-  status.textContent = "任务已提交，正在生成...";
-  if (preview) {
-    preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
-  }
-  return pollImageTask(result.taskId, status, signal, payload.apimartChannel, result.provider);
-}
-
-async function fetchImageGenerationApi(payload, signal) {
-  try {
-    return await fetch("/api/generate-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    });
-  } catch (error) {
-    if (isAbortError(error)) throw error;
-    throw new Error(`前端到 /api/generate-image 连接失败：${error instanceof Error ? error.message : String(error)}。可能是 Vercel 函数超时、部署正在重启，或网络请求被中断。`);
-  }
+.generated-export-item {
+  display: grid;
+  grid-template-rows: auto 112px auto auto;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #101722;
+  padding: 9px;
+  cursor: pointer;
 }
 
-function cancelImageGeneration(node) {
-  const controller = imageGenerationControllers.get(node.id);
-  if (!controller) return;
-  controller.abort();
-  const status = ensureNodeStatus(node);
-  status.textContent = "正在取消生成...";
-  syncImageSubmitButton(node);
-}
-
-function syncImageSubmitButton(node) {
-  if (!submitImageConfig) return;
-  const activeNode = node || configNode;
-  const isRunning = activeNode ? imageGenerationControllers.has(activeNode.id) : false;
-  submitImageConfig.textContent = isRunning ? "停止生成" : "提交";
-  submitImageConfig.classList.toggle("danger", isRunning);
-}
-
-function isAbortError(error) {
-  return error?.name === "AbortError" || /abort/i.test(String(error?.message || error));
-}
-
-function sleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
-}
-
-function openImageViewer(src, sources = [src]) {
-  if (!imageViewer || !imageViewerImg || !src) return;
-  imageViewerSources = uniqueValues((sources.length ? sources : [src]).filter(Boolean));
-  imageViewerIndex = Math.max(0, imageViewerSources.indexOf(src));
-  imageViewerImg.src = src;
-  setImageViewerScale(1);
-  imageViewer.classList.add("show");
-  imageViewer.setAttribute("aria-hidden", "false");
-}
-
-function closeImageViewerPanel() {
-  if (!imageViewer || !imageViewerImg) return;
-  imageViewer.classList.remove("show");
-  imageViewer.setAttribute("aria-hidden", "true");
-  imageViewerImg.removeAttribute("src");
-  imageViewerSources = [];
-  imageViewerIndex = 0;
-  setImageViewerScale(1);
-}
-
-function setImageViewerScale(scale) {
-  imageViewerScale = Math.min(4, Math.max(0.5, scale));
-  if (imageViewerImg) {
-    imageViewerImg.style.transform = `scale(${imageViewerScale})`;
-    imageViewerImg.style.cursor = imageViewerScale > 1 ? "zoom-out" : "zoom-in";
-  }
+.generated-export-item.selected {
+  border-color: rgba(22, 217, 245, 0.58);
+  box-shadow: 0 0 0 1px rgba(22, 217, 245, 0.16);
 }
 
-function stepImageViewer(direction) {
-  if (!imageViewerSources.length || !imageViewerImg) return;
-  imageViewerIndex = (imageViewerIndex + direction + imageViewerSources.length) % imageViewerSources.length;
-  imageViewerImg.src = imageViewerSources[imageViewerIndex];
-  setImageViewerScale(1);
-}
-
-function getViewerSourcesForImage(image) {
-  const node = image.closest(".node");
-  if (node?.dataset.type === "image") {
-    return uniqueValues([
-      ...getGeneratedImageHistory(node),
-      ...parseJsonArray(node.dataset.imageUrls),
-      node.dataset.imageDataUrl,
-    ].filter(Boolean));
-  }
-  const scope = image.closest(".upload-preview, .config-input-thumbs, .output-history-popover") || document;
-  return uniqueValues([...scope.querySelectorAll("img")].map((item) => item.src).filter(Boolean));
-}
-
-function openGeneratedImageExportPanel() {
-  const items = collectGeneratedImageExportItems();
-  let modal = document.querySelector("#generatedImageExportModal");
-  if (!modal) {
-    modal = document.createElement("div");
-    modal.id = "generatedImageExportModal";
-    modal.className = "generated-export-modal";
-    modal.setAttribute("aria-hidden", "true");
-    modal.innerHTML = `
-      <div class="generated-export-panel" role="dialog" aria-modal="true">
-        <header>
-          <div>
-            <strong>导出生成图片</strong>
-            <span data-export-summary></span>
-          </div>
-          <button type="button" data-export-close>关闭</button>
-        </header>
-        <div class="generated-export-actions">
-          <button type="button" data-export-select="all">全选</button>
-          <button type="button" data-export-select="none">取消</button>
-          <button type="button" data-export-select="latest">每个节点最新</button>
-        </div>
-        <div class="generated-export-grid" data-export-grid></div>
-        <footer>
-          <span data-export-status></span>
-          <button type="button" data-export-download>导出 ZIP</button>
-        </footer>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    modal.addEventListener("click", handleGeneratedImageExportClick);
-  }
+.generated-export-item input {
+  justify-self: start;
+  accent-color: var(--cyan);
+}
 
-  exportImageSelection = new Set(items.map((item) => item.id));
-  modal.dataset.items = JSON.stringify(items);
-  renderGeneratedImageExportPanel(modal, items);
-  modal.classList.add("show");
-  modal.setAttribute("aria-hidden", "false");
-}
-
-function collectGeneratedImageExportItems() {
-  const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node.dataset.type === "image");
-  const items = [];
-  const seen = new Set();
-  nodes.forEach((node) => {
-    const title = node.querySelector(".node-title strong")?.textContent || "图片节点";
-    const history = getGeneratedImageHistory(node);
-    history.forEach((url, index) => {
-      if (!url || seen.has(url)) return;
-      seen.add(url);
-      items.push({
-        id: `img-${items.length}`,
-        url,
-        title,
-        index,
-        latest: index === 0,
-        fileName: buildExportImageFileName(title, index, url, items.length),
-      });
-    });
-  });
-  return items;
-}
-
-function buildExportImageFileName(title, index, url, globalIndex = 0) {
-  const safeTitle = String(title || "image").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 48) || "image";
-  const extension = getImageExtensionFromUrl(url);
-  const suffix = index === 0 ? "latest" : `history-${index + 1}`;
-  return `${String(globalIndex + 1).padStart(3, "0")}-${safeTitle}-${suffix}.${extension}`;
-}
-
-function getImageExtensionFromUrl(url) {
-  if (/^data:image\/jpe?g/i.test(url)) return "jpg";
-  if (/^data:image\/webp/i.test(url)) return "webp";
-  if (/^data:image\/gif/i.test(url)) return "gif";
-  const pathname = (() => {
-    try {
-      return new URL(url, window.location.href).pathname;
-    } catch {
-      return String(url || "");
-    }
-  })();
-  const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
-  return match ? match[1].toLowerCase().replace("jpeg", "jpg") : "png";
-}
-
-function renderGeneratedImageExportPanel(modal, items) {
-  const grid = modal.querySelector("[data-export-grid]");
-  const summary = modal.querySelector("[data-export-summary]");
-  const status = modal.querySelector("[data-export-status]");
-  if (summary) summary.textContent = items.length ? `共 ${items.length} 张生成图` : "暂无可导出的生成图";
-  if (status) status.textContent = items.length ? `已选 ${exportImageSelection.size} 张` : "画布上还没有生成图片";
-  if (!grid) return;
-  grid.innerHTML = items.length
-    ? items.map((item) => `
-      <label class="generated-export-item ${exportImageSelection.has(item.id) ? "selected" : ""}">
-        <input type="checkbox" data-export-item="${escapeHtml(item.id)}" ${exportImageSelection.has(item.id) ? "checked" : ""}>
-        <img src="${item.url}" alt="">
-        <span>${escapeHtml(item.title)}</span>
-        <small>${item.latest ? "最新" : `历史 ${item.index + 1}`}</small>
-      </label>
-    `).join("")
-    : '<div class="generated-export-empty">暂无生成图片</div>';
-}
-
-function handleGeneratedImageExportClick(event) {
-  const modal = event.currentTarget;
-  if (event.target === modal || event.target.closest("[data-export-close]")) {
-    closeGeneratedImageExportPanel();
-    return;
-  }
-  const items = readGeneratedExportItems(modal);
-  const checkbox = event.target.closest("[data-export-item]");
-  if (checkbox) {
-    if (checkbox.checked) exportImageSelection.add(checkbox.dataset.exportItem);
-    else exportImageSelection.delete(checkbox.dataset.exportItem);
-    renderGeneratedImageExportPanel(modal, items);
-    return;
-  }
-  const selectButton = event.target.closest("[data-export-select]");
-  if (selectButton) {
-    const mode = selectButton.dataset.exportSelect;
-    if (mode === "all") exportImageSelection = new Set(items.map((item) => item.id));
-    if (mode === "none") exportImageSelection = new Set();
-    if (mode === "latest") exportImageSelection = new Set(items.filter((item) => item.latest).map((item) => item.id));
-    renderGeneratedImageExportPanel(modal, items);
-    return;
-  }
-  if (event.target.closest("[data-export-download]")) {
-    exportSelectedGeneratedImages(modal);
-  }
+.generated-export-item img {
+  width: 100%;
+  height: 112px;
+  border-radius: 6px;
+  background: #050910;
+  object-fit: cover;
 }
 
-function readGeneratedExportItems(modal) {
-  try {
-    return JSON.parse(modal.dataset.items || "[]");
-  } catch {
-    return [];
-  }
+.generated-export-item span,
+.generated-export-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-function closeGeneratedImageExportPanel() {
-  const modal = document.querySelector("#generatedImageExportModal");
-  if (!modal) return;
-  modal.classList.remove("show");
-  modal.setAttribute("aria-hidden", "true");
+.generated-export-item span {
+  font-weight: 900;
 }
 
-async function exportSelectedGeneratedImages(modal) {
-  const items = readGeneratedExportItems(modal).filter((item) => exportImageSelection.has(item.id));
-  const status = modal.querySelector("[data-export-status]");
-  const button = modal.querySelector("[data-export-download]");
-  if (!items.length) {
-    if (status) status.textContent = "请先选择图片";
-    return;
-  }
-  if (button) button.disabled = true;
-  if (status) status.textContent = `正在读取 ${items.length} 张图片...`;
-  const files = [];
-  const failures = [];
-  for (const item of items) {
-    try {
-      const bytes = await readImageAsUint8Array(item.url);
-      files.push({ name: item.fileName, bytes });
-    } catch (error) {
-      failures.push(item);
-    }
-  }
-  if (!files.length) {
-    if (status) status.textContent = "导出失败：选中图片都无法读取";
-    if (button) button.disabled = false;
-    return;
-  }
-  if (status) status.textContent = "正在打包 ZIP...";
-  const zipBlob = createZipBlob(files);
-  downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
-  if (status) status.textContent = failures.length ? `已导出 ${files.length} 张，${failures.length} 张读取失败` : `已导出 ${files.length} 张`;
-  if (button) button.disabled = false;
-}
-
-async function readImageAsUint8Array(url) {
-  if (/^data:image\//i.test(url)) {
-    const base64 = url.split(",")[1] || "";
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytes;
-  }
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-function createZipBlob(files) {
-  const localParts = [];
-  const centralParts = [];
-  let offset = 0;
-  files.forEach((file) => {
-    const nameBytes = encodeUtf8(file.name);
-    const crc = crc32(file.bytes);
-    const localHeader = concatUint8Arrays([
-      uint32le(0x04034b50), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
-      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0), nameBytes,
-    ]);
-    const centralHeader = concatUint8Arrays([
-      uint32le(0x02014b50), uint16le(20), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
-      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0),
-      uint16le(0), uint16le(0), uint16le(0), uint32le(0), uint32le(offset), nameBytes,
-    ]);
-    localParts.push(localHeader, file.bytes);
-    centralParts.push(centralHeader);
-    offset += localHeader.length + file.bytes.length;
-  });
-  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-  const end = concatUint8Arrays([
-    uint32le(0x06054b50), uint16le(0), uint16le(0), uint16le(files.length), uint16le(files.length),
-    uint32le(centralSize), uint32le(offset), uint16le(0),
-  ]);
-  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
-}
-
-function encodeUtf8(value) {
-  return new TextEncoder().encode(String(value || ""));
-}
-
-function uint16le(value) {
-  return new Uint8Array([value & 255, (value >> 8) & 255]);
-}
-
-function uint32le(value) {
-  return new Uint8Array([value & 255, (value >> 8) & 255, (value >> 16) & 255, (value >> 24) & 255]);
-}
-
-function concatUint8Arrays(parts) {
-  const length = parts.reduce((sum, part) => sum + part.length, 0);
-  const output = new Uint8Array(length);
-  let offset = 0;
-  parts.forEach((part) => {
-    output.set(part, offset);
-    offset += part.length;
-  });
-  return output;
-}
-
-function crc32(bytes) {
-  let crc = -1;
-  for (let index = 0; index < bytes.length; index += 1) {
-    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ bytes[index]) & 255];
-  }
-  return (crc ^ -1) >>> 0;
+.generated-export-item small {
+  color: #ffd88a;
 }
 
-function downloadBlob(blob, fileName) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = fileName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+.generated-export-empty {
+  grid-column: 1 / -1;
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: var(--muted);
 }
 
-function sanitizeDownloadName(value) {
-  return String(value || "download").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 60) || "download";
+.generated-export-panel footer {
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 0;
 }
 
-async function resolveGenerationSize(prompt, referencePlan, model = "") {
-  const explicit = parseExplicitSize(prompt, model);
-  if (explicit) return explicit;
-  if (referencePlan?.structureDimensions?.width && referencePlan?.structureDimensions?.height) {
-    return sizeFromDimensions(referencePlan.structureDimensions.width, referencePlan.structureDimensions.height, model);
-  }
-  const structureImage = referencePlan?.images?.[0] || "";
-  const dimensions = await getImageDimensions(structureImage);
-  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height, model);
-  return "";
-}
-
-function parseExplicitSize(prompt, model = "") {
-  const text = String(prompt || "");
-  const sizeMatch = text.match(/(\d{3,5})\s*(?:x|\*|×|X)\s*(\d{3,5})/);
-  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]), model);
-  const ratioMatch = text.match(/(?:比例|画幅|aspect\s*ratio)?\s*(\d{1,2})\s*[:：]\s*(\d{1,2})/i);
-  if (!ratioMatch) return "";
-  const width = Number(ratioMatch[1]);
-  const height = Number(ratioMatch[2]);
-  if (!width || !height) return "";
-  if (width === height) return "2048x2048";
-  if (width > height) return "2560x1440";
-  return "1440x2560";
-}
-
-function getImageDimensions(src) {
-  return new Promise((resolve) => {
-    if (!src) {
-      resolve(null);
-      return;
-    }
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => resolve(null);
-    image.src = src;
-  });
-}
-
-function getImageFileDimensions(file) {
-  return new Promise((resolve) => {
-    if (!file || !file.type?.startsWith("image/")) {
-      resolve(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-    image.src = url;
-  });
-}
-
-function sizeFromDimensions(width, height, model = "") {
-  return normalizeGenerationSize(width, height, model);
-}
-
-function normalizeGenerationSize(width, height, model = "") {
-  if (!width || !height) return "";
-  const maxEdge = Math.max(width, height);
-  const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-  const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
-  const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
-  return `${nextWidth}x${nextHeight}`;
-}
-
-function roundUpToMultiple(value, multiple) {
-  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
-}
-
-async function readResponseJson(response) {
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {
-      error: text,
-      message: text.slice(0, 240),
-    };
-  }
+.folder-mini-icon,
+.folder-large-icon {
+  position: relative;
+  display: inline-block;
+  width: 23px;
+  height: 18px;
+  border-radius: 2px 2px 3px 3px;
+  background: linear-gradient(180deg, #ffc533 0%, #f6a800 62%, #d98900 100%);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
 }
 
-function formatApiError(result, fallback) {
-  if (!result) return fallback;
-  if (typeof result === "string") return result;
-  const message = extractApiErrorMessage(result);
-  const diagnostic = formatApiErrorDiagnostic(result);
-  if (message) return diagnostic ? `${message}（${diagnostic}）` : message;
-  try {
-    return JSON.stringify(result);
-  } catch {
-    return fallback;
-  }
+.folder-mini-icon::before,
+.folder-large-icon::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: -4px;
+  width: 10px;
+  height: 6px;
+  border-radius: 2px 2px 0 0;
+  background: #ffc533;
 }
 
-function formatApiErrorDiagnostic(result) {
-  const request = result?.request;
-  if (!request || typeof request !== "object") return "";
-  const parts = [];
-  if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
-  if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
-  if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
-  return parts.join("，");
-}
-
-function extractApiErrorMessage(value, seen = new Set()) {
-  if (!value) return "";
-  if (typeof value === "string") {
-    if (/internal server error|server_error/i.test(value)) return "上游图片生成服务内部错误，请稍后重试，或切换 ApiMart 通道后再试。";
-    return value;
-  }
-  if (typeof value !== "object" || seen.has(value)) return "";
-  seen.add(value);
-  const direct = value.message || value.error || value.detail || value.code;
-  const directMessage = extractApiErrorMessage(direct, seen);
-  if (directMessage) return directMessage;
-  for (const item of Object.values(value)) {
-    const nested = extractApiErrorMessage(item, seen);
-    if (nested) return nested;
-  }
-  return "";
+.folder-mini-icon::after,
+.folder-large-icon::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 12px;
+  height: 6px;
+  border-radius: 1px;
+  background: #31a9ff;
 }
 
-function shouldRetryWithSaferPrompt(result) {
-  const message = formatApiError(result, "");
-  return /prohibited|flagged|safety|policy|moderation|敏感|违规|拦截/i.test(message);
+.folder-large-icon {
+  width: 58px;
+  height: 45px;
+  border-radius: 5px 5px 7px 7px;
 }
 
-function sanitizeGenerationPrompt(prompt) {
-  return makePromptSafer(prompt);
+.folder-large-icon::before {
+  top: -9px;
+  left: 5px;
+  width: 25px;
+  height: 13px;
+  border-radius: 4px 4px 0 0;
 }
 
-function makePromptSafer(prompt) {
-  return String(prompt || "")
-    .replace(/characters or creatures/gi, "extra subjects")
-    .replace(/characters/gi, "extra subjects")
-    .replace(/creatures/gi, "extra subjects")
-    .replace(/broken/gi, "damaged")
-    .replace(/破碎/g, "受损")
-    .replace(/不要有太繁复/g, "保持简洁")
-    .replace(/不要/g, "避免")
-    .replace(/禁止/g, "避免");
+.folder-large-icon::after {
+  right: 7px;
+  bottom: 7px;
+  width: 30px;
+  height: 14px;
+  border-radius: 3px;
 }
 
-async function fileToDataUrl(file) {
-  if (file.type.startsWith("image/")) {
-    if (file.size <= 1.8 * 1024 * 1024) {
-      return readFileAsDataUrl(file);
-    }
-    return compressImageFile(file, 3.2 * 1024 * 1024);
-  }
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  display: none;
+  min-width: 176px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0b111a;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+}
 
-  return readFileAsDataUrl(file);
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function uploadImageFile(file) {
-  return uploadMediaFile(file);
-}
-
-async function uploadMediaFile(file) {
-  const imageDataUrl = await fileToDataUrl(file);
-  const response = await fetch("/api/upload-image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      fileName: safeAsciiFileName(file.name, file.type.startsWith("video/") ? "media.mp4" : "image.png"),
-      imageDataUrl,
-    }),
-  });
-  const result = await readResponseJson(response);
-  if (!response.ok) {
-    throw new Error(formatApiError(result, `HTTP ${response.status}`));
-  }
-  if (!result.url) {
-    throw new Error("上传接口没有返回图片 URL");
-  }
-  return result.url;
-}
-
-function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      const sourceMaxSide = Math.max(image.naturalWidth, image.naturalHeight);
-      const candidates = [
-        { maxSide: 3072, quality: 0.94 },
-        { maxSide: 2560, quality: 0.92 },
-        { maxSide: 2208, quality: 0.9 },
-        { maxSide: 1920, quality: 0.88 },
-        { maxSide: 1600, quality: 0.86 },
-        { maxSide: 1280, quality: 0.84 },
-      ];
-
-      let best = "";
-      for (const candidate of candidates) {
-        const scale = Math.min(1, candidate.maxSide / sourceMaxSide);
-        const width = Math.max(1, Math.round(image.naturalWidth * scale));
-        const height = Math.max(1, Math.round(image.naturalHeight * scale));
-        canvas.width = width;
-        canvas.height = height;
-        context.clearRect(0, 0, width, height);
-        context.drawImage(image, 0, 0, width, height);
-        const output = canvas.toDataURL("image/jpeg", candidate.quality);
-        best = output;
-        if (estimateDataUrlBytes(output) <= targetBytes) {
-          resolve(output);
-          return;
-        }
-      }
-
-      resolve(best);
-    };
-
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("图片压缩失败"));
-    };
-
-    image.src = objectUrl;
-  });
-}
-
-function estimateDataUrlBytes(dataUrl) {
-  const commaIndex = dataUrl.indexOf(",");
-  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
-  return Math.ceil((base64.length * 3) / 4);
-}
-
-function buildImageEditPrompt(
-  prompt,
-  mode = "structureStyle",
-  roleImages = { structure: [], style: [], general: [] },
-  referencePlan = { images: [], structureCount: 0, styleCount: 0, generalCount: 0 },
-  purpose = "自定义",
-) {
-  const referenceCount = Array.isArray(referencePlan.images) ? referencePlan.images.length : Number(referencePlan) || 0;
-  const styleCount = Number(referencePlan.styleCount || 0);
-  const hasEditBase = Number(referencePlan.editBaseCount || 0) > 0;
-  const hasStructureReference = Number(referencePlan.structureCount || 0) > 0;
-  const userPrompt = String(prompt || "").trim() || "生成一张高质量游戏宣发视觉图。";
-  const purposeText = purpose && purpose !== "自定义" ? `Image purpose: ${purpose}` : "Image purpose: game visual production";
-  const referenceSizeRule = hasEditBase
-    ? "Output size policy: If the user request explicitly states aspect ratio, canvas size, image size, or resolution, follow the user request. Otherwise match the edit base image's aspect ratio, framing, and output canvas proportions."
-    : hasStructureReference
-      ? "Output size policy: If the user request explicitly states aspect ratio, canvas size, image size, or resolution, follow the user request. Otherwise match the structure reference image's aspect ratio, framing, and output canvas proportions."
-      : "Output size policy: Follow any explicit aspect ratio, canvas size, image size, or resolution in the user request. If none is provided and no structure reference is attached, choose a natural production canvas for the requested scene without inventing arbitrary numeric dimensions.";
-  const baseRules = [
-    purposeText,
-    "Make a clean, high-quality game environment image.",
-    "Follow the user's request. Do not invent a different setting, architecture type, story, logo, text, or unrelated props.",
-    "Avoid blur, warped architecture, unstable perspective, duplicated objects, random text, watermark, logo, frame, UI overlay, and poster typography unless explicitly requested.",
-    referenceSizeRule,
-    "User request:",
-    userPrompt,
-  ];
-
-  if (!referenceCount) {
-    return [
-      ...baseRules,
-      "No reference image is attached. Build the scene from the user request.",
-    ].join("\n");
-  }
+.context-menu.show {
+  display: grid;
+  gap: 4px;
+}
 
-  if (hasEditBase) {
-    return [
-      ...baseRules,
-      "Multimodal edit mode:",
-      "- Input image 1 is the edit base. Edit this scene instead of creating a new composition.",
-      "- Preserve camera, perspective, layout, scale, and object placement unless the user asks to change them.",
-      `- The next ${Math.max(0, styleCount)} input image(s) are style references for palette, lighting, material, atmosphere, texture, and finish.`,
-      "- Apply only the requested changes.",
-    ].join("\n");
-  }
+.context-title {
+  padding: 7px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
 
-  if (mode === "structureStyle") {
-    if (!hasStructureReference) {
-      return [
-        ...baseRules,
-        "Image reference roles:",
-        `- The ${Math.max(0, styleCount)} input image(s) are style references only: use palette, lighting mood, material feel, atmosphere, texture, and finish.`,
-        "- Build the composition from the user request.",
-      ].join("\n");
-    }
-    return [
-      ...baseRules,
-      "Image reference roles:",
-      "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
-      `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
-      "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
-      "- Red light must stay local: preserve red lamps, warning light spills, signs, and original red markings only where they physically exist. Do not turn the full scene, fog, shadows, walls, floor, or neutral materials reddish unless the style reference is globally red.",
-      "- User request decides the intended content. Structure decides geometry. Style decides look.",
-      "- Do not output a near-identical copy of the structure reference. Re-render it with the requested content clarity and the style reference's finish.",
-      "- Do not copy composition from style references.",
-    ].join("\n");
-  }
+.context-menu button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #d7e7f8;
+  padding: 0 9px;
+  text-align: left;
+}
 
-  if (mode === "style") {
-    return [
-      ...baseRules,
-      "Use the input images as style and mood references. Let the scene layout follow the user request.",
-    ].join("\n");
-  }
+.context-menu button:hover {
+  background: rgba(22, 217, 245, 0.12);
+  color: var(--text);
+}
 
-  if (mode === "creative") {
-    return [
-      ...baseRules,
-      "Use the input images as loose inspiration. Keep the mood and material language, but follow the user request.",
-    ].join("\n");
-  }
+.port-connection-menu {
+  min-width: 220px;
+}
 
-  return [
-    ...baseRules,
-    "Use the first input image as the scene reference. Preserve its camera, layout, scale, and main object positions while improving clarity and finish.",
-  ].join("\n");
-}
-
-function ensureNodeStatus(node) {
-  let status = node.querySelector(".node-status");
-  if (!status) {
-    status = document.createElement("div");
-    status.className = "node-status";
-    node.appendChild(status);
-  }
-  return status;
+.port-connection-list {
+  display: grid;
+  gap: 6px;
 }
 
-function uploadFilesToImageNode(node, files) {
-  const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-  if (!node || !imageFiles.length) return;
+.port-connection-list button {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
 
-  node.dataset.fileName = imageFiles.length === 1 ? imageFiles[0].name : `${imageFiles.length} 张图片`;
-  const nameEl = node.querySelector(".upload-name");
-  if (nameEl) nameEl.textContent = node.dataset.fileName;
+.port-connection-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-  const preview = node.querySelector(".upload-preview");
-  const status = ensureNodeStatus(node);
-  status.textContent = `正在上传 ${imageFiles.length} 张图片...`;
-  if (preview) {
-    preview.innerHTML = imageFiles.map((file) => `<img src="${URL.createObjectURL(file)}" alt="">`).join("");
-  }
+.port-connection-list button small {
+  color: var(--muted);
+  font-size: 11px;
+}
 
-  getImageFileDimensions(imageFiles[0]).then((dimensions) => {
-    if (!dimensions) return;
-    node.dataset.imageNaturalWidth = String(dimensions.width);
-    node.dataset.imageNaturalHeight = String(dimensions.height);
-    saveCurrentProject();
-  });
-
-  Promise.all([
-    Promise.all(imageFiles.map(uploadImageFile)),
-    Promise.all(imageFiles.map((file) => fileToDataUrl(file))),
-  ])
-    .then(([uploadedUrls, inlineDataUrls]) => {
-      node.dataset.imageUrls = JSON.stringify(uploadedUrls);
-      node.dataset.imageDataUrl = uploadedUrls[0] || "";
-      node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
-      node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
-      renderNodeImagePreview(node);
-      status.textContent = `${uploadedUrls.length} 张图片已上传并保存。`;
-      saveCurrentProject();
-    })
-    .catch((error) => {
-      status.textContent = `上传失败：${error instanceof Error ? error.message : String(error)}`;
-      saveCurrentProject();
-    });
-}
-
-function hasDraggedImageFiles(dataTransfer) {
-  return [...(dataTransfer?.items || [])].some((item) => item.kind === "file" && item.type.startsWith("image/"));
-}
-
-function hasDraggedVideoFiles(dataTransfer) {
-  return [...(dataTransfer?.items || [])].some((item) => item.kind === "file" && item.type.startsWith("video/"));
-}
-
-function hasDraggedMediaFiles(dataTransfer) {
-  return hasDraggedImageFiles(dataTransfer) || hasDraggedVideoFiles(dataTransfer);
-}
-
-function hasDraggedMemory(dataTransfer) {
-  return [...(dataTransfer?.types || [])].includes("application/x-aivideobox-memory");
-}
-
-function getImageFilesFromDataTransfer(dataTransfer) {
-  return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("image/"));
-}
-
-function getVideoFilesFromDataTransfer(dataTransfer) {
-  return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("video/"));
-}
-
-function askCanvasUploadImageRole() {
-  const choices = [
-    ["general", "普通图"],
-    ["editBase", "编辑底图"],
-    ["structure", "渲染结构图"],
-    ["style", "风格参考图"],
-    ["output", "输出图"],
-  ];
-  const answer = window.prompt(
-    ["选择上传图片角色：", ...choices.map(([, label], index) => `${index + 1}. ${label}`)].join("\n"),
-    "1",
-  );
-  if (answer === null) return "";
-  const trimmed = answer.trim();
-  const index = Number(trimmed);
-  if (Number.isInteger(index) && index >= 1 && index <= choices.length) return choices[index - 1][0];
-  const found = choices.find(([value, label]) => value === trimmed || label === trimmed);
-  return found?.[0] || "general";
-}
-
-function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general") {
-  const title = files.length === 1 ? stripFileExtension(files[0].name) : `${files.length} 张上传图片`;
-  const node = createNode({
-    type: "image",
-    title,
-    content: "",
-    x: point.x - 129,
-    y: point.y - 70,
-    fileName: files.length === 1 ? files[0].name : `${files.length} 张图片`,
-    imageRole,
-    imagePurpose: "自定义",
-    referenceMode: "structureStyle",
-  });
-  selectNode(node);
-  uploadFilesToImageNode(node, files);
-  saveCurrentProject();
-  return node;
-}
-
-function createImageInputNodeFromDrop(files, clientX, clientY) {
-  const point = clientPointToWorldPoint(clientX, clientY);
-  if (files.length > 1) {
-    createImageNodesFromFilesAtPoint(files, point);
-    return;
-  }
-  createImageInputNodeFromFilesAtPoint(files, point);
-}
-
-function uploadFilesToVideoNode(node, files) {
-  const videoFiles = files.filter((file) => file.type.startsWith("video/"));
-  if (!node || !videoFiles.length) return;
-
-  const file = videoFiles[0];
-  node.dataset.fileName = file.name;
-  const nameEl = node.querySelector(".upload-name");
-  if (nameEl) nameEl.textContent = node.dataset.fileName;
-
-  const preview = node.querySelector(".upload-preview");
-  const status = ensureNodeStatus(node);
-  status.textContent = "正在上传视频...";
-  if (preview) {
-    preview.innerHTML = `<video src="${URL.createObjectURL(file)}" muted controls playsinline></video>`;
-  }
+.port-connection-list button.empty {
+  cursor: default;
+  opacity: 0.62;
+}
 
-  uploadMediaFile(file)
-    .then((uploadedUrl) => {
-      node.dataset.videoUrls = JSON.stringify([uploadedUrl]);
-      node.dataset.videoDataUrl = uploadedUrl;
-      renderNodeVideoPreview(node);
-      status.textContent = "视频已上传并保存。";
-      saveCurrentProject();
-    })
-    .catch((error) => {
-      status.textContent = `视频上传失败：${error instanceof Error ? error.message : String(error)}`;
-      saveCurrentProject();
-    });
-}
-
-function createVideoInputNodeFromDrop(files, clientX, clientY) {
-  const point = clientPointToWorldPoint(clientX, clientY);
-  const file = files[0];
-  const node = createNode({
-    type: "video",
-    title: stripFileExtension(file.name),
-    content: "",
-    x: point.x - 129,
-    y: point.y - 70,
-    fileName: file.name,
-    videoMode: "video-to-video",
-    videoDuration: "5",
-  });
-  selectNode(node);
-  uploadFilesToVideoNode(node, files);
-  saveCurrentProject();
-}
-
-function clientPointToWorldPoint(clientX, clientY) {
-  const rect = canvasContent.getBoundingClientRect();
-  return {
-    x: (clientX - rect.left) / viewport.scale,
-    y: (clientY - rect.top) / viewport.scale,
-  };
-}
-
-function stripFileExtension(fileName) {
-  return String(fileName || "上传图片").replace(/\.[^.]+$/, "") || "上传图片";
-}
-
-function safeAsciiFileName(name, fallback = "file") {
-  const cleaned = String(name || fallback)
-    .normalize("NFKD")
-    .replace(/[^\x20-\x7E]/g, "")
-    .replace(/[/\\?%*:|"<>]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
-  return cleaned || fallback;
-}
-
-function moveNode(node, x, y) {
-  const nextX = Math.max(-6000, Math.min(11500, x));
-  const nextY = Math.max(-6000, Math.min(11500, y));
-  node.dataset.x = String(Math.round(nextX));
-  node.dataset.y = String(Math.round(nextY));
-  node.style.left = `${nextX}px`;
-  node.style.top = `${nextY}px`;
-}
-
-function startSelectionBoxFromPoint(clientX, clientY) {
-  const rect = canvasContent.getBoundingClientRect();
-  const start = {
-    x: (clientX - rect.left) / viewport.scale,
-    y: (clientY - rect.top) / viewport.scale,
-  };
-  const box = document.createElement("div");
-  box.className = "selection-box";
-  canvasContent.appendChild(box);
-  selectionBoxState = { start, box };
-}
-
-function updateSelectionBox(event) {
-  const rect = canvasContent.getBoundingClientRect();
-  const current = {
-    x: (event.clientX - rect.left) / viewport.scale,
-    y: (event.clientY - rect.top) / viewport.scale,
-  };
-  const left = Math.min(selectionBoxState.start.x, current.x);
-  const top = Math.min(selectionBoxState.start.y, current.y);
-  const width = Math.abs(current.x - selectionBoxState.start.x);
-  const height = Math.abs(current.y - selectionBoxState.start.y);
-  Object.assign(selectionBoxState.box.style, {
-    left: `${left}px`,
-    top: `${top}px`,
-    width: `${width}px`,
-    height: `${height}px`,
-  });
-
-  const selected = [...canvasContent.querySelectorAll(".node")].filter((node) => rectsOverlap(getNodeWorldRect(node), { left, top, right: left + width, bottom: top + height }));
-  selectNodes(selected);
-}
-
-function finishSelectionBox() {
-  selectionBoxState.box.remove();
-  selectionBoxState = null;
-}
-
-function getNodeWorldRect(node) {
-  const left = Number(node.dataset.x) || 0;
-  const top = Number(node.dataset.y) || 0;
-  return {
-    left,
-    top,
-    right: left + node.offsetWidth,
-    bottom: top + node.offsetHeight,
-  };
-}
-
-function rectsOverlap(a, b) {
-  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
-}
-
-function isTextEditingTarget(target) {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target?.isContentEditable
-  );
-}
-
-function startWire(node, port, event) {
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.classList.add("temp-wire");
-  connectorSvg.appendChild(path);
-  wireState = { node, port, path, startPoint: getPortPoint(port) };
-  node.classList.add("linking");
-  updateTempWire(event);
-}
-
-function updateTempWire(event) {
-  const startSide = wireState.port.classList.contains("out") ? "right" : "left";
-  const start = wireState.startPoint;
-  const rect = canvasContent.getBoundingClientRect();
-  const end = {
-    x: (event.clientX - rect.left) / viewport.scale,
-    y: (event.clientY - rect.top) / viewport.scale,
-  };
-  const mid = Math.max(80, Math.abs(end.x - start.x) * 0.45);
-  const c1 = startSide === "left" ? start.x - mid : start.x + mid;
-  wireState.path.setAttribute("d", `M${start.x} ${start.y} C${c1} ${start.y} ${end.x - mid} ${end.y} ${end.x} ${end.y}`);
-}
-
-function finishWire(event) {
-  const targetPort = findPortNear(event.clientX, event.clientY);
-  const targetNode = targetPort?.closest(".node");
-  if (targetNode && targetNode !== wireState.node) {
-    addConnection(wireState.node, targetNode, sideForPort(wireState.port), sideForPort(targetPort));
-  }
-  wireState.node.classList.remove("linking");
-  wireState.path.remove();
-  wireState = null;
-  clearPortHighlights();
-}
-
-function addConnection(fromNode, toNode, fromSide, toSide) {
-  const duplicate = [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].some(
-    (path) =>
-      path.dataset.from === fromNode.id &&
-      path.dataset.to === toNode.id &&
-      path.dataset.fromSide === fromSide &&
-      path.dataset.toSide === toSide,
-  );
-  if (duplicate) return;
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.dataset.from = fromNode.id;
-  path.dataset.to = toNode.id;
-  path.dataset.fromSide = fromSide;
-  path.dataset.toSide = toSide;
-  connectorSvg.appendChild(path);
-  updateConnections();
-  saveCurrentProject();
-}
-
-function renderPortConnectionMenu(port) {
-  if (!portConnectionContextMenu) return;
-  const list = portConnectionContextMenu.querySelector(".port-connection-list");
-  if (!list) return;
-  const connections = getConnectionsForPort(port);
-  if (!connections.length) {
-    list.innerHTML = '<button class="empty" type="button" disabled>暂无连接</button>';
-    return;
-  }
-  list.innerHTML = connections
-    .map(
-      (connection, index) => `
-        <button type="button" data-connection-index="${index}">
-          <span>${escapeHtml(connection.label)}</span>
-          <small>删除连接线</small>
-        </button>
-      `,
-    )
-    .join("");
-}
-
-function getConnectionsForPort(port) {
-  const node = port?.closest(".node");
-  if (!node) return [];
-  const side = sideForPort(port);
-  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].reduce((items, path) => {
-    const isFrom = path.dataset.from === node.id && path.dataset.fromSide === side;
-    const isTo = path.dataset.to === node.id && path.dataset.toSide === side;
-    if (!isFrom && !isTo) return items;
-    const otherNode = document.getElementById(isFrom ? path.dataset.to : path.dataset.from);
-    const otherTitle = otherNode?.querySelector(".node-title strong")?.textContent || "未知节点";
-    const direction = isFrom ? "输出到" : "输入自";
-    items.push({ path, label: `${direction} ${otherTitle}` });
-    return items;
-  }, []);
-}
-
-function updateConnections() {
-  connectorSvg.querySelectorAll("path:not(.temp-wire)").forEach((path) => {
-    const from = document.getElementById(path.dataset.from);
-    const to = document.getElementById(path.dataset.to);
-    if (!from || !to) {
-      path.remove();
-      return;
-    }
-    const start = getNodePortPoint(from, path.dataset.fromSide || "right");
-    const end = getNodePortPoint(to, path.dataset.toSide || "left");
-    const mid = Math.max(90, Math.abs(end.x - start.x) * 0.5);
-    const c1 = path.dataset.fromSide === "left" ? start.x - mid : start.x + mid;
-    const c2 = path.dataset.toSide === "right" ? end.x + mid : end.x - mid;
-    path.setAttribute("d", `M${start.x} ${start.y} C${c1} ${start.y} ${c2} ${end.y} ${end.x} ${end.y}`);
-  });
-}
-
-function saveCurrentProject() {
-  if (!currentProject || isRestoring) return;
-  if (activeFolder) {
-    saveActiveFolder();
-    return;
-  }
-  const data = serializeCanvasData();
-  if (!shouldSaveProjectData(currentProject, data)) return;
-  try {
-    localStorage.setItem(projectKey(currentProject), JSON.stringify(data));
-  } catch (error) {
-    console.error("Project save failed", error);
-  }
-  updateProjectCardThumbnail(currentProject, data);
-}
-
-function shouldSaveProjectData(name, nextData) {
-  const nextNodeCount = Array.isArray(nextData?.nodes) ? nextData.nodes.length : 0;
-  if (nextNodeCount > 0) return true;
-  const existing = readJson(projectKey(name), null);
-  const backup = readJson(`${projectKey(name)}.backup`, null);
-  const existingNodeCount = Array.isArray(existing?.nodes) ? existing.nodes.length : 0;
-  const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
-  if (existingNodeCount > 0 || backupNodeCount > 0) {
-    console.warn(`Skipped empty save for ${name}`);
-    return false;
-  }
-  return true;
+.port-connection-list button.empty:hover {
+  background: transparent;
+  color: #d7e7f8;
 }
 
-async function ensureSharedProjectImages(name, data) {
-  let changed = false;
-  for (const node of data.nodes || []) {
-    changed = (await makeNodeImagesShareable(node)) || changed;
-  }
-  if (changed) {
-    try {
-      localStorage.setItem(projectKey(name), JSON.stringify(data));
-    } catch {}
-  }
-  return data;
-}
-
-async function makeNodeImagesShareable(node) {
-  let changed = false;
-  if (node.imageDataUrl?.startsWith("data:image/")) {
-    try {
-      const url = await uploadDataUrlAsSharedImage(node.imageDataUrl, node.fileName || `${node.title || "image"}.png`);
-      node.imageUrls = uniqueValues([...(Array.isArray(node.imageUrls) ? node.imageUrls : []), url]);
-      node.imageDataUrl = "";
-      node.imageDataKey = "";
-      changed = true;
-    } catch (error) {
-      console.warn("Shared image upload failed", error);
-    }
-  }
-  if (node.referenceImageDataUrl?.startsWith("data:image/")) {
-    try {
-      const url = await uploadDataUrlAsSharedImage(node.referenceImageDataUrl, node.referenceFileName || `${node.title || "reference"}.png`);
-      node.referenceImageUrls = uniqueValues([...(Array.isArray(node.referenceImageUrls) ? node.referenceImageUrls : []), url]);
-      node.referenceImageDataUrl = "";
-      node.referenceImageDataKey = "";
-      changed = true;
-    } catch (error) {
-      console.warn("Shared reference image upload failed", error);
-    }
-  }
-  for (const child of Array.isArray(node.folderNodes) ? node.folderNodes : []) {
-    changed = (await makeNodeImagesShareable(child)) || changed;
-  }
-  return changed;
-}
-
-async function uploadDataUrlAsSharedImage(imageDataUrl, fileName) {
-  const response = await fetch("/api/upload-image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: safeAsciiFileName(fileName, "image.png"), imageDataUrl }),
-  });
-  const result = await readResponseJson(response);
-  if (!response.ok || !result.url) throw new Error(formatApiError(result, `HTTP ${response.status}`));
-  return result.url;
-}
-
-async function saveSharedProject(code, name, data) {
-  if (!code || !hasProjectNodes(data)) return;
-  const response = await fetch(SHARED_PROJECTS_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      code: normalizeProjectCode(code),
-      name,
-      data: stripLocalImageKeysFromProject(data),
-    }),
-  });
-  if (!response.ok) {
-    const result = await readResponseJson(response);
-    throw new Error(formatApiError(result, `HTTP ${response.status}`));
-  }
+.assets-header {
+  max-width: 1340px;
+  margin: 0 auto 26px;
+  align-items: start;
 }
 
-async function loadSharedProjectByCode(code) {
-  try {
-    const response = await fetch(`${SHARED_PROJECTS_API}?code=${encodeURIComponent(normalizeProjectCode(code))}`, { cache: "no-store" });
-    const result = await readResponseJson(response);
-    if (!response.ok || !result?.data) return null;
-    return result;
-  } catch (error) {
-    console.warn("Project code load failed", error);
-    return null;
-  }
+.assets-header h1 {
+  font-size: 44px;
 }
 
-function hasProjectNodes(data) {
-  return Array.isArray(data?.nodes) && data.nodes.length > 0;
-}
-
-function stripLocalImageKeysFromProject(data) {
-  return {
-    ...data,
-    nodes: (data.nodes || []).map(stripLocalImageKeysFromNode),
-  };
-}
-
-function stripLocalImageKeysFromNode(node) {
-  const clean = { ...node };
-  if (clean.imageDataKey) clean.imageDataKey = "";
-  if (clean.referenceImageDataKey) clean.referenceImageDataKey = "";
-  if (Array.isArray(clean.folderNodes)) clean.folderNodes = clean.folderNodes.map(stripLocalImageKeysFromNode);
-  return clean;
-}
-
-async function deleteSharedProject(name) { return; }
-
-function serializeCanvasData() {
-  const nodes = serializeNodes([...canvasContent.querySelectorAll(".node")]);
-  const connections = serializeConnections();
-  return { nodes, connections };
-}
-
-function serializeNodes(nodes) {
-  return nodes.map((node) => {
-    const imageIsData = node.dataset.imageDataUrl?.startsWith("data:image/");
-    const imageDataKey = imageIsData ? projectImageKey(currentProject, node.id, "upload") : "";
-    const referenceIsData = node.dataset.referenceImageDataUrl?.startsWith("data:image/");
-    const referenceImageDataKey = referenceIsData ? projectImageKey(currentProject, node.id, "reference") : "";
-
-    if (imageDataKey) storeProjectImage(imageDataKey, node.dataset.imageDataUrl);
-    if (referenceImageDataKey) storeProjectImage(referenceImageDataKey, node.dataset.referenceImageDataUrl);
-
-    return {
-      id: node.id,
-      type: node.dataset.type,
-      tone: node.dataset.tone,
-      title: node.querySelector(".node-title strong")?.textContent || "节点",
-      content: getNodeContent(node),
-      imagePurpose: node.dataset.imagePurpose || "自定义",
-      referenceMode: node.dataset.referenceMode || "structureStyle",
-    imageRole: node.dataset.imageRole || "general",
-    imageQuality: node.dataset.imageQuality || "high",
-    imageModel: node.dataset.imageModel || "gpt-image-2-official",
-    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
-    apimartChannel: "b",
-      fileName: node.dataset.fileName || "",
-      imageNaturalWidth: node.dataset.imageNaturalWidth || "",
-      imageNaturalHeight: node.dataset.imageNaturalHeight || "",
-      imageUrls: parseJsonArray(node.dataset.imageUrls),
-      imageDataKey,
-      imageDataUrl: imageDataKey ? "" : node.dataset.imageDataUrl || "",
-      referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
-      referenceImageDataKey,
-      referenceImageDataUrl: referenceImageDataKey ? "" : node.dataset.referenceImageDataUrl || "",
-      referenceFileName: node.dataset.referenceFileName || "",
-      generatedImageUrl: node.dataset.generatedImageUrl || "",
-      generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
-      generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
-      generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
-      videoUrls: parseJsonArray(node.dataset.videoUrls),
-      videoDataUrl: node.dataset.videoDataUrl || "",
-      referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
-      referenceVideoUrl: node.dataset.referenceVideoUrl || "",
-      generatedVideoUrl: node.dataset.generatedVideoUrl || "",
-      generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
-      videoMode: normalizeVideoModeValue(node.dataset.videoMode),
-      videoDuration: node.dataset.videoDuration || "5",
-      videoModel: normalizeVideoModelValue(node.dataset.videoModel),
-      videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
-      videoResolution: node.dataset.videoResolution || "1080p",
-      videoSeed: node.dataset.videoSeed || "",
-      videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
-      videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
-      videoWebSearch: node.dataset.videoWebSearch === "true",
-      videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
-      videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
-      videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
-      videoReferenceAudioUrls: parseJsonArray(node.dataset.videoReferenceAudioUrls),
-      folderNodes: parseJsonArray(node.dataset.folderNodes),
-      folderConnections: parseJsonArray(node.dataset.folderConnections),
-      x: Number(node.dataset.x),
-      y: Number(node.dataset.y),
-    };
-  });
-}
-
-function serializeConnections(filter = () => true) {
-  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].filter(filter).map((path) => ({
-    from: path.dataset.from,
-    to: path.dataset.to,
-    fromSide: path.dataset.fromSide,
-    toSide: path.dataset.toSide,
-  }));
-}
-
-function restoreProject(name) {
-  const data = readProjectDataWithBackup(name);
-  backupProjectData(name, data);
-  migrateProjectMemoriesToGlobal(data.memories);
-  loadGlobalMemories();
-  renderConversationMemories();
-  restoreCanvasData(data);
-}
-
-function readProjectDataWithBackup(name) {
-  const data = readJson(projectKey(name), { nodes: [], connections: [], memories: [] });
-  const backup = readJson(`${projectKey(name)}.backup`, null);
-  const dataNodeCount = Array.isArray(data?.nodes) ? data.nodes.length : 0;
-  const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
-  if (dataNodeCount === 0 && backupNodeCount > 0) {
-    try {
-      localStorage.setItem(projectKey(name), JSON.stringify(backup));
-      console.warn(`Restored ${name} from local backup`);
-    } catch (error) {
-      console.warn("Project backup restore save failed", error);
-    }
-    return backup;
-  }
-  return data;
+.assets-header p {
+  max-width: 820px;
 }
 
-async function loadSharedProject(name) { return; }
+.assets-actions {
+  max-width: 1340px;
+  margin: 0 auto 12px;
+  justify-content: end;
+}
 
-function shouldUseSharedProjectData(name, sharedData) {
-  const localData = readJson(projectKey(name), null);
-  const localNodeCount = Array.isArray(localData?.nodes) ? localData.nodes.length : 0;
-  const sharedNodeCount = Array.isArray(sharedData?.nodes) ? sharedData.nodes.length : 0;
-  if (localNodeCount > 0 && sharedNodeCount < localNodeCount) {
-    console.warn(`Skipped smaller shared project overwrite for ${name}`);
-    return false;
-  }
-  return true;
-}
-
-function backupProjectData(name, data) {
-  if (!name || !data || !Array.isArray(data.nodes) || !data.nodes.length) return;
-  try {
-    localStorage.setItem(`${projectKey(name)}.backup`, JSON.stringify(data));
-  } catch (error) {
-    console.warn("Project backup failed", error);
-  }
+.my-assets,
+.platform-assets {
+  max-width: 1340px;
+  margin: 0 auto 30px;
 }
 
-function restoreCanvasData(data) {
-  isRestoring = true;
-  const restoredIds = new Set();
-  (data.nodes || []).forEach((saved) => {
-    let node = null;
-    try {
-      node = createNode(saved);
-      restoredIds.add(node.id);
-    } catch (error) {
-      console.error("Node restore failed", saved, error);
-      return;
-    }
-    try {
-    node.dataset.imagePurpose = saved.imagePurpose || "自定义";
-    node.dataset.referenceMode = saved.referenceMode || "structureStyle";
-    node.dataset.imageRole = saved.imageRole || "general";
-    delete node.dataset.imageRatio;
-    delete node.dataset.imageResolution;
-    node.dataset.imageQuality = saved.imageQuality || "high";
-    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
-    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-    node.dataset.apimartChannel = "b";
-    if (saved.fileName) node.dataset.fileName = saved.fileName;
-    if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
-    if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
-    if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
-    if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
-    if (Array.isArray(saved.imageDataUrls)) node.dataset.imageDataUrls = JSON.stringify(saved.imageDataUrls);
-    if (saved.imageDataInlineUrl) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
-    if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
-    if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
-    if (Array.isArray(saved.referenceImageDataUrls)) node.dataset.referenceImageDataUrls = JSON.stringify(saved.referenceImageDataUrls);
-    if (saved.referenceImageDataInlineUrl) node.dataset.referenceImageDataInlineUrl = saved.referenceImageDataInlineUrl;
-    if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
-    if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
-    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
-    if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
-    if (saved.generatedImageNaturalHeight) node.dataset.generatedImageNaturalHeight = saved.generatedImageNaturalHeight;
-    if (Array.isArray(saved.videoUrls)) node.dataset.videoUrls = JSON.stringify(saved.videoUrls);
-    if (saved.videoDataUrl) node.dataset.videoDataUrl = saved.videoDataUrl;
-    if (Array.isArray(saved.referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(saved.referenceVideoUrls);
-    if (saved.referenceVideoUrl) node.dataset.referenceVideoUrl = saved.referenceVideoUrl;
-    if (saved.generatedVideoUrl) node.dataset.generatedVideoUrl = saved.generatedVideoUrl;
-    if (Array.isArray(saved.generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(saved.generatedVideoUrls);
-    node.dataset.videoMode = normalizeVideoModeValue(saved.videoMode);
-    node.dataset.videoDuration = saved.videoDuration || "5";
-    node.dataset.videoModel = normalizeVideoModelValue(saved.videoModel);
-    node.dataset.videoAspectRatio = saved.videoAspectRatio || "16:9";
-    node.dataset.videoResolution = saved.videoResolution || "1080p";
-    node.dataset.videoSeed = saved.videoSeed || "";
-    node.dataset.videoGenerateAudio = String(Boolean(saved.videoGenerateAudio));
-    node.dataset.videoReturnLastFrame = String(Boolean(saved.videoReturnLastFrame));
-    node.dataset.videoWebSearch = String(Boolean(saved.videoWebSearch));
-    if (saved.videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = saved.videoFirstFrameUrl;
-    if (saved.videoLastFrameUrl) node.dataset.videoLastFrameUrl = saved.videoLastFrameUrl;
-    if (saved.videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = saved.videoReferenceAudioUrl;
-    if (Array.isArray(saved.videoReferenceAudioUrls)) node.dataset.videoReferenceAudioUrls = JSON.stringify(saved.videoReferenceAudioUrls);
-    if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
-    if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
-    node.dataset.tone = saved.tone || node.dataset.tone;
-    setNodeType(node, saved.type, saved.content);
-    renderNodeImagePreview(node);
-    } catch (error) {
-      console.error("Node data hydrate failed", saved, error);
-      return;
-    }
-    if (saved.imageDataKey) {
-      loadProjectImage(saved.imageDataKey).then((value) => {
-        if (!value) return;
-        node.dataset.imageDataUrl = value;
-        renderNodeImagePreview(node);
-      });
-    }
-    if (saved.referenceImageDataKey) {
-      loadProjectImage(saved.referenceImageDataKey).then((value) => {
-        if (value) node.dataset.referenceImageDataUrl = value;
-      });
-    }
-  });
-  (data.connections || []).forEach((saved) => {
-    if (!restoredIds.has(saved.from) || !restoredIds.has(saved.to)) return;
-    const from = document.getElementById(saved.from);
-    const to = document.getElementById(saved.to);
-    if (from && to) addConnection(from, to, saved.fromSide || "right", saved.toSide || "left");
-  });
-  isRestoring = false;
-  refreshConnectionsSoon();
-}
-
-function clearCanvas() {
-  canvasContent.querySelectorAll(".node").forEach((node) => node.remove());
-  connectorSvg.innerHTML = "";
-  connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
-  selectNode(null);
-}
-
-function selectNode(node, additive = false) {
-  if (!additive) clearSelectedNodes();
-  selectedNode = node;
-  if (node) addSelectedNode(node);
-  if (node) {
-    document.body.tabIndex = -1;
-    document.body.focus();
-  }
+.empty-assets {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  border-style: dashed;
+  box-shadow: none;
 }
 
-function addSelectedNode(node) {
-  selectedNodes.add(node);
-  node.classList.add("selected");
-  selectedNode = node;
+.empty-assets div {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 24px;
 }
 
-function clearSelectedNodes() {
-  selectedNodes.forEach((node) => node.classList.remove("selected"));
-  selectedNodes.clear();
-  selectedNode = null;
+.empty-assets span {
+  max-width: 460px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
 }
 
-function selectNodes(nodes) {
-  clearSelectedNodes();
-  nodes.forEach(addSelectedNode);
-  if (!nodes.length) selectedNode = null;
+.asset-library-grid article {
+  min-height: 260px;
+  padding: 20px;
+  box-shadow: none;
 }
 
-function zoomCanvas(factor, clientX, clientY) {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
-  const py = clientY === undefined ? rect.height / 2 : clientY - rect.top;
-  const wx = (px - viewport.x) / viewport.scale;
-  const wy = (py - viewport.y) / viewport.scale;
-  const scale = Math.min(3.5, Math.max(0.2, viewport.scale * factor));
-  viewport.x = px - wx * scale;
-  viewport.y = py - wy * scale;
-  viewport.scale = scale;
-  applyViewport();
+.asset-icon {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 18px;
 }
 
-function resetViewport() {
-  const bounds = getNodesBounds([...canvasContent.querySelectorAll(".node")]);
-  if (!bounds || !canvas) {
-    viewport = { x: 0, y: 0, scale: 1 };
-    applyViewport();
-    return;
-  }
-  const rect = canvas.getBoundingClientRect();
-  const padding = 140;
-  const availableWidth = Math.max(320, rect.width - padding * 2);
-  const availableHeight = Math.max(240, rect.height - padding * 2);
-  const scale = Math.min(1, Math.max(0.25, Math.min(availableWidth / bounds.width, availableHeight / bounds.height)));
-  viewport = {
-    x: Math.round(rect.width / 2 - ((bounds.left + bounds.width / 2) * scale)),
-    y: Math.round(rect.height / 2 - ((bounds.top + bounds.height / 2) * scale)),
-    scale,
-  };
-  applyViewport();
-  refreshConnectionsSoon();
-}
-
-function arrangeNodes() {
-  const selected = [...selectedNodes].filter((node) => node.isConnected);
-  const nodes = selected.length ? selected : [...canvasContent.querySelectorAll(".node")];
-  if (!nodes.length) return;
-  arrangeExistingNodeLayout(nodes);
-  selectNodes(nodes);
-  resetViewport();
-  saveCurrentProject();
-  refreshConnectionsSoon();
-}
-
-function getNodesBounds(nodes) {
-  const visibleNodes = nodes.filter((node) => node.isConnected);
-  if (!visibleNodes.length) return null;
-  const left = Math.min(...visibleNodes.map((node) => Number(node.dataset.x) || 0));
-  const top = Math.min(...visibleNodes.map((node) => Number(node.dataset.y) || 0));
-  const right = Math.max(...visibleNodes.map((node) => (Number(node.dataset.x) || 0) + (node.offsetWidth || 260)));
-  const bottom = Math.max(...visibleNodes.map((node) => (Number(node.dataset.y) || 0) + (node.offsetHeight || 180)));
-  return {
-    left,
-    top,
-    right,
-    bottom,
-    width: Math.max(1, right - left),
-    height: Math.max(1, bottom - top),
-  };
-}
-
-function arrangeExistingNodeLayout(nodes) {
-  const columnThreshold = 190;
-  const rowGap = 42;
-  const columns = [];
-
-  [...nodes]
-    .sort((a, b) => nodeOriginalLeft(a) - nodeOriginalLeft(b))
-    .forEach((node) => {
-      const left = nodeOriginalLeft(node);
-      let column = columns.find((item) => Math.abs(item.anchorX - left) <= columnThreshold);
-      if (!column) {
-        column = { anchorX: left, nodes: [] };
-        columns.push(column);
-      }
-      column.nodes.push(node);
-      column.anchorX = column.nodes.reduce((sum, item) => sum + nodeOriginalLeft(item), 0) / column.nodes.length;
-    });
-
-  columns
-    .sort((a, b) => a.anchorX - b.anchorX)
-    .forEach((column) => {
-      const sorted = column.nodes.sort((a, b) => nodeOriginalTop(a) - nodeOriginalTop(b));
-      const alignedX = Math.round(column.anchorX);
-      let nextY = Math.min(...sorted.map(nodeOriginalTop));
-      sorted.forEach((node, index) => {
-        moveNode(node, alignedX, nextY);
-        nextY += Math.max(170, node.offsetHeight || 0) + rowGap;
-      });
-    });
-}
-
-function nodeTypeRank(node) {
-  return { image: 0, text: 1, video: 2 }[node?.dataset.type] ?? 3;
-}
-
-function nodeOriginalTop(node) {
-  return Number(node?.dataset.y) || 0;
-}
-
-function nodeOriginalLeft(node) {
-  return Number(node?.dataset.x) || 0;
-}
-
-function applyViewport() {
-  canvasContent.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-  if (canvasZoomLabel) canvasZoomLabel.textContent = `${Math.round(viewport.scale * 100)}%`;
-}
-
-function showMenu(menu, x, y) {
-  hideMenus();
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  menu.classList.add("show");
-  menu.setAttribute("aria-hidden", "false");
-}
-
-function hideMenus() {
-  canvasContextMenu.classList.remove("show");
-  nodeContextMenu.classList.remove("show");
-  imageUploadContextMenu?.classList.remove("show");
-  portConnectionContextMenu?.classList.remove("show");
-  canvasContextMenu.setAttribute("aria-hidden", "true");
-  nodeContextMenu.setAttribute("aria-hidden", "true");
-  imageUploadContextMenu?.setAttribute("aria-hidden", "true");
-  portConnectionContextMenu?.setAttribute("aria-hidden", "true");
-  contextUploadNode = null;
-  contextPort = null;
-}
-
-function highlightNearestPort(event) {
-  clearPortHighlights();
-  const port = findPortNear(event.clientX, event.clientY);
-  if (port && port.closest(".node") !== wireState.node) port.classList.add("connect-target");
-}
-
-function clearPortHighlights() {
-  document.querySelectorAll(".node-port.connect-target").forEach((port) => port.classList.remove("connect-target"));
-}
-
-function findPortNear(clientX, clientY) {
-  const direct = document.elementFromPoint(clientX, clientY)?.closest(".node-port");
-  if (direct) return direct;
-  let best = null;
-  let distance = Infinity;
-  document.querySelectorAll(".node-port").forEach((port) => {
-    const rect = port.getBoundingClientRect();
-    const d = Math.hypot(rect.left + rect.width / 2 - clientX, rect.top + rect.height / 2 - clientY);
-    if (d < distance) {
-      distance = d;
-      best = port;
-    }
-  });
-  return distance <= 30 ? best : null;
-}
-
-function getPortPoint(port) {
-  const portRect = port.getBoundingClientRect();
-  const canvasRect = canvasContent.getBoundingClientRect();
-  return {
-    x: (portRect.left + portRect.width / 2 - canvasRect.left) / viewport.scale,
-    y: (portRect.top + portRect.height / 2 - canvasRect.top) / viewport.scale,
-  };
-}
-
-function getNodePortPoint(node, side) {
-  return getPortPoint(node.querySelector(side === "right" ? ".node-port.out" : ".node-port.in"));
-}
-
-function sideForPort(port) {
-  return port.classList.contains("out") ? "right" : "left";
-}
-
-function getNodeContent(node) {
-  const structuredFields = node.querySelectorAll(".text-brief-field");
-  if (structuredFields.length) {
-    const fields = {
-      requirement: "",
-      revision: "",
-      scene: "",
-      negative: "",
-    };
-    structuredFields.forEach((field) => {
-      fields[field.dataset.textField] = field.value;
-    });
-    return formatTextNodeFields(fields);
-  }
-  const input = node.querySelector(".text-input, .mini-textarea");
-  return input ? input.value : node.querySelector(".node-description")?.textContent || "";
-}
-
-function createNodeId() {
-  nodeCounter += 1;
-  return `node-${Date.now()}-${nodeCounter}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
-function projectKey(name) {
-  return `aivideobox.project.v2:${name}`;
-}
-
-function projectImageKey(projectName, nodeId, slot) {
-  return `${projectName}::${nodeId}::${slot}`;
-}
-
-function openImageDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(IMAGE_DB_NAME, 2);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(IMAGE_STORE_NAME)) {
-        request.result.createObjectStore(IMAGE_STORE_NAME);
-      }
-    };
-    request.onsuccess = () => {
-      const db = request.result;
-      if (db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
-        resolve(db);
-        return;
-      }
-      db.close();
-      const upgradeRequest = indexedDB.open(IMAGE_DB_NAME, db.version + 1);
-      upgradeRequest.onupgradeneeded = () => {
-        if (!upgradeRequest.result.objectStoreNames.contains(IMAGE_STORE_NAME)) {
-          upgradeRequest.result.createObjectStore(IMAGE_STORE_NAME);
-        }
-      };
-      upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
-      upgradeRequest.onerror = () => reject(upgradeRequest.error);
-    };
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function storeProjectImage(key, value) {
-  if (!key || !value) return;
-  try {
-    const db = await openImageDb();
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction(IMAGE_STORE_NAME, "readwrite");
-      transaction.objectStore(IMAGE_STORE_NAME).put(value, key);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    });
-    db.close();
-  } catch (error) {
-    console.error("Image save failed", error);
-  }
+.asset-library-grid small {
+  display: inline-flex;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #bfd1e3;
 }
 
-async function loadProjectImage(key) {
-  if (!key) return "";
-  try {
-    const db = await openImageDb();
-    const value = await new Promise((resolve, reject) => {
-      const transaction = db.transaction(IMAGE_STORE_NAME, "readonly");
-      const request = transaction.objectStore(IMAGE_STORE_NAME).get(key);
-      request.onsuccess = () => resolve(request.result || "");
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return value;
-  } catch (error) {
-    console.error("Image load failed", error);
-    return "";
-  }
+.asset-library-grid h3 {
+  margin: 16px 0 10px;
 }
 
-function readJson(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) || fallback;
-  } catch {
-    return fallback;
-  }
+.asset-library-grid button {
+  margin-top: 16px;
+}
+
+.placeholder-page {
+  max-width: 920px;
+  min-height: auto;
+  margin: 30px auto;
+  padding: 34px;
 }
 
-window.aivideoboxRecovery = function aivideoboxRecovery() {
-  const rows = [];
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("aivideobox.project.v2:")) continue;
-    const data = readJson(key, null);
-    rows.push({
-      key,
-      nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
-      connections: Array.isArray(data?.connections) ? data.connections.length : 0,
-      size: localStorage.getItem(key)?.length || 0,
-    });
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 1fr;
   }
-  console.table(rows);
-  return rows;
-};
-
-window.aivideoboxRestoreBackups = function aivideoboxRestoreBackups() {
-  const restored = [];
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("aivideobox.project.v2:") || !key.endsWith(".backup")) continue;
-    const baseKey = key.replace(/\.backup$/, "");
-    const current = readJson(baseKey, null);
-    const backup = readJson(key, null);
-    const currentNodes = Array.isArray(current?.nodes) ? current.nodes.length : 0;
-    const backupNodes = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
-    if (currentNodes === 0 && backupNodes > 0) {
-      localStorage.setItem(baseKey, JSON.stringify(backup));
-      restored.push({ key: baseKey, nodes: backupNodes });
-    }
+
+  .sidebar {
+    position: static;
+    height: auto;
   }
-  console.table(restored);
-  return restored;
-};
-
-window.aivideoboxExportFullBackup = async function aivideoboxExportFullBackup() {
-  const local = Object.fromEntries(
-    Object.keys(localStorage)
-      .filter((key) => key.startsWith("aivideobox.project.v2:") || key === PROJECT_LIST_KEY)
-      .map((key) => [key, localStorage.getItem(key)]),
-  );
-  const images = await exportImageDb();
-  const inlined = await inlineReachableProjectImages(local);
-  downloadJson({ local, images, inlined, exportedAt: new Date().toISOString() }, "aivideobox-full-backup.json");
-  return {
-    localKeys: Object.keys(local).length,
-    imageKeys: Object.keys(images).length,
-    inlinedImages: countInlinedImages(inlined),
-  };
-};
-
-window.aivideoboxImportFullBackup = async function aivideoboxImportFullBackup() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "application/json";
-  input.onchange = async () => {
-    const backup = JSON.parse(await input.files[0].text());
-    Object.entries(backup.local || {}).forEach(([key, value]) => localStorage.setItem(key, value));
-    await importImageDb(backup.images || {});
-    Object.entries(backup.inlined || {}).forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
-    location.reload();
-  };
-  input.click();
-};
-
-async function exportImageDb() {
-  try {
-    const db = await openImageDb();
-    if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
-      db.close();
-      return {};
-    }
-    const transaction = db.transaction(IMAGE_STORE_NAME, "readonly");
-    const store = transaction.objectStore(IMAGE_STORE_NAME);
-    const keys = await idbRequest(store.getAllKeys());
-    const images = {};
-    for (const key of keys) {
-      images[key] = await idbRequest(store.get(key));
-    }
-    db.close();
-    return images;
-  } catch (error) {
-    console.warn("Image DB export skipped", error);
-    return {};
+
+  .side-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-}
 
-async function importImageDb(images) {
-  const db = await openImageDb();
-  const transaction = db.transaction(IMAGE_STORE_NAME, "readwrite");
-  const store = transaction.objectStore(IMAGE_STORE_NAME);
-  Object.entries(images).forEach(([key, value]) => store.put(value, key));
-  await new Promise((resolve, reject) => {
-    transaction.oncomplete = resolve;
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-}
-
-function idbRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function inlineReachableProjectImages(local) {
-  const inlined = {};
-  for (const [key, raw] of Object.entries(local)) {
-    if (!key.startsWith("aivideobox.project.v2:")) continue;
-    const data = safeParseJson(raw);
-    if (!data?.nodes) continue;
-    const next = structuredClone(data);
-    await inlineProjectNodeImages(next.nodes);
-    inlined[key] = next;
+  .account,
+  .nav-divider,
+  .points {
+    display: none;
   }
-  return inlined;
-}
 
-async function inlineProjectNodeImages(nodes) {
-  for (const node of nodes || []) {
-    await inlineNodeImageFields(node);
-    if (Array.isArray(node.folderNodes)) await inlineProjectNodeImages(node.folderNodes);
+  .brief-card,
+  .workspace-layout {
+    grid-template-columns: 1fr;
   }
-}
 
-async function inlineNodeImageFields(node) {
-  for (const key of ["generatedImageUrl", "imageDataUrl", "referenceImageDataUrl"]) {
-    if (isRemoteImageUrl(node[key])) node[key] = await fetchImageAsDataUrl(node[key]) || node[key];
+  .conversation-panel {
+    max-height: 340px;
   }
-  for (const key of ["generatedImageUrls", "imageUrls", "referenceImageUrls"]) {
-    if (!Array.isArray(node[key])) continue;
-    node[key] = await Promise.all(node[key].map(async (url) => isRemoteImageUrl(url) ? (await fetchImageAsDataUrl(url)) || url : url));
+
+  .canvas-toolbar {
+    left: 24px;
   }
-}
 
-async function fetchImageAsDataUrl(url) {
-  try {
-    const response = await fetch(url, { cache: "force-cache", mode: "cors" });
-    if (!response.ok) return "";
-    const blob = await response.blob();
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return "";
+  .workspace-side-toggle {
+    left: 18px;
+    top: 18px;
+    bottom: auto;
   }
 }
 
-function safeParseJson(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
+@media (max-width: 760px) {
+  .page {
+    padding: 18px;
   }
-}
 
-function countInlinedImages(projects) {
-  let count = 0;
-  Object.values(projects || {}).forEach((project) => {
-    (project.nodes || []).forEach((node) => {
-      const candidates = [];
-      collectNodeThumbnailCandidates(node, candidates);
-      count += candidates.filter((value) => typeof value === "string" && value.startsWith("data:image/")).length;
-    });
-  });
-  return count;
-}
+  .side-nav,
+  .hero-links,
+  .task-grid,
+  .asset-library-grid {
+    grid-template-columns: 1fr;
+  }
 
-function downloadJson(data, fileName) {
-  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = fileName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
+  .hero-card h1 {
+    font-size: 38px;
+  }
 
-function cssEscape(value) {
-  return window.CSS?.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
-}
+  .brief-card {
+    display: block;
+  }
 
-function escapeHtml(value = "") {
-  return String(value).replace(/[&<>"']/g, (char) => {
-    const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
-    return entities[char];
-  });
+  .visual-placeholder {
+    min-height: 280px;
+  }
 }
-
-loadImageOptions();
-loadProjectList();
-showPage("home");
-startSharedProjectAutoRefresh();
-
