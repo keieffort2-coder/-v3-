@@ -42,11 +42,13 @@ function getRayinAiUserId(token) {
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
-  return withoutName
+  const normalized = withoutName
     .replace(/\/v1\/responses\/?$/i, "")
     .replace(/\/responses\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
+  if (/^https?:\/\/(?:www\.)?240423\.xyz\b/i.test(normalized)) return RAYINAI_DEFAULT_BASE;
+  return normalized || RAYINAI_DEFAULT_BASE;
 }
 
 function getRhartBaseUrl() {
@@ -764,8 +766,6 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     ? [
         { url: `${baseUrl}/v1/responses`, body: responsesBody },
         { url: `${baseUrl}/responses`, body: responsesBody },
-        { url: `${baseUrl}/v1/images/edits`, body: rayinImageBody },
-        { url: `${baseUrl}/images/edits`, body: rayinImageBody },
       ]
     : [
         { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
