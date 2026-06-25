@@ -2,6 +2,7 @@ const key = String(process.env.RAYINAI_API_KEY || "").trim().replace(/^Bearer\s+
 const baseUrl = String(process.env.RAYINAI_BASE_URL || "https://code.rayinai.com").trim().replace(/\/+$/, "");
 const model = String(process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2").trim();
 const prompt = String(process.env.RAYINAI_PROMPT || "hi");
+const endpointType = String(process.env.RAYINAI_ENDPOINT || "responses").trim().toLowerCase();
 const imageUrls = String(process.env.RAYINAI_IMAGE_URLS || "")
   .split(",")
   .map((value) => value.trim())
@@ -18,13 +19,20 @@ const content = [
   ...imageUrls.map((imageUrl) => ({ type: "input_image", image_url: imageUrl })),
 ];
 
-const body = {
-  model,
-  input: [{ type: "message", role: "user", content }],
-};
+const body = endpointType === "images"
+  ? {
+      model,
+      prompt,
+      n: 1,
+      image_urls: imageUrls,
+    }
+  : {
+      model,
+      input: [{ type: "message", role: "user", content }],
+    };
 
 async function main() {
-  const endpoint = `${baseUrl}/v1/responses`;
+  const endpoint = endpointType === "images" ? `${baseUrl}/v1/images/generations` : `${baseUrl}/v1/responses`;
   const started = Date.now();
   const response = await fetch(endpoint, {
     method: "POST",
@@ -49,6 +57,7 @@ async function main() {
     status: response.status,
     statusText: response.statusText,
     endpoint,
+    endpointType,
     model,
     contentTypes: content.map((item) => item.type),
     elapsedMs: Date.now() - started,
