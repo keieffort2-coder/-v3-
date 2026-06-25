@@ -25,16 +25,16 @@ function getRayinAiKeyId() {
 }
 
 function getRayinAiResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
 }
 
 function getRayinAiResponsesModels() {
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
   const models = configured
     .split(/[,\s;]+/)
     .map((value) => value.trim())
     .filter(Boolean);
-  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
+  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-image-2"];
 }
 
 function getRayinAiRetryAttempts() {
@@ -244,7 +244,7 @@ module.exports = async function handler(req, res) {
           taskId,
           status: imageUrl ? "completed" : "submitted",
           imageUrl,
-          model: rayinSubmitBody.model,
+          model: rayinResult.payload?.rayinRequest?.model || rayinSubmitBody.model,
           provider: "rayinai",
           rayinEndpoint: rayinResult.payload?.rayinEndpoint,
           payload: imageUrl ? undefined : rayinResult.payload,
@@ -746,6 +746,13 @@ async function submitRayinImageTask(apiKey, submitBody) {
     const { response, payload } = await fetchRayinWithRetry(attempt.url, headers, attempt.body);
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      payload.rayinRequest = {
+        model: attempt.body?.model,
+        hasTools: Array.isArray(attempt.body?.tools),
+        contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
+      };
+    }
     if (response.ok && (imageUrl || taskId)) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = attempt.url;
@@ -753,13 +760,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
       return { ok: true, status: response.status, payload };
     }
     last = { ok: false, status: response.status, payload };
-    if (last.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
-      last.payload.rayinRequest = {
-        model: attempt.body?.model,
-        hasTools: Array.isArray(attempt.body?.tools),
-        contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
-      };
-    }
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
     if (![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
