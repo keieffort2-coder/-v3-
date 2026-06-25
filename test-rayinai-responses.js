@@ -956,14 +956,17 @@ function buildRayinStrictPrompt(submitBody, structureAnchor, styleCount) {
   if (!structureAnchor) return submitBody.prompt;
   return [
     "STRICT IMAGE RECONSTRUCTION CONTRACT:",
-    "The first/structure input image is the non-negotiable spatial blueprint.",
-    "Preserve its scene category, camera angle, perspective, corridor/room layout, wall and floor placement, doorway/opening positions, object locations, major silhouettes, crop, and canvas ratio.",
+    "Task type: image-to-image reconstruction, not text-to-image invention.",
+    "The first/structure input image is the non-negotiable spatial blueprint and must remain visibly recognizable in the final image.",
+    "Preserve its exact scene category, camera angle, perspective, corridor/room layout, wall and floor placement, doorway/opening positions, object locations, major silhouettes, crop, and canvas ratio.",
     "Do not invent a different scene, different architecture, different room type, outdoor environment, character scene, product shot, poster, UI, or unrelated composition.",
-    "Only improve clarity, rendering quality, material finish, lighting finish, and requested style.",
+    "Do not replace the structure image with a generic fantasy ruin, temple, corridor, hall, street, landscape, or any other unrelated environment.",
+    "Only improve clarity, rendering quality, material finish, edge definition, lighting finish, and requested style while keeping the original layout.",
     styleCount > 0
       ? "Style references may affect palette, lighting mood, texture, atmosphere, and finish only. They must not change composition, camera, scene content, or object placement."
       : "",
     "If any instruction conflicts with the structure image, the structure image wins.",
+    "中文硬性约束：必须沿用第一张结构参考图的场景、构图、镜头、透视、墙地位置、开口位置、物体位置和画幅比例；禁止生成无关的新场景。",
     "User request and existing role instructions:",
     submitBody.prompt,
   ].filter(Boolean).join("\n");
