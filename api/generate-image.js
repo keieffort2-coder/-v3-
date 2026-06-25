@@ -37,6 +37,12 @@ function getRayinAiResponsesModels() {
   return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
 }
 
+function getRayinAiRetryAttempts() {
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "6"));
+  if (!Number.isFinite(value)) return 6;
+  return Math.min(10, Math.max(1, Math.floor(value)));
+}
+
 function getRayinAiBaseUrl() {
   const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || RAYINAI_DEFAULT_BASE);
   const withoutName = raw.replace(/^RAYINAI_BASE_URL\s*=\s*/i, "");
@@ -769,7 +775,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
 async function fetchRayinWithRetry(url, headers, body) {
   let response;
   let payload;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const maxAttempts = getRayinAiRetryAttempts();
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     response = await fetch(url, {
       method: "POST",
       headers,
@@ -777,13 +784,18 @@ async function fetchRayinWithRetry(url, headers, body) {
     });
     payload = await readJson(response);
     const message = formatUpstreamError(payload);
-    if (![429, 502, 503, 504].includes(response.status) || attempt === 2) return { response, payload };
+    if (![429, 502, 503, 504].includes(response.status) || attempt === maxAttempts - 1) return { response, payload };
     if (!isRetryableRayinMessage(message)) {
       return { response, payload };
     }
-    await sleep(1200 * (attempt + 1));
+    await sleep(getRayinRetryDelay(attempt));
   }
   return { response, payload };
+}
+
+function getRayinRetryDelay(attempt) {
+  const delays = [1500, 3000, 6000, 10000, 15000, 20000, 25000, 30000, 30000];
+  return delays[Math.min(attempt, delays.length - 1)];
 }
 
 function isRetryableRayinMessage(message) {
