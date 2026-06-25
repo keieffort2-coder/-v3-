@@ -698,9 +698,6 @@ async function getTask(apiKey, taskId) {
 async function getRayinTask(apiKey, taskId) {
   const baseUrl = getRayinAiBaseUrl();
   const endpoints = [
-    `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
-    `${baseUrl}/extension/api/image/tasks?task_id=${encodeURIComponent(taskId)}`,
-    `${baseUrl}/extension/api/image/tasks?page=1&page_size=20`,
     `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
   ];
@@ -746,11 +743,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = models.flatMap((model) => [
-    {
-      url: `${baseUrl}/extension/api/image/tasks`,
-      body: buildRayinExtensionImageTaskBody(rayinImageBody, model),
-      type: "extension",
-    },
     {
       url: `${baseUrl}/v1/images/generations`,
       body: buildRayinImagesBody(rayinImageBody, model),
@@ -918,52 +910,6 @@ function toRayinInputImage(value) {
 
 function uniqueArray(values) {
   return [...new Set(values.filter(Boolean))];
-}
-
-function buildRayinExtensionImageTaskBody(submitBody, model = getRayinAiResponsesModel()) {
-  const inputImages = buildRayinExtensionInputImageGroups(submitBody);
-  const body = {
-    key_id: getRayinAiKeyId(),
-    provider: "gpt",
-    operation: inputImages.length ? "edit" : "generate",
-    model,
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    input_images: inputImages,
-    moderation: "auto",
-    n: 1,
-    output_format: submitBody.output_format || "png",
-    prompt: buildRayinStrictPrompt(submitBody, inputImages[0]?.[0]?.data_url || inputImages[0]?.[0]?.image_url || "", inputImages[1]?.length || 0),
-    quality: "auto",
-    size: "auto",
-  };
-  return body;
-}
-
-function buildRayinExtensionInputImageGroups(submitBody) {
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue) : [];
-  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const structureGroup = uniqueArray([...structureUrls, ...editUrls, imageUrls[0]].filter(isImageReferenceValue)).slice(0, 4);
-  const remaining = imageUrls.filter((url) => !structureGroup.includes(url) && !styleUrls.includes(url));
-  const groups = [];
-  if (structureGroup.length) groups.push(structureGroup.map(toRayinExtensionInputImage));
-  if (styleUrls.length) groups.push(styleUrls.map(toRayinExtensionInputImage));
-  remaining.slice(0, 8).forEach((url) => groups.push([toRayinExtensionInputImage(url)]));
-  return groups;
-}
-
-function toRayinExtensionInputImage(value) {
-  const dataUrlMatch = typeof value === "string" ? value.match(/^data:([^;]+);base64,/i) : null;
-  const item = { mime_type: dataUrlMatch?.[1] || "image/png" };
-  if (/^data:image\//i.test(value)) {
-    item.data_url = value;
-  } else {
-    item.image_url = value;
-    item.url = value;
-  }
-  return item;
 }
 
 function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel()) {
