@@ -4472,12 +4472,21 @@ async function uploadMediaFile(file) {
   });
   const result = await readResponseJson(response);
   if (!response.ok) {
-    throw new Error(formatApiError(result, `HTTP ${response.status}`));
+    const message = formatApiError(result, `HTTP ${response.status}`);
+    if (file.type.startsWith("image/") && isBlobStorageQuotaError(message)) {
+      console.warn("Vercel Blob quota exceeded; using inline image reference instead.", message);
+      return imageDataUrl;
+    }
+    throw new Error(message);
   }
   if (!result.url) {
     throw new Error("上传接口没有返回图片 URL");
   }
   return result.url;
+}
+
+function isBlobStorageQuotaError(message) {
+  return /vercel blob|storage quota|quota exceeded|1gb maximum|blob.*quota/i.test(String(message || ""));
 }
 
 function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
@@ -4664,7 +4673,10 @@ function uploadFilesToImageNode(node, files) {
       node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
       node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
       renderNodeImagePreview(node);
-      status.textContent = `${uploadedUrls.length} 张图片已上传并保存。`;
+      const remoteCount = uploadedUrls.filter(isRemoteImageUrl).length;
+      status.textContent = remoteCount
+        ? `${remoteCount} 张图片已上传并保存。`
+        : `${inlineDataUrls.length} 张图片已作为本地引用使用。`;
       saveCurrentProject();
     })
     .catch((error) => {
