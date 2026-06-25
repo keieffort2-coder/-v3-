@@ -260,6 +260,7 @@ module.exports = async function handler(req, res) {
           upstream: rayinResult.payload,
           request: {
             rayinResponsesModel: rayinResult.payload?.rayinRequest?.model || getRayinAiResponsesModel(),
+            rayinRequestType: rayinResult.payload?.rayinRequest?.type || "",
             size: rayinSubmitBody.size,
             quality: rayinSubmitBody.quality,
             output_format: rayinSubmitBody.output_format,
@@ -736,10 +737,18 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const models = getRayinAiResponsesModels();
-  const attempts = models.map((model) => ({
-    url: `${baseUrl}/v1/responses`,
-    body: buildRayinResponsesBody(rayinImageBody, model),
-  }));
+  const attempts = models.flatMap((model) => [
+    {
+      url: `${baseUrl}/v1/images/generations`,
+      body: buildRayinImagesBody(rayinImageBody, model),
+      type: "images",
+    },
+    {
+      url: `${baseUrl}/v1/responses`,
+      body: buildRayinResponsesBody(rayinImageBody, model),
+      type: "responses",
+    },
+  ]);
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
@@ -749,8 +758,10 @@ async function submitRayinImageTask(apiKey, submitBody) {
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       payload.rayinRequest = {
         model: attempt.body?.model,
+        type: attempt.type,
         hasTools: Array.isArray(attempt.body?.tools),
         contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
+        referenceCount: Array.isArray(attempt.body?.image_urls) ? attempt.body.image_urls.length : 0,
       };
     }
     if (response.ok && (imageUrl || taskId)) {
@@ -901,6 +912,24 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
   };
 }
 
+function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
+  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
+  const body = {
+    model,
+    prompt: submitBody.prompt,
+    n: 1,
+  };
+  if (submitBody.output_format) body.output_format = submitBody.output_format;
+  if (submitBody.quality) body.quality = submitBody.quality;
+  if (submitBody.size) body.size = submitBody.size;
+  if (imageUrls.length) {
+    body.image_urls = imageUrls;
+    body.reference_image_urls = imageUrls;
+    body.input_image_urls = imageUrls;
+  }
+  return body;
+}
+
 function getRayinReferenceLabel(submitBody, url, index) {
   const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
   const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
@@ -967,6 +996,9 @@ function extractResultUrl(payload) {
     data?.image,
     data?.url,
     data?.image_url,
+    Array.isArray(data) ? data[0]?.url : null,
+    Array.isArray(data) ? data[0]?.image_url : null,
+    Array.isArray(data) ? data[0]?.b64_json : null,
     payload?.result,
     payload?.result_url,
     payload?.output,
@@ -983,6 +1015,12 @@ function extractResultUrl(payload) {
   }
   if (Array.isArray(data?.images)) {
     candidates.push(data.images[0]?.url, data.images[0]?.image_url);
+  }
+  if (Array.isArray(payload?.data)) {
+    candidates.push(payload.data[0]?.url, payload.data[0]?.image_url, payload.data[0]?.b64_json);
+  }
+  if (Array.isArray(payload?.images)) {
+    candidates.push(payload.images[0]?.url, payload.images[0]?.image_url, payload.images[0]?.b64_json);
   }
   if (Array.isArray(data?.assets)) {
     const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
