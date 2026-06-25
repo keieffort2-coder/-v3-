@@ -507,6 +507,9 @@ function formatUpstreamError(payload) {
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
   }
+  if (/service temporarily unavailable|temporarily unavailable|bad gateway|gateway timeout/i.test(message)) {
+    return "RayinAI 上游暂时不可用，请稍后重试，或临时切换到 ApiMart 通道。";
+  }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
@@ -715,12 +718,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
-    const response = await fetch(attempt.url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(attempt.body),
-    });
-    const payload = await readJson(response);
+    const { response, payload } = await fetchRayinWithRetry(attempt.url, headers, attempt.body);
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
     if (response.ok && (imageUrl || taskId)) {
@@ -739,6 +737,26 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last.payload.status = last.status;
   }
   return last;
+}
+
+async function fetchRayinWithRetry(url, headers, body) {
+  let response;
+  let payload;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    payload = await readJson(response);
+    const message = formatUpstreamError(payload);
+    if (![502, 503, 504].includes(response.status) || attempt === 2) return { response, payload };
+    if (!/RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout/i.test(message)) {
+      return { response, payload };
+    }
+    await sleep(1200 * (attempt + 1));
+  }
+  return { response, payload };
 }
 
 function normalizeRayinImageBody(body) {
