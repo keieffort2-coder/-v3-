@@ -32,6 +32,10 @@ function getRayinAiKeyId() {
   return Number.isFinite(id) && id > 0 ? id : 8634;
 }
 
+function getRayinAiResponsesModel() {
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+}
+
 function getRayinAiUserId(token) {
   const raw = sanitizeUserId(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID || process.env.user_id || process.env.USER_ID);
   if (raw) return raw;
@@ -303,8 +307,8 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey || rayinExtensionToken)) {
-      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody, rayinExtensionToken);
+    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
+      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody);
       if (rayinResult.ok) {
         const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
         const taskId = extractTaskId(rayinResult.payload);
@@ -333,6 +337,7 @@ module.exports = async function handler(req, res) {
             output_format: submitBody.output_format,
             rayinEndpoint,
             rayinBaseUrl: getRayinAiBaseUrl(),
+            rayinApiKeyConfigured: Boolean(rayinAiKey),
             referenceCount: imageUrls.length,
           },
         });
@@ -748,13 +753,14 @@ function toRayinExtensionInputImage(value) {
   return item;
 }
 
-async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey) {
+async function submitRayinImageTask(apiKey, submitBody) {
   const baseUrl = getRayinAiBaseUrl();
   const headers = {
     Authorization: `Bearer ${apiKey}`,
-    "x-api-key": apiKey,
-    "x-goog-api-key": apiKey,
     "Content-Type": "application/json",
+    Accept: "*/*",
+    Host: new URL(baseUrl).host,
+    Connection: "keep-alive",
   };
   const imageBody = {
     ...submitBody,
@@ -763,19 +769,10 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const responsesBody = buildRayinResponsesBody(rayinImageBody);
-  let extensionFailure = null;
-  if (hasReferences) {
-    const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
-    if (extensionResult.ok) return extensionResult;
-    extensionFailure = extensionResult;
-    return extensionFailure;
-  }
   const attempts = [
-    { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
-    { url: `${baseUrl}/images/generations`, body: rayinImageBody },
     { url: `${baseUrl}/v1/responses`, body: responsesBody },
   ];
-  let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
+  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
     const response = await fetch(attempt.url, {
@@ -821,6 +818,14 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     Referer: referer,
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
   };
+  if (apiKey) {
+    headers.token = apiKey;
+    headers["x-token"] = apiKey;
+  }
+  if (userId) {
+    headers.user_id = String(userId);
+    headers["x-user-id"] = String(userId);
+  }
   if (cookie) headers.Cookie = cookie;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -833,8 +838,10 @@ async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
     payload.rayinExtensionAuth = {
       hasToken: Boolean(apiKey),
       tokenLooksLikeJwt: /^eyJ/.test(apiKey || ""),
+      tokenLength: String(apiKey || "").length,
       hasUserId: Boolean(userId),
       hasCookie: Boolean(cookie),
+      cookieLength: String(cookie || "").length,
       keyId: getRayinAiKeyId(),
       baseUrl,
       refererHasUserId: referer.includes("user_id="),
@@ -943,7 +950,7 @@ function buildRayinResponsesBody(submitBody) {
     content.push({ type: "input_image", image_url: url });
   });
   const body = {
-    model: normalizeRayinModel(submitBody.model),
+    model: getRayinAiResponsesModel(),
     input: [{ type: "message", role: "user", content }],
     tools: [{ type: "image_generation" }],
   };
