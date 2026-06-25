@@ -931,8 +931,8 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     body.image_urls = imageUrls;
     body.reference_image_urls = imageUrls;
     body.input_image_urls = imageUrls;
-    body.images = imageUrls.map((url) => ({ image_url: url, url }));
-    body.input_images = imageUrls.map((url) => ({ image_url: url, url }));
+    body.images = imageUrls.map(toRayinInputImage);
+    body.input_images = imageUrls.map(toRayinInputImage);
     body.inputs = buildRayinRoleInputs(submitBody, imageUrls);
     body.references = body.inputs;
   }
@@ -950,7 +950,7 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
   }
   if (styleUrls.length) {
     body.style_image_urls = styleUrls;
-    body.style_images = styleUrls.map((url) => ({ image_url: url, url }));
+    body.style_images = styleUrls.map(toRayinInputImage);
   }
   return body;
 }
@@ -958,13 +958,19 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
 function buildRayinRoleInputs(submitBody, imageUrls) {
   return imageUrls.map((url, index) => {
     const role = getRayinImageRole(submitBody, url, index);
-    return {
+    const item = {
       type: "image",
       role,
       image_url: url,
       url,
       weight: index === 0 || role === "structure" ? 1 : 0.45,
     };
+    if (/^data:image\//i.test(url)) {
+      item.data_url = url;
+      item.image_data_url = url;
+      item.source_data_url = url;
+    }
+    return item;
   });
 }
 
