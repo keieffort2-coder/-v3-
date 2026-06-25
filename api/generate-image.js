@@ -698,6 +698,9 @@ async function getTask(apiKey, taskId) {
 async function getRayinTask(apiKey, taskId) {
   const baseUrl = getRayinAiBaseUrl();
   const endpoints = [
+    `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
+    `${baseUrl}/extension/api/image/tasks?task_id=${encodeURIComponent(taskId)}`,
+    `${baseUrl}/extension/api/image/tasks?page=1&page_size=20`,
     `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
   ];
@@ -710,6 +713,11 @@ async function getRayinTask(apiKey, taskId) {
     const response = await fetch(endpoint, { headers });
     const payload = await readJson(response);
     if (response.ok) {
+      const taskPayload = findTaskById(payload, taskId) || payload;
+      if (taskPayload !== payload && taskPayload && typeof taskPayload === "object" && !Array.isArray(taskPayload)) {
+        taskPayload.rayinEndpoint = endpoint;
+        return taskPayload;
+      }
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = endpoint;
       }
@@ -739,6 +747,11 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const models = getRayinAiResponsesModels();
   const attempts = models.flatMap((model) => [
     {
+      url: `${baseUrl}/extension/api/image/tasks`,
+      body: buildRayinExtensionImageTaskBody(rayinImageBody, model),
+      type: "extension",
+    },
+    {
       url: `${baseUrl}/v1/images/generations`,
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
@@ -761,12 +774,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
         type: attempt.type,
         hasTools: Array.isArray(attempt.body?.tools),
         contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
-        referenceCount: Array.isArray(attempt.body?.inputs)
-          ? attempt.body.inputs.length
-          : Array.isArray(attempt.body?.image_urls)
-            ? attempt.body.image_urls.length
-            : 0,
-        inputRoles: Array.isArray(attempt.body?.inputs) ? attempt.body.inputs.map((item) => item?.role).filter(Boolean) : [],
+        referenceCount: getRayinAttemptReferenceCount(attempt.body),
+        inputRoles: getRayinAttemptInputRoles(attempt.body),
       };
     }
     if (response.ok && (imageUrl || taskId)) {
@@ -812,6 +821,26 @@ async function fetchRayinWithRetry(url, headers, body) {
 function getRayinRetryDelay(attempt) {
   const delays = [1500, 3000, 6000, 10000, 15000, 20000, 25000, 30000, 30000];
   return delays[Math.min(attempt, delays.length - 1)];
+}
+
+function getRayinAttemptReferenceCount(body) {
+  if (Array.isArray(body?.input_images)) {
+    return body.input_images.reduce((total, group) => total + (Array.isArray(group) ? group.length : 1), 0);
+  }
+  if (Array.isArray(body?.inputs)) return body.inputs.length;
+  if (Array.isArray(body?.image_urls)) return body.image_urls.length;
+  return 0;
+}
+
+function getRayinAttemptInputRoles(body) {
+  if (Array.isArray(body?.input_images)) {
+    return body.input_images.map((_, index) => {
+      if (index === 0) return "structure";
+      if (index === 1) return "style";
+      return "reference";
+    });
+  }
+  return Array.isArray(body?.inputs) ? body.inputs.map((item) => item?.role).filter(Boolean) : [];
 }
 
 function isRetryableRayinMessage(message) {
@@ -889,6 +918,52 @@ function toRayinInputImage(value) {
 
 function uniqueArray(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function buildRayinExtensionImageTaskBody(submitBody, model = getRayinAiResponsesModel()) {
+  const inputImages = buildRayinExtensionInputImageGroups(submitBody);
+  const body = {
+    key_id: getRayinAiKeyId(),
+    provider: "gpt",
+    operation: inputImages.length ? "edit" : "generate",
+    model,
+    aspect_ratio: "auto",
+    base_resolution: "auto",
+    input_images: inputImages,
+    moderation: "auto",
+    n: 1,
+    output_format: submitBody.output_format || "png",
+    prompt: buildRayinStrictPrompt(submitBody, inputImages[0]?.[0]?.data_url || inputImages[0]?.[0]?.image_url || "", inputImages[1]?.length || 0),
+    quality: "auto",
+    size: "auto",
+  };
+  return body;
+}
+
+function buildRayinExtensionInputImageGroups(submitBody) {
+  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue) : [];
+  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const structureGroup = uniqueArray([...structureUrls, ...editUrls, imageUrls[0]].filter(isImageReferenceValue)).slice(0, 4);
+  const remaining = imageUrls.filter((url) => !structureGroup.includes(url) && !styleUrls.includes(url));
+  const groups = [];
+  if (structureGroup.length) groups.push(structureGroup.map(toRayinExtensionInputImage));
+  if (styleUrls.length) groups.push(styleUrls.map(toRayinExtensionInputImage));
+  remaining.slice(0, 8).forEach((url) => groups.push([toRayinExtensionInputImage(url)]));
+  return groups;
+}
+
+function toRayinExtensionInputImage(value) {
+  const dataUrlMatch = typeof value === "string" ? value.match(/^data:([^;]+);base64,/i) : null;
+  const item = { mime_type: dataUrlMatch?.[1] || "image/png" };
+  if (/^data:image\//i.test(value)) {
+    item.data_url = value;
+  } else {
+    item.image_url = value;
+    item.url = value;
+  }
+  return item;
 }
 
 function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel()) {
@@ -1062,11 +1137,36 @@ function extractTaskId(payload) {
   if (payload?.data?.task_id) return String(payload.data.task_id);
   if (payload?.data?.task_no) return String(payload.data.task_no);
   if (payload?.data?.id) return String(payload.data.id);
+  if (payload?.task?.id) return String(payload.task.id);
+  if (payload?.task?.task_id) return String(payload.task.task_id);
+  if (payload?.task?.task_no) return String(payload.task.task_no);
   if (payload?.task_no) return String(payload.task_no);
   if (payload?.task_id) return String(payload.task_id);
   if (payload?.id) return String(payload.id);
   if (Array.isArray(payload?.data) && payload.data[0]?.task_id) {
     return String(payload.data[0].task_id);
+  }
+  return null;
+}
+
+function findTaskById(payload, taskId, seen = new Set()) {
+  if (!payload || typeof payload !== "object") return null;
+  if (seen.has(payload)) return null;
+  seen.add(payload);
+  const ids = [payload.id, payload.task_id, payload.task_no, payload.key, payload.uuid]
+    .filter((value) => value !== undefined && value !== null)
+    .map(String);
+  if (ids.includes(String(taskId))) return payload;
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findTaskById(item, taskId, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const value of Object.values(payload)) {
+    const found = findTaskById(value, taskId, seen);
+    if (found) return found;
   }
   return null;
 }
