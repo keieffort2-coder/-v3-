@@ -3738,7 +3738,11 @@ async function runImageGeneration(node) {
       status.textContent = `生成失败：${error instanceof Error ? error.message : "请确认已部署后端并配置 APIMART_API_KEY。"}`;
     }
     if (preview && !preview.innerHTML.trim()) {
-      preview.innerHTML = '<div class="generated-placeholder">后端未连接</div>';
+      const message = error instanceof Error ? error.message : String(error || "");
+      const placeholder = /fetch|network|Failed to fetch|后端未连接|Load failed/i.test(message)
+        ? "后端未连接"
+        : "上游返回失败";
+      preview.innerHTML = `<div class="generated-placeholder">${escapeHtml(placeholder)}</div>`;
     }
   } finally {
     imageGenerationControllers.delete(node.id);
