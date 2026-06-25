@@ -768,16 +768,13 @@ async function submitRayinImageTask(apiKey, submitBody, extensionToken = apiKey)
     const extensionResult = await submitRayinExtensionImageTask(extensionToken, rayinImageBody);
     if (extensionResult.ok) return extensionResult;
     extensionFailure = extensionResult;
+    return extensionFailure;
   }
-  const attempts = hasReferences
-    ? [
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-      ]
-    : [
-        { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/images/generations`, body: rayinImageBody },
-        { url: `${baseUrl}/v1/responses`, body: responsesBody },
-      ];
+  const attempts = [
+    { url: `${baseUrl}/v1/images/generations`, body: rayinImageBody },
+    { url: `${baseUrl}/images/generations`, body: rayinImageBody },
+    { url: `${baseUrl}/v1/responses`, body: responsesBody },
+  ];
   let last = extensionFailure || { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
