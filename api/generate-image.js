@@ -762,6 +762,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
         hasTools: Array.isArray(attempt.body?.tools),
         contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
         referenceCount: Array.isArray(attempt.body?.image_urls) ? attempt.body.image_urls.length : 0,
+        inputRoles: Array.isArray(attempt.body?.inputs) ? attempt.body.inputs.map((item) => item?.role).filter(Boolean) : [],
       };
     }
     if (response.ok && (imageUrl || taskId)) {
@@ -914,9 +915,13 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
 
 function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
+  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+  const structureAnchor = structureUrls[0] || editUrls[0] || imageUrls[0] || "";
   const body = {
     model,
-    prompt: submitBody.prompt,
+    prompt: buildRayinStrictPrompt(submitBody, structureAnchor, styleUrls.length),
     n: 1,
   };
   if (submitBody.output_format) body.output_format = submitBody.output_format;
@@ -926,8 +931,71 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     body.image_urls = imageUrls;
     body.reference_image_urls = imageUrls;
     body.input_image_urls = imageUrls;
+    body.images = imageUrls.map((url) => ({ image_url: url, url }));
+    body.input_images = imageUrls.map((url) => ({ image_url: url, url }));
+    body.inputs = buildRayinRoleInputs(submitBody, imageUrls);
+    body.references = body.inputs;
+  }
+  if (structureAnchor) {
+    body.image = structureAnchor;
+    body.image_url = structureAnchor;
+    body.reference_image = structureAnchor;
+    body.reference_image_url = structureAnchor;
+    body.structure_image_url = structureAnchor;
+    body.structure_image_urls = [structureAnchor];
+    body.composition_image_url = structureAnchor;
+    body.layout_image_url = structureAnchor;
+    body.edit_image_url = structureAnchor;
+    body.base_image_url = structureAnchor;
+  }
+  if (styleUrls.length) {
+    body.style_image_urls = styleUrls;
+    body.style_images = styleUrls.map((url) => ({ image_url: url, url }));
   }
   return body;
+}
+
+function buildRayinRoleInputs(submitBody, imageUrls) {
+  return imageUrls.map((url, index) => {
+    const role = getRayinImageRole(submitBody, url, index);
+    return {
+      type: "image",
+      role,
+      image_url: url,
+      url,
+      weight: index === 0 || role === "structure" ? 1 : 0.45,
+    };
+  });
+}
+
+function getRayinImageRole(submitBody, url, index = 0) {
+  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
+  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
+  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls : [];
+  if (structureUrls.includes(url) || index === 0) return "structure";
+  if (styleUrls.includes(url)) return "style";
+  if (editUrls.includes(url)) return "edit_base";
+  return "reference";
+}
+
+function buildRayinStrictPrompt(submitBody, structureAnchor, styleCount) {
+  if (!structureAnchor) return submitBody.prompt;
+  return [
+    "STRICT IMAGE RECONSTRUCTION CONTRACT:",
+    "Task type: image-to-image reconstruction, not text-to-image invention.",
+    "The first/structure input image is the non-negotiable spatial blueprint and must remain visibly recognizable in the final image.",
+    "Preserve its exact scene category, camera angle, perspective, corridor/room layout, wall and floor placement, doorway/opening positions, object locations, major silhouettes, crop, and canvas ratio.",
+    "Do not invent a different scene, different architecture, different room type, outdoor environment, character scene, product shot, poster, UI, or unrelated composition.",
+    "Do not replace the structure image with a generic fantasy ruin, temple, corridor, hall, street, landscape, or any other unrelated environment.",
+    "Only improve clarity, rendering quality, material finish, edge definition, lighting finish, and requested style while keeping the original layout.",
+    styleCount > 0
+      ? "Style references may affect palette, lighting mood, texture, atmosphere, and finish only. Style references must not change composition, camera, scene content, or object placement."
+      : "",
+    "If any instruction conflicts with the structure image, the structure image wins.",
+    "中文硬性约束：必须沿用第一张结构参考图的场景、构图、镜头、透视、墙地位置、开口位置、物体位置和画幅比例；禁止生成无关的新场景。",
+    "User request and existing role instructions:",
+    submitBody.prompt,
+  ].filter(Boolean).join("\n");
 }
 
 function getRayinReferenceLabel(submitBody, url, index) {
