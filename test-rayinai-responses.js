@@ -1,6 +1,6 @@
 const key = String(process.env.RAYINAI_API_KEY || "").trim().replace(/^Bearer\s+/i, "");
 const baseUrl = String(process.env.RAYINAI_BASE_URL || "https://code.rayinai.com").trim().replace(/\/+$/, "");
-const model = String(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4").trim();
+const model = String(process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2").trim();
 const prompt = String(process.env.RAYINAI_PROMPT || "hi");
 const imageUrls = String(process.env.RAYINAI_IMAGE_URLS || "")
   .split(",")
