@@ -15,19 +15,11 @@ function getRhartKey() {
 }
 
 function getRayinAiKey() {
-  return sanitizeBearerToken(process.env.RAYINAI_API_KEY || process.env.RAYINCODE_API_KEY);
-}
-
-function getRayinAiExtensionToken() {
-  return sanitizeBearerToken(process.env.RAYINAI_EXTENSION_TOKEN || process.env.RAYINCODE_EXTENSION_TOKEN || getRayinAiKey());
-}
-
-function getRayinAiExtensionCookie() {
-  return sanitizeCookieHeader(process.env.RAYINAI_EXTENSION_COOKIE || process.env.RAYINCODE_EXTENSION_COOKIE);
+  return sanitizeBearerToken(process.env.RAYINAI_API_KEY);
 }
 
 function getRayinAiKeyId() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || process.env.RAYINCODE_KEY_ID || "8634");
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || "8634");
   const id = Number(raw);
   return Number.isFinite(id) && id > 0 ? id : 8634;
 }
@@ -36,16 +28,9 @@ function getRayinAiResponsesModel() {
   return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
 }
 
-function getRayinAiUserId(token) {
-  const raw = sanitizeUserId(process.env.RAYINAI_USER_ID || process.env.RAYINCODE_USER_ID || process.env.user_id || process.env.USER_ID);
-  if (raw) return raw;
-  const payload = parseJwtPayload(token);
-  return payload.user_id || payload.userId || payload.sub || payload.id || "";
-}
-
 function getRayinAiBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || process.env.RAYINCODE_BASE_URL || RAYINAI_DEFAULT_BASE);
-  const withoutName = raw.replace(/^RAYIN(?:AI|CODE)_BASE_URL\s*=\s*/i, "");
+  const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || RAYINAI_DEFAULT_BASE);
+  const withoutName = raw.replace(/^RAYINAI_BASE_URL\s*=\s*/i, "");
   const normalized = withoutName
     .replace(/\/v1\/responses\/?$/i, "")
     .replace(/\/responses\/?$/i, "")
@@ -91,45 +76,6 @@ function sanitizeBearerToken(value) {
     .replace(/\s+/g, "");
 }
 
-function sanitizeCookieHeader(value) {
-  return sanitizeHeaderValue(value)
-    .replace(/^Cookie\s*:\s*/i, "")
-    .replace(/^cookie\s*=\s*/i, "");
-}
-
-function sanitizeUserId(value) {
-  return sanitizeHeaderValue(value)
-    .replace(/^user_id\s*=\s*/i, "")
-    .replace(/^RAYINAI_USER_ID\s*=\s*/i, "")
-    .replace(/^USER_ID\s*=\s*/i, "");
-}
-
-function parseJwtPayload(token) {
-  try {
-    const part = String(token || "").split(".")[1];
-    if (!part) return {};
-    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function buildRayinExtensionReferer(baseUrl, token) {
-  const userId = getRayinAiUserId(token);
-  const query = new URLSearchParams({
-    token,
-    theme: "light",
-    lang: "zh",
-    ui_mode: "embedded",
-    src_host: baseUrl,
-    src_url: `${baseUrl}/customer`,
-  });
-  if (userId) query.set("user_id", String(userId));
-  return `${baseUrl}/extension/draw?${query.toString()}`;
-}
-
 module.exports = async function handler(req, res) {
   if (req.method === "GET") {
     const taskId = req.query?.taskId;
@@ -140,7 +86,7 @@ module.exports = async function handler(req, res) {
 
     const provider = normalizeProvider(req.query?.provider);
     const apiKey = provider === "rayinai"
-      ? getRayinAiExtensionToken()
+      ? getRayinAiKey()
       : provider === "rhart"
         ? getRhartKey()
         : getApiMartKey(req.query?.apimartChannel);
@@ -206,7 +152,6 @@ module.exports = async function handler(req, res) {
   const apiKey = getApiMartKey(apimartChannel);
   const rhartKey = getRhartKey();
   const rayinAiKey = getRayinAiKey();
-  const rayinExtensionToken = getRayinAiExtensionToken();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
   if (preferredProvider === "rhart" && !rhartKey) {
     res.status(500).json({
@@ -229,54 +174,21 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const submitBody = {
-      model: normalizeModel(model),
-      prompt: String(prompt),
-      n: 1,
-      output_format: "png",
-    };
-
-    const normalizedQuality = normalizeQuality(quality, submitBody.model);
-    if (normalizedQuality) submitBody.quality = normalizedQuality;
-    const references = Array.isArray(imageDataUrls)
-      ? imageDataUrls
-      : [imageDataUrl];
-    const imageUrls = references.filter(isImageReferenceValue);
-    const structureUrls = Array.isArray(structureImageUrls) ? structureImageUrls.filter(isImageReferenceValue) : [];
-    const styleUrls = Array.isArray(styleImageUrls) ? styleImageUrls.filter(isImageReferenceValue) : [];
-    const editBaseUrls = Array.isArray(editBaseImageUrls) ? editBaseImageUrls.filter(isImageReferenceValue) : [];
-    const orderedReferenceUrls = uniqueValues([
-      ...structureUrls,
-      ...styleUrls,
-      ...imageUrls,
-      ...editBaseUrls,
-    ]).slice(0, 16);
-    const bindingPrompt = String(referenceBindings || "").trim();
-    if (orderedReferenceUrls.length) {
-      submitBody.image_urls = orderedReferenceUrls;
-      submitBody.prompt = [
-        bindingPrompt,
-        "Reference order: structure images control geometry, composition, local red lights, markings, and inherent object/material colors; style images control the global palette, color grade, ambient light, shadows, fog, atmosphere, texture, and finish.",
-        String(prompt),
-      ].filter(Boolean).join("\n");
-    }
-    const normalizedSize = shouldSendSize(submitBody.model) ? normalizeSize(size, submitBody.model) : "";
-    if (normalizedSize) submitBody.size = normalizedSize;
-    if (structureUrls.length) {
-      submitBody.structure_image_urls = structureUrls.slice(0, 4);
-      submitBody.composition_image_urls = structureUrls.slice(0, 4);
-      submitBody.layout_image_urls = structureUrls.slice(0, 4);
-    }
-    if (styleUrls.length) {
-      submitBody.style_image_urls = styleUrls.slice(0, 4);
-    }
-    if (editBaseUrls.length) {
-      submitBody.edit_image_urls = editBaseUrls.slice(0, 4);
-      submitBody.base_image_urls = editBaseUrls.slice(0, 4);
-    }
+    const requestContext = buildImageRequestContext({
+      prompt,
+      quality,
+      imageDataUrl,
+      imageDataUrls,
+      structureImageUrls,
+      styleImageUrls,
+      editBaseImageUrls,
+      referenceBindings,
+      model,
+      size,
+    });
 
     if (preferredProvider === "rhart") {
-      const rhartSubmitBody = buildRhartSubmitBody(submitBody);
+      const rhartSubmitBody = buildRhartSubmitBody(requestContext);
       const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
       if (rhartResult.ok) {
         const imageUrl = await persistResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`);
@@ -285,7 +197,7 @@ module.exports = async function handler(req, res) {
           taskId,
           status: imageUrl ? "completed" : "submitted",
           imageUrl,
-          model: submitBody.model,
+          model: rhartSubmitBody.model,
           provider: "rhart",
           payload: imageUrl ? undefined : rhartResult.payload,
         });
@@ -307,8 +219,9 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    if (shouldTryRayinAi(preferredProvider, submitBody.model, rayinAiKey)) {
-      const rayinResult = await submitRayinImageTask(rayinAiKey, submitBody);
+    if (shouldTryRayinAi(preferredProvider, requestContext.model, rayinAiKey)) {
+      const rayinSubmitBody = buildRayinSubmitBody(requestContext);
+      const rayinResult = await submitRayinImageTask(rayinAiKey, rayinSubmitBody);
       if (rayinResult.ok) {
         const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
         const taskId = extractTaskId(rayinResult.payload);
@@ -316,7 +229,7 @@ module.exports = async function handler(req, res) {
           taskId,
           status: imageUrl ? "completed" : "submitted",
           imageUrl,
-          model: submitBody.model,
+          model: rayinSubmitBody.model,
           provider: "rayinai",
           rayinEndpoint: rayinResult.payload?.rayinEndpoint,
           payload: imageUrl ? undefined : rayinResult.payload,
@@ -331,14 +244,14 @@ module.exports = async function handler(req, res) {
           message: formatUpstreamError(rayinResult.payload),
           upstream: rayinResult.payload,
           request: {
-            model: submitBody.model,
-            size: submitBody.size,
-            quality: submitBody.quality,
-            output_format: submitBody.output_format,
+            model: getRayinAiResponsesModel(),
+            size: rayinSubmitBody.size,
+            quality: rayinSubmitBody.quality,
+            output_format: rayinSubmitBody.output_format,
             rayinEndpoint,
             rayinBaseUrl: getRayinAiBaseUrl(),
             rayinApiKeyConfigured: Boolean(rayinAiKey),
-            referenceCount: imageUrls.length,
+            referenceCount: rayinSubmitBody.image_urls?.length || 0,
           },
         });
         return;
@@ -353,7 +266,7 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const apiMartSubmitBody = buildApiMartSubmitBody(submitBody);
+    const apiMartSubmitBody = buildApiMartSubmitBody(requestContext);
     const submit = await fetch(`${API_BASE}/images/generations`, {
       method: "POST",
       headers: {
@@ -419,44 +332,118 @@ function uniqueValues(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function buildApiMartSubmitBody(body) {
-  const next = {
-    model: body.model,
-    prompt: body.prompt,
-    n: body.n || 1,
+function buildImageRequestContext(body) {
+  const model = normalizeModel(body.model);
+  const basePrompt = String(body.prompt || "");
+  const references = Array.isArray(body.imageDataUrls)
+    ? body.imageDataUrls
+    : [body.imageDataUrl];
+  const imageUrls = references.filter(isImageReferenceValue);
+  const structureUrls = Array.isArray(body.structureImageUrls) ? body.structureImageUrls.filter(isImageReferenceValue) : [];
+  const styleUrls = Array.isArray(body.styleImageUrls) ? body.styleImageUrls.filter(isImageReferenceValue) : [];
+  const editBaseUrls = Array.isArray(body.editBaseImageUrls) ? body.editBaseImageUrls.filter(isImageReferenceValue) : [];
+  const orderedReferenceUrls = uniqueValues([
+    ...structureUrls,
+    ...styleUrls,
+    ...imageUrls,
+    ...editBaseUrls,
+  ]).slice(0, 16);
+  const referencePrompt = orderedReferenceUrls.length
+    ? [
+        String(body.referenceBindings || "").trim(),
+        "Reference order: structure images control geometry, composition, local red lights, markings, and inherent object/material colors; style images control the global palette, color grade, ambient light, shadows, fog, atmosphere, texture, and finish.",
+        basePrompt,
+      ].filter(Boolean).join("\n")
+    : basePrompt;
+  const normalizedQuality = normalizeQuality(body.quality, model);
+  const normalizedSize = shouldSendSize(model) ? normalizeSize(body.size, model) : "";
+  return {
+    model,
+    prompt: referencePrompt,
+    basePrompt,
+    n: 1,
+    output_format: "png",
+    quality: normalizedQuality,
+    size: normalizedSize,
+    image_urls: orderedReferenceUrls,
+    structure_image_urls: structureUrls.slice(0, 4),
+    composition_image_urls: structureUrls.slice(0, 4),
+    layout_image_urls: structureUrls.slice(0, 4),
+    style_image_urls: styleUrls.slice(0, 4),
+    edit_image_urls: editBaseUrls.slice(0, 4),
+    base_image_urls: editBaseUrls.slice(0, 4),
   };
-  if (body.output_format) next.output_format = body.output_format;
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
-  if (Array.isArray(body.image_urls) && body.image_urls.length) {
-    next.image_urls = body.image_urls.filter(isImageReferenceValue).slice(0, 4);
+}
+
+function buildApiMartSubmitBody(context) {
+  const next = {
+    model: context.model,
+    prompt: context.prompt,
+    n: context.n || 1,
+  };
+  if (context.output_format) next.output_format = context.output_format;
+  if (context.quality) next.quality = context.quality;
+  if (context.size) next.size = context.size;
+  if (Array.isArray(context.image_urls) && context.image_urls.length) {
+    next.image_urls = context.image_urls.filter(isImageReferenceValue).slice(0, 4);
   }
   return next;
 }
 
-function buildRhartSubmitBody(body) {
-  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
+function buildRayinSubmitBody(context) {
+  const next = {
+    model: context.model,
+    prompt: context.prompt,
+    n: context.n || 1,
+    output_format: context.output_format || "png",
+  };
+  if (context.quality) next.quality = context.quality;
+  if (context.size) next.size = context.size;
+  if (Array.isArray(context.image_urls) && context.image_urls.length) next.image_urls = context.image_urls.slice(0, 16);
+  if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
+    next.structure_image_urls = context.structure_image_urls.slice(0, 4);
+  }
+  if (Array.isArray(context.composition_image_urls) && context.composition_image_urls.length) {
+    next.composition_image_urls = context.composition_image_urls.slice(0, 4);
+  }
+  if (Array.isArray(context.layout_image_urls) && context.layout_image_urls.length) {
+    next.layout_image_urls = context.layout_image_urls.slice(0, 4);
+  }
+  if (Array.isArray(context.style_image_urls) && context.style_image_urls.length) {
+    next.style_image_urls = context.style_image_urls.slice(0, 4);
+  }
+  if (Array.isArray(context.edit_image_urls) && context.edit_image_urls.length) {
+    next.edit_image_urls = context.edit_image_urls.slice(0, 4);
+  }
+  if (Array.isArray(context.base_image_urls) && context.base_image_urls.length) {
+    next.base_image_urls = context.base_image_urls.slice(0, 4);
+  }
+  return next;
+}
+
+function buildRhartSubmitBody(context) {
+  const imageUrls = Array.isArray(context.image_urls) ? context.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
   const next = {
     model: RHART_MODEL,
-    prompt: body.prompt,
-    n: body.n || 1,
-    output_format: body.output_format || "png",
+    prompt: context.prompt,
+    n: context.n || 1,
+    output_format: context.output_format || "png",
   };
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
+  if (context.quality) next.quality = context.quality;
+  if (context.size) next.size = context.size;
   if (imageUrls.length) {
     next.image_urls = imageUrls;
     next.images = imageUrls.map((url) => ({ image_url: url, url }));
     next.input_images = imageUrls.map((url) => ({ image_url: url, url }));
   }
-  if (Array.isArray(body.structure_image_urls) && body.structure_image_urls.length) {
-    next.structure_image_urls = body.structure_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
+    next.structure_image_urls = context.structure_image_urls.filter(isImageReferenceValue).slice(0, 4);
   }
-  if (Array.isArray(body.style_image_urls) && body.style_image_urls.length) {
-    next.style_image_urls = body.style_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  if (Array.isArray(context.style_image_urls) && context.style_image_urls.length) {
+    next.style_image_urls = context.style_image_urls.filter(isImageReferenceValue).slice(0, 4);
   }
-  if (Array.isArray(body.edit_image_urls) && body.edit_image_urls.length) {
-    next.edit_image_urls = body.edit_image_urls.filter(isImageReferenceValue).slice(0, 4);
+  if (Array.isArray(context.edit_image_urls) && context.edit_image_urls.length) {
+    next.edit_image_urls = context.edit_image_urls.filter(isImageReferenceValue).slice(0, 4);
   }
   return next;
 }
@@ -518,17 +505,7 @@ function shouldTryRayinAi(provider, model, apiKey) {
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
-    if (payload?.rayinExtensionAuth?.hasToken) {
-      const auth = payload.rayinExtensionAuth;
-      if (!auth.hasUserId) {
-        return "RayinAI 扩展接口认证失败：已读取 RAYINAI_EXTENSION_TOKEN，但后端没有读到 user_id。请在 Vercel 配置 RAYINAI_USER_ID 或 user_id，并重新部署。";
-      }
-      if (!auth.hasCookie) {
-        return "RayinAI 扩展接口认证失败：已读取 token 和 user_id，但没有读到 RAYINAI_EXTENSION_COOKIE。请从 RayinAI 网页请求里复制同一登录会话的 Cookie。";
-      }
-      return "RayinAI 扩展接口认证失败：token、user_id 和 cookie 都已读取，但上游仍返回 401。请重新从 RayinAI 网页抓取同一会话的 RAYINAI_EXTENSION_TOKEN 和 RAYINAI_EXTENSION_COOKIE。";
-    }
-    return "RayinAI 扩展接口认证失败：后端没有读到 RAYINAI_EXTENSION_TOKEN。请确认变量名拼写、环境为 Production/Preview，并重新部署。";
+    return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
   }
   if (/internal server error|server_error/i.test(message)) {
     return "上游图片生成服务内部错误，请稍后重试或切换通道。";
@@ -692,9 +669,7 @@ async function getTask(apiKey, taskId) {
 
 async function getRayinTask(apiKey, taskId) {
   const baseUrl = getRayinAiBaseUrl();
-  const cookie = getRayinAiExtensionCookie();
   const endpoints = [
-    `${baseUrl}/extension/api/image/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
   ];
@@ -703,18 +678,12 @@ async function getRayinTask(apiKey, taskId) {
     const headers = {
       Authorization: `Bearer ${apiKey}`,
       Accept: "*/*",
-      "Accept-Language": "zh-CN,zh;q=0.9",
-      Origin: baseUrl,
-      Referer: buildRayinExtensionReferer(baseUrl, apiKey),
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
     };
-    if (cookie) headers.Cookie = cookie;
     const response = await fetch(endpoint, { headers });
     const payload = await readJson(response);
     if (response.ok) {
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         payload.rayinEndpoint = endpoint;
-        payload.rayinExtension = true;
       }
       return payload;
     }
@@ -722,35 +691,6 @@ async function getRayinTask(apiKey, taskId) {
     if (![404, 405].includes(response.status)) break;
   }
   throw new Error(JSON.stringify(lastPayload || { error: "RayinAI task polling failed" }));
-}
-
-function buildRayinExtensionImageBody(body) {
-  const references = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  return {
-    key_id: getRayinAiKeyId(),
-    provider: "gpt",
-    operation: references.length ? "edit" : "generate",
-    model: normalizeRayinModel(body.model),
-    prompt: body.prompt,
-    input_images: references.map(toRayinExtensionInputImage),
-    n: 1,
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    moderation: "auto",
-    output_format: body.output_format || "png",
-    quality: "auto",
-    size: "auto",
-  };
-}
-
-function toRayinExtensionInputImage(value) {
-  const item = { mime_type: "image/png" };
-  if (/^data:image\//i.test(value)) {
-    item.data_url = value;
-  } else {
-    item.image_url = value;
-  }
-  return item;
 }
 
 async function submitRayinImageTask(apiKey, submitBody) {
@@ -799,61 +739,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last.payload.status = last.status;
   }
   return last;
-}
-
-async function submitRayinExtensionImageTask(apiKey, rayinImageBody) {
-  const baseUrl = getRayinAiBaseUrl();
-  const endpoint = `${baseUrl}/extension/api/image/tasks`;
-  const body = buildRayinExtensionImageBody(rayinImageBody);
-  const cookie = getRayinAiExtensionCookie();
-  const userId = getRayinAiUserId(apiKey);
-  const referer = buildRayinExtensionReferer(baseUrl, apiKey);
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    Accept: "*/*",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    Origin: baseUrl,
-    Referer: referer,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-  };
-  if (apiKey) {
-    headers.token = apiKey;
-    headers["x-token"] = apiKey;
-  }
-  if (userId) {
-    headers.user_id = String(userId);
-    headers["x-user-id"] = String(userId);
-  }
-  if (cookie) headers.Cookie = cookie;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  const payload = await readJson(response);
-  const taskId = extractTaskId(payload);
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.rayinExtensionAuth = {
-      hasToken: Boolean(apiKey),
-      tokenLooksLikeJwt: /^eyJ/.test(apiKey || ""),
-      tokenLength: String(apiKey || "").length,
-      hasUserId: Boolean(userId),
-      hasCookie: Boolean(cookie),
-      cookieLength: String(cookie || "").length,
-      keyId: getRayinAiKeyId(),
-      baseUrl,
-      refererHasUserId: referer.includes("user_id="),
-    };
-  }
-  if (response.ok && taskId) {
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      payload.rayinEndpoint = endpoint;
-      payload.rayinExtension = true;
-    }
-    return { ok: true, status: response.status, payload };
-  }
-  return { ok: false, status: response.status, payload };
 }
 
 function normalizeRayinImageBody(body) {
@@ -1010,11 +895,6 @@ function extractTaskId(payload) {
 
 function extractResultUrl(payload) {
   const data = payload?.data;
-  if (payload?.rayinExtension) {
-    const assets = Array.isArray(data?.assets) ? data.assets : [];
-    const outputAsset = assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
-    return normalizeImageValue(outputAsset?.url) || normalizeImageValue(outputAsset?.download_url) || null;
-  }
   const candidates = [
     data?.result,
     data?.result?.url,
