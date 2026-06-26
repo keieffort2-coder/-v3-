@@ -3873,7 +3873,11 @@ async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", pro
     lastStatus = result.status || lastStatus;
     if (statusEl) {
       const minutes = Math.floor((attempts * 5) / 60);
-      const endpointHint = result.rayinEndpoint ? "，RayinAI扩展接口" : "";
+      const endpointHint = result.rayinEndpoint
+        ? "，RayinAI扩展接口"
+        : result.rhartEndpoint
+          ? "，RHarT查询接口"
+          : "";
       statusEl.textContent = `生成中：${lastStatus}${endpointHint}，已等待约 ${minutes} 分钟`;
     }
     if (result.imageUrl) {
