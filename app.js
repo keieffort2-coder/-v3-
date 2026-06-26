@@ -2982,7 +2982,7 @@ function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
 
 function getProviderRoleImages(roleImages, provider = "apimart") {
   const normalizedProvider = normalizeImageProvider(provider);
-  if (!["apimart", "rayinai", "aihubmix"].includes(normalizedProvider)) return roleImages;
+  if (!["apimart", "rayinai", "aihubmix", "rhart"].includes(normalizedProvider)) return roleImages;
   return {
     ...roleImages,
     editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
