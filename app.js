@@ -1620,6 +1620,13 @@ function hydrateRestoredNodeData(node, saved) {
   if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
   if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
   if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
+  if (saved.generatedImageDataKey) {
+    loadProjectImage(saved.generatedImageDataKey).then((value) => {
+      if (!value) return;
+      node.dataset.generatedImageUrl = value;
+      renderNodeImagePreview(node);
+    });
+  }
   if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
   if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(saved.imageGenerationRecords);
   if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
@@ -2180,7 +2187,7 @@ function addGeneratedImageHistory(node, imageUrl) {
     imageUrl,
     node.dataset.generatedImageUrl,
     ...parseJsonArray(node.dataset.generatedImageUrls),
-  ].filter(Boolean)).slice(0, 12);
+  ].filter(Boolean)).slice(0, 6);
 }
 
 function addImageGenerationRecord(node, imageUrl, debug = {}) {
@@ -2194,12 +2201,12 @@ function addImageGenerationRecord(node, imageUrl, debug = {}) {
     model: debug.payload?.model || "",
     size: debug.payload?.size || "",
     quality: debug.payload?.quality || "",
-    userPrompt: String(debug.userPrompt || "").slice(0, 4000),
-    finalPrompt: String(debug.finalPrompt || "").slice(0, 12000),
-    referenceBindings: String(debug.referenceBindings || "").slice(0, 4000),
+    userPrompt: String(debug.userPrompt || "").slice(0, 1000),
+    finalPrompt: String(debug.finalPrompt || "").slice(0, 2000),
+    referenceBindings: String(debug.referenceBindings || "").slice(0, 1000),
     referenceSummary: formatReferencePlan(debug.referencePlan || { images: [] }),
   };
-  const nextRecords = [record, ...records].slice(0, 24);
+  const nextRecords = [record, ...records].slice(0, 10);
   node.dataset.imageGenerationRecords = JSON.stringify(nextRecords);
   return nextRecords;
 }
@@ -2207,6 +2214,23 @@ function addImageGenerationRecord(node, imageUrl, debug = {}) {
 function getImageGenerationRecords(node) {
   const records = parseJsonArray(node?.dataset.imageGenerationRecords);
   return Array.isArray(records) ? records.filter((record) => record && record.imageUrl) : [];
+}
+
+function compactImageGenerationRecords(records, limit = 10) {
+  return arrayOrEmpty(records).slice(0, limit).map((record) => ({
+    id: record.id || `gen-${Math.random().toString(36).slice(2, 8)}`,
+    imageUrl: record.imageUrl || "",
+    createdAt: record.createdAt || "",
+    favorite: Boolean(record.favorite),
+    provider: record.provider || "",
+    model: record.model || "",
+    size: record.size || "",
+    quality: record.quality || "",
+    userPrompt: String(record.userPrompt || "").slice(0, 1000),
+    finalPrompt: String(record.finalPrompt || "").slice(0, 2000),
+    referenceBindings: String(record.referenceBindings || "").slice(0, 1000),
+    referenceSummary: String(record.referenceSummary || "").slice(0, 240),
+  })).filter((record) => record.imageUrl);
 }
 
 function renderImageGenerationRecords(records) {
@@ -5155,13 +5179,7 @@ function slimProjectDataForLocalStorage(data) {
     nodes: (data.nodes || []).map((node) => ({
       ...node,
       generatedImageUrls: arrayOrEmpty(node.generatedImageUrls).slice(-3),
-      imageGenerationRecords: arrayOrEmpty(node.imageGenerationRecords).slice(0, 8).map((record) => ({
-        ...record,
-        payload: undefined,
-        finalPrompt: String(record.finalPrompt || "").slice(0, 1200),
-        userPrompt: String(record.userPrompt || "").slice(0, 600),
-        referenceBindings: String(record.referenceBindings || "").slice(0, 600),
-      })),
+      imageGenerationRecords: compactImageGenerationRecords(node.imageGenerationRecords, 8),
       folderNodes: Array.isArray(node.folderNodes) ? slimProjectDataForLocalStorage({ nodes: node.folderNodes }).nodes : node.folderNodes,
     })),
   };
@@ -5306,9 +5324,12 @@ function serializeNodes(nodes) {
     const imageDataKey = imageIsData ? projectImageKey(currentProject, node.id, "upload") : "";
     const referenceIsData = node.dataset.referenceImageDataUrl?.startsWith("data:image/");
     const referenceImageDataKey = referenceIsData ? projectImageKey(currentProject, node.id, "reference") : "";
+    const generatedIsData = node.dataset.generatedImageUrl?.startsWith("data:image/");
+    const generatedImageDataKey = generatedIsData ? projectImageKey(currentProject, node.id, "generated") : "";
 
     if (imageDataKey) storeProjectImage(imageDataKey, node.dataset.imageDataUrl);
     if (referenceImageDataKey) storeProjectImage(referenceImageDataKey, node.dataset.referenceImageDataUrl);
+    if (generatedImageDataKey) storeProjectImage(generatedImageDataKey, node.dataset.generatedImageUrl);
 
     return {
       id: node.id,
@@ -5333,9 +5354,10 @@ function serializeNodes(nodes) {
       referenceImageDataKey,
       referenceImageDataUrl: referenceImageDataKey ? "" : node.dataset.referenceImageDataUrl || "",
       referenceFileName: node.dataset.referenceFileName || "",
-      generatedImageUrl: node.dataset.generatedImageUrl || "",
-      generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
-      imageGenerationRecords: getImageGenerationRecords(node),
+      generatedImageDataKey,
+      generatedImageUrl: generatedImageDataKey ? "" : node.dataset.generatedImageUrl || "",
+      generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls).slice(0, 6),
+      imageGenerationRecords: compactImageGenerationRecords(getImageGenerationRecords(node)),
       generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
       generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
       videoUrls: parseJsonArray(node.dataset.videoUrls),
@@ -5459,6 +5481,13 @@ function restoreCanvasData(data) {
     if (saved.referenceImageDataInlineUrl) node.dataset.referenceImageDataInlineUrl = saved.referenceImageDataInlineUrl;
     if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
     if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
+    if (saved.generatedImageDataKey) {
+      loadProjectImage(saved.generatedImageDataKey).then((value) => {
+        if (!value) return;
+        node.dataset.generatedImageUrl = value;
+        renderNodeImagePreview(node);
+      });
+    }
     if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
     if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(saved.imageGenerationRecords);
     if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
