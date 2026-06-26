@@ -3734,7 +3734,7 @@ async function runImageGeneration(node) {
     }
 
     if (preview) {
-      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="">`;
+      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`;
     }
     node.dataset.generatedImageUrl = finalResult.imageUrl;
     node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
