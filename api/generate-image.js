@@ -15,7 +15,7 @@ function getApiMartKey(channel) {
 }
 
 function getRhartKey() {
-  return sanitizeHeaderValue(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
+  return sanitizeBearerToken(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
 }
 
 function getAiHubMixKey() {
@@ -385,6 +385,8 @@ module.exports = async function handler(req, res) {
           resolution: rhartSubmitBody.resolution,
           referenceCount: rhartSubmitBody.referenceCount || 0,
           publicReferenceCount: rhartSubmitBody.publicReferenceCount || 0,
+          rhartEndpoint: rhartResult.payload?.rhartEndpoint || buildRhartEndpoint(),
+          rhartKeyHint: getKeyHint(rhartKey),
         },
       });
       return;
@@ -1119,6 +1121,12 @@ function buildImageFetchHeaders(options = {}) {
   if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
   if (options.referer) headers.Referer = options.referer;
   return headers;
+}
+
+function getKeyHint(value) {
+  const key = sanitizeBearerToken(value);
+  if (!key) return "empty";
+  return `len:${key.length}, tail:${key.slice(-4)}`;
 }
 
 function looksLikeImageBuffer(buffer) {
