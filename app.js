@@ -4560,8 +4560,27 @@ function formatApiErrorDiagnostic(result) {
     if (upstream.errorCode || upstream.code) parts.push(`code: ${upstream.errorCode || upstream.code}`);
     if (upstream.rhartQueryShape) parts.push(`query: ${upstream.rhartQueryShape}`);
     if (upstream.rhartEndpoint) parts.push(`endpoint: ${upstream.rhartEndpoint}`);
+    if (Array.isArray(upstream.uploadAttempts) && upstream.uploadAttempts.length) {
+      parts.push(`upload: ${formatUploadAttemptSummary(upstream.uploadAttempts)}`);
+    }
+  }
+  if (Array.isArray(result?.uploadAttempts) && result.uploadAttempts.length) {
+    parts.push(`upload: ${formatUploadAttemptSummary(result.uploadAttempts)}`);
   }
   return parts.join("，");
+}
+
+function formatUploadAttemptSummary(attempts) {
+  return attempts.slice(0, 2).map((attempt, index) => {
+    const fields = [`#${index + 1}`];
+    if (attempt.status) fields.push(`status ${attempt.status}`);
+    if (attempt.code !== undefined && attempt.code !== null) fields.push(`code ${attempt.code}`);
+    if (attempt.message) fields.push(String(attempt.message).slice(0, 80));
+    if (attempt.url) fields.push("url ok");
+    if (attempt.filename) fields.push(`filename ${String(attempt.filename).slice(0, 80)}`);
+    if (Array.isArray(attempt.dataKeys) && attempt.dataKeys.length) fields.push(`keys ${attempt.dataKeys.join("|")}`);
+    return fields.join(" / ");
+  }).join("; ");
 }
 
 function extractApiErrorMessage(value, seen = new Set()) {
