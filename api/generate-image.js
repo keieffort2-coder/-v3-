@@ -662,6 +662,8 @@ function qualityToRhartResolution(quality) {
 
 function sizeToAspectRatio(size) {
   const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
+  const allowed = new Set(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"]);
+  if (allowed.has(value)) return value;
   const known = {
     "1024x1024": "1:1",
     "1536x864": "16:9",
@@ -683,7 +685,32 @@ function reduceAspectRatio(width, height) {
   const allowed = new Set(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"]);
   const ratio = `${reducedWidth}:${reducedHeight}`;
   if (allowed.has(ratio)) return ratio;
-  return width >= height ? "16:9" : "9:16";
+  return closestAllowedAspectRatio(width, height);
+}
+
+function closestAllowedAspectRatio(width, height) {
+  const ratio = Number(width) / Number(height);
+  if (!Number.isFinite(ratio) || ratio <= 0) return "16:9";
+  const allowed = [
+    ["1:1", 1],
+    ["16:9", 16 / 9],
+    ["9:16", 9 / 16],
+    ["4:3", 4 / 3],
+    ["3:4", 3 / 4],
+    ["3:2", 3 / 2],
+    ["2:3", 2 / 3],
+    ["5:4", 5 / 4],
+    ["4:5", 4 / 5],
+    ["21:9", 21 / 9],
+    ["1:4", 1 / 4],
+    ["4:1", 4],
+    ["1:8", 1 / 8],
+    ["8:1", 8],
+  ];
+  return allowed.reduce((best, item) => {
+    const distance = Math.abs(Math.log(ratio / item[1]));
+    return distance < best.distance ? { value: item[0], distance } : best;
+  }, { value: "16:9", distance: Infinity }).value;
 }
 
 function greatestCommonDivisor(a, b) {
