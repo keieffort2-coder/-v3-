@@ -4412,11 +4412,37 @@ function sizeFromDimensions(width, height, model = "") {
 
 function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
+  if (isRhartImageModel(model)) return closestRhartAspectRatio(width, height);
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
   const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
   const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
   return `${nextWidth}x${nextHeight}`;
+}
+
+function closestRhartAspectRatio(width, height) {
+  const ratio = Number(width) / Number(height);
+  if (!Number.isFinite(ratio) || ratio <= 0) return "";
+  const allowed = [
+    ["1:1", 1],
+    ["16:9", 16 / 9],
+    ["9:16", 9 / 16],
+    ["4:3", 4 / 3],
+    ["3:4", 3 / 4],
+    ["3:2", 3 / 2],
+    ["2:3", 2 / 3],
+    ["5:4", 5 / 4],
+    ["4:5", 4 / 5],
+    ["21:9", 21 / 9],
+    ["1:4", 1 / 4],
+    ["4:1", 4],
+    ["1:8", 1 / 8],
+    ["8:1", 8],
+  ];
+  return allowed.reduce((best, item) => {
+    const distance = Math.abs(Math.log(ratio / item[1]));
+    return distance < best.distance ? { value: item[0], distance } : best;
+  }, { value: "16:9", distance: Infinity }).value;
 }
 
 function roundUpToMultiple(value, multiple) {
