@@ -1608,8 +1608,10 @@ function hydrateRestoredNodeData(node, saved) {
   node.dataset.referenceMode = saved.referenceMode || "structureStyle";
   node.dataset.imageRole = saved.imageRole || "general";
   node.dataset.imageQuality = saved.imageQuality || "high";
-  node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
   node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+  node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+    ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+    : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
   node.dataset.apimartChannel = "b";
   if (saved.fileName) node.dataset.fileName = saved.fileName;
   if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
@@ -3434,8 +3436,10 @@ function ungroupFolderNode(folderNode) {
     node.dataset.referenceMode = saved.referenceMode || "structureStyle";
     node.dataset.imageRole = saved.imageRole || "general";
     node.dataset.imageQuality = saved.imageQuality || "high";
-    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.apimartChannel = "b";
     if (saved.tone) node.dataset.tone = saved.tone;
     if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
@@ -5119,12 +5123,57 @@ function saveCurrentProject() {
   }
   const data = serializeCanvasData();
   if (!shouldSaveProjectData(currentProject, data)) return;
+  const saved = writeProjectDataWithFallback(currentProject, data);
+  if (!saved) return;
+  updateProjectCardThumbnail(currentProject, data);
+}
+
+function writeProjectDataWithFallback(name, data) {
+  const key = projectKey(name);
   try {
-    localStorage.setItem(projectKey(currentProject), JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
+    return true;
   } catch (error) {
     console.error("Project save failed", error);
   }
-  updateProjectCardThumbnail(currentProject, data);
+
+  const slim = slimProjectDataForLocalStorage(data);
+  try {
+    localStorage.setItem(key, JSON.stringify(slim));
+    notifyProjectSaveIssue("本地存储空间不足，已自动精简图片历史后保存。");
+    return true;
+  } catch (retryError) {
+    console.error("Project slim save failed", retryError);
+    notifyProjectSaveIssue("项目保存失败：浏览器本地存储空间不足。请导出备份或清理旧项目/图片历史。");
+    return false;
+  }
+}
+
+function slimProjectDataForLocalStorage(data) {
+  return {
+    ...data,
+    nodes: (data.nodes || []).map((node) => ({
+      ...node,
+      generatedImageUrls: arrayOrEmpty(node.generatedImageUrls).slice(-3),
+      imageGenerationRecords: arrayOrEmpty(node.imageGenerationRecords).slice(0, 8).map((record) => ({
+        ...record,
+        payload: undefined,
+        finalPrompt: String(record.finalPrompt || "").slice(0, 1200),
+        userPrompt: String(record.userPrompt || "").slice(0, 600),
+        referenceBindings: String(record.referenceBindings || "").slice(0, 600),
+      })),
+      folderNodes: Array.isArray(node.folderNodes) ? slimProjectDataForLocalStorage({ nodes: node.folderNodes }).nodes : node.folderNodes,
+    })),
+  };
+}
+
+function notifyProjectSaveIssue(message) {
+  const target = selectedNode || [...canvasContent.querySelectorAll(".node")].at(-1);
+  if (target) {
+    ensureNodeStatus(target).textContent = message;
+    return;
+  }
+  console.warn(message);
 }
 
 function shouldSaveProjectData(name, nextData) {
@@ -5392,8 +5441,10 @@ function restoreCanvasData(data) {
     delete node.dataset.imageRatio;
     delete node.dataset.imageResolution;
     node.dataset.imageQuality = saved.imageQuality || "high";
-    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.apimartChannel = "b";
     if (saved.fileName) node.dataset.fileName = saved.fileName;
     if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
