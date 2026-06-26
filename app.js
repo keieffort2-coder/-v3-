@@ -3934,7 +3934,7 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
     return result;
   }
   if (!result.taskId) {
-    throw new Error("后端没有返回 taskId");
+    throw new Error(formatApiError(result, "后端没有返回 taskId"));
   }
 
   node.dataset.lastImageTaskId = result.taskId;
