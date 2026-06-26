@@ -171,7 +171,9 @@ module.exports = async function handler(req, res) {
           ? await getRhartTask(apiKey, String(taskId))
           : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
-      const imageUrl = await persistResultImage(extractResultUrl(taskPayload), taskId);
+      const imageUrl = provider === "rhart"
+        ? await materializeResultImage(extractResultUrl(taskPayload), taskId, { inlineFallback: true })
+        : await persistResultImage(extractResultUrl(taskPayload), taskId);
       res.status(200).json({
         taskId,
         status,
@@ -290,7 +292,7 @@ module.exports = async function handler(req, res) {
       const rhartSubmitBody = buildRhartSubmitBody(requestContext);
       const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
       if (rhartResult.ok) {
-        const imageUrl = await persistResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`);
+        const imageUrl = await materializeResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`, { inlineFallback: true });
         const taskId = extractTaskId(rhartResult.payload);
         res.status(imageUrl ? 200 : 202).json({
           taskId,
@@ -961,6 +963,21 @@ async function persistResultImage(imageUrl, taskId) {
     return blob.url;
   } catch (error) {
     console.error("Failed to persist generated image:", error);
+    return imageUrl;
+  }
+}
+
+async function materializeResultImage(imageUrl, taskId, options = {}) {
+  if (!imageUrl || typeof imageUrl !== "string") return imageUrl;
+  const persisted = await persistResultImage(imageUrl, taskId);
+  if (persisted && persisted !== imageUrl) return persisted;
+  if (!options.inlineFallback || /^data:image\//i.test(imageUrl)) return imageUrl;
+
+  try {
+    const { buffer, contentType } = await readImageBytes(imageUrl);
+    return `data:${contentType || "image/png"};base64,${buffer.toString("base64")}`;
+  } catch (error) {
+    console.error("Failed to inline generated image:", error);
     return imageUrl;
   }
 }
