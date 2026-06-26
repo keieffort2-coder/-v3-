@@ -3,6 +3,7 @@ const API_BASE = "https://api.apimart.ai/v1";
 const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
+const AIHUBMIX_DEFAULT_BASE = "https://aihubmix.com/v1";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -12,6 +13,22 @@ function getApiMartKey(channel) {
 
 function getRhartKey() {
   return sanitizeHeaderValue(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
+}
+
+function getAiHubMixKey() {
+  return sanitizeBearerToken(process.env.AIHUBMIX_API_KEY || process.env.AIHUBMIX_TOKEN);
+}
+
+function getAiHubMixBaseUrl() {
+  const raw = sanitizeHeaderValue(process.env.AIHUBMIX_BASE_URL || AIHUBMIX_DEFAULT_BASE);
+  const withoutName = raw.replace(/^AIHUBMIX_BASE_URL\s*=\s*/i, "");
+  return (withoutName || AIHUBMIX_DEFAULT_BASE).replace(/\/+$/, "");
+}
+
+function getAiHubMixModel(model) {
+  const explicit = sanitizeHeaderValue(process.env.AIHUBMIX_IMAGE_MODEL);
+  if (explicit) return explicit;
+  return normalizeModel(model) === "gemini-3-pro-image-preview" ? "gemini-3-pro-image-preview" : "gpt-image-2";
 }
 
 function getRayinAiKey() {
@@ -104,6 +121,8 @@ module.exports = async function handler(req, res) {
       ? getRayinAiKey()
       : provider === "rhart"
         ? getRhartKey()
+        : provider === "aihubmix"
+          ? getAiHubMixKey()
         : getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
@@ -111,11 +130,15 @@ module.exports = async function handler(req, res) {
           ? "RAYINAI_API_KEY is not configured"
           : provider === "rhart"
             ? "RHART_G31_API_KEY / RHART_API_KEY is not configured"
+            : provider === "aihubmix"
+              ? "AIHUBMIX_API_KEY is not configured"
             : "APIMART_API_KEY_2 is not configured",
         message: provider === "rayinai"
           ? "Please configure RAYINAI_API_KEY in Vercel Environment Variables."
           : provider === "rhart"
             ? "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables."
+            : provider === "aihubmix"
+              ? "Please configure AIHUBMIX_API_KEY in Vercel Environment Variables."
           : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
@@ -167,7 +190,15 @@ module.exports = async function handler(req, res) {
   const apiKey = getApiMartKey(apimartChannel);
   const rhartKey = getRhartKey();
   const rayinAiKey = getRayinAiKey();
+  const aiHubMixKey = getAiHubMixKey();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
+  if (preferredProvider === "aihubmix" && !aiHubMixKey) {
+    res.status(500).json({
+      error: "AIHUBMIX_API_KEY is not configured",
+      message: "Please configure AIHUBMIX_API_KEY in Vercel Environment Variables.",
+    });
+    return;
+  }
   if (preferredProvider === "rhart" && !rhartKey) {
     res.status(500).json({
       error: "RHART_G31_API_KEY / RHART_API_KEY is not configured",
@@ -175,7 +206,7 @@ module.exports = async function handler(req, res) {
     });
     return;
   }
-  if (!apiKey && preferredProvider !== "rayinai" && preferredProvider !== "rhart") {
+  if (!apiKey && preferredProvider !== "rayinai" && preferredProvider !== "rhart" && preferredProvider !== "aihubmix") {
     res.status(500).json({
       error: "APIMART_API_KEY_2 is not configured",
       message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
@@ -201,6 +232,36 @@ module.exports = async function handler(req, res) {
       model,
       size,
     });
+
+    if (preferredProvider === "aihubmix") {
+      const aiHubMixSubmitBody = buildAiHubMixSubmitBody(requestContext);
+      const aiHubMixResult = await submitAiHubMixImageTask(aiHubMixKey, aiHubMixSubmitBody);
+      if (aiHubMixResult.ok) {
+        const imageUrl = await persistResultImage(extractResultUrl(aiHubMixResult.payload), `aihubmix-${Date.now()}`);
+        res.status(200).json({
+          status: "completed",
+          imageUrl,
+          model: aiHubMixSubmitBody.model,
+          provider: "aihubmix",
+          payload: imageUrl ? undefined : aiHubMixResult.payload,
+        });
+        return;
+      }
+
+      res.status(aiHubMixResult.status || 502).json({
+        error: "AIHubMix submit failed",
+        message: formatUpstreamError(aiHubMixResult.payload),
+        upstream: aiHubMixResult.payload,
+        request: {
+          model: aiHubMixSubmitBody.model,
+          size: aiHubMixSubmitBody.size,
+          quality: aiHubMixSubmitBody.quality,
+          output_format: aiHubMixSubmitBody.output_format,
+          referenceCount: aiHubMixSubmitBody.image_urls?.length || 0,
+        },
+      });
+      return;
+    }
 
     if (preferredProvider === "rhart") {
       const rhartSubmitBody = buildRhartSubmitBody(requestContext);
@@ -337,6 +398,7 @@ module.exports = async function handler(req, res) {
 
 function normalizeProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
+  if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
   if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
   if (provider === "rayinai" || provider === "rayincode") return "rayinai";
   return "apimart";
@@ -466,6 +528,99 @@ function buildRhartSubmitBody(context) {
   return next;
 }
 
+function buildAiHubMixSubmitBody(context) {
+  const imageUrls = Array.isArray(context.image_urls) ? context.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
+  return {
+    model: getAiHubMixModel(context.model),
+    prompt: context.prompt,
+    n: context.n || 1,
+    output_format: context.output_format || "png",
+    quality: "auto",
+    size: context.size || "auto",
+    image_urls: imageUrls,
+    structure_image_urls: Array.isArray(context.structure_image_urls) ? context.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [],
+    style_image_urls: Array.isArray(context.style_image_urls) ? context.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [],
+  };
+}
+
+async function submitAiHubMixImageTask(apiKey, body) {
+  const baseUrl = getAiHubMixBaseUrl();
+  const hasReferences = Array.isArray(body.image_urls) && body.image_urls.length > 0;
+  try {
+    const response = hasReferences
+      ? await submitAiHubMixImageEdit(apiKey, baseUrl, body)
+      : await fetch(`${baseUrl}/images/generations`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: body.model,
+            prompt: body.prompt,
+            n: body.n || 1,
+            size: body.size || "auto",
+            quality: body.quality || "auto",
+            output_format: body.output_format || "png",
+          }),
+        });
+    const payload = await readJson(response);
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      payload.aihubmixEndpoint = response.url || `${baseUrl}/images/${hasReferences ? "edits" : "generations"}`;
+    }
+    const imageUrl = extractResultUrl(payload);
+    return {
+      ok: response.ok && Boolean(imageUrl),
+      status: response.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 500,
+      payload: {
+        error: "AIHubMix request failed before reaching upstream",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+async function submitAiHubMixImageEdit(apiKey, baseUrl, body) {
+  const form = new FormData();
+  form.set("model", body.model);
+  form.set("prompt", body.prompt);
+  form.set("n", String(body.n || 1));
+  form.set("size", body.size || "auto");
+  form.set("quality", body.quality || "auto");
+  form.set("output_format", body.output_format || "png");
+  const images = uniqueValues([
+    ...(Array.isArray(body.structure_image_urls) ? body.structure_image_urls : []),
+    ...(Array.isArray(body.style_image_urls) ? body.style_image_urls : []),
+    ...(Array.isArray(body.image_urls) ? body.image_urls : []),
+  ].filter(isImageReferenceValue)).slice(0, 8);
+  for (let index = 0; index < images.length; index += 1) {
+    const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
+    form.append("image", blob, filename);
+  }
+  return fetch(`${baseUrl}/images/edits`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: form,
+  });
+}
+
+async function imageReferenceToBlob(value, filename) {
+  const { buffer, contentType } = await readImageBytes(value);
+  const extension = contentTypeToExtension(contentType);
+  return {
+    blob: new Blob([buffer], { type: contentType }),
+    filename: filename.replace(/\.[^.]+$/, `.${extension}`),
+  };
+}
+
 async function submitRhartImageTask(apiKey, body) {
   const endpoint = buildRhartEndpoint();
   if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
@@ -537,6 +692,9 @@ function formatUpstreamError(payload) {
     return message
       ? `上游图片生成服务内部错误：${message}`
       : "上游图片生成服务内部错误，请稍后重试或切换通道。";
+  }
+  if (/RayinAI structure-style references unsupported/i.test(message)) {
+    return "RayinAI 公开 API 当前无法稳定处理“结构图 + 风格图”双参考图，请改用单结构图生成、分两步生成，或切换到更稳定的图生图通道。";
   }
   return message || "Image generation request failed.";
 }
@@ -741,6 +899,10 @@ async function submitRayinImageTask(apiKey, submitBody) {
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
+  const hasStructureStyleReferences = Array.isArray(rayinImageBody.structure_image_urls)
+    && rayinImageBody.structure_image_urls.length > 0
+    && Array.isArray(rayinImageBody.style_image_urls)
+    && rayinImageBody.style_image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = models.flatMap((model) => {
     const responsesAttempt = {
@@ -758,6 +920,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
     };
+    if (hasStructureStyleReferences) return [responsesAttempt];
     return hasReferences ? [responsesAttempt, imagesAttempt, compatImagesAttempt] : [imagesAttempt, responsesAttempt, compatImagesAttempt];
   });
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
@@ -792,6 +955,10 @@ async function submitRayinImageTask(apiKey, submitBody) {
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
+    if (hasStructureStyleReferences) {
+      last.payload.message = last.payload.message || "RayinAI structure-style references unsupported";
+      last.payload.reason = last.payload.reason || "RayinAI public API did not return a reliable structure/style reference edit result.";
+    }
   }
   return last;
 }
