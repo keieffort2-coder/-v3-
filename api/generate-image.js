@@ -1081,23 +1081,38 @@ function getRayinImageRole(submitBody, url, index = 0) {
 
 function buildRayinStrictPrompt(submitBody, structureAnchor, styleCount) {
   if (!structureAnchor) return submitBody.prompt;
+  const userPrompt = extractRayinUserPrompt(submitBody.prompt);
   return [
-    "STRICT IMAGE RECONSTRUCTION CONTRACT:",
-    "Task type: image-to-image reconstruction, not text-to-image invention.",
-    "The first/structure input image is the spatial blueprint, not a texture or pixel-copy target.",
-    "Preserve its scene category, camera angle, perspective, corridor/room layout, wall and floor placement, doorway/opening positions, object locations, major silhouettes, crop, and canvas ratio.",
-    "Rebuild the scene as a fresh high-quality render. Do not copy source pixels, compression artifacts, blur, low resolution, exact stains, exact scratches, or accidental tiny details.",
-    "Do not invent a different scene, different architecture, different room type, outdoor environment, character scene, product shot, poster, UI, or unrelated composition.",
-    "Do not replace the structure image with a generic fantasy ruin, temple, corridor, hall, street, landscape, or any other unrelated environment.",
-    "Change surface finish, color grading, lighting quality, edge definition, material detail, and render clarity according to the style/request while keeping the original layout skeleton.",
+    "输入图一是渲染结构图。必须以图一为最终画面的空间蓝图：场景类型、构图、镜头角度、透视、墙地关系、开口位置、主体轮廓、物体位置、裁切和画幅比例都以图一为准。",
     styleCount > 0
-      ? "Style references may affect palette, lighting mood, texture, atmosphere, and finish only. Style references must not change composition, camera, scene content, or object placement."
+      ? "输入图二是风格参考图。图二只用于参考色块笔触、美术样式、色彩氛围、材质质感、光照气质和渲染完成度；禁止采用图二的构图、镜头、场景内容或物体位置。"
       : "",
-    "If any instruction conflicts with the structure image, the structure image wins.",
-    "中文硬性约束：沿用第一张结构参考图的场景类型、构图、镜头、透视、墙地位置、开口位置、物体位置和画幅比例；重新渲染材质、光照、清晰度和风格，不要像素级照搬；禁止生成无关的新场景。",
-    "User request and existing role instructions:",
-    submitBody.prompt,
+    styleCount > 0
+      ? "请按照图二的风格重建图一。最终结果必须看起来是图一的场景结构被重新渲染，而不是图二的场景，也不是无关新场景。"
+      : "请重建图一，不要生成无关新场景。",
+    "不要像素级照搬图一的模糊、压缩、污渍和偶然小细节；只重建结构和主要内容，并提升材质、光照、边缘清晰度和整体完成度。",
+    "如果文字要求、风格参考和结构图冲突，以图一的空间结构和内容为最高优先级。",
+    userPrompt,
   ].filter(Boolean).join("\n");
+}
+
+function extractRayinUserPrompt(prompt) {
+  const text = String(prompt || "").trim();
+  if (!text) return "";
+  const markers = [
+    "User request and existing role instructions:",
+    "用户需求：",
+    "需求：",
+  ];
+  for (const marker of markers) {
+    const index = text.lastIndexOf(marker);
+    if (index >= 0) {
+      return text.slice(index + marker.length).trim().slice(0, 1200);
+    }
+  }
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const useful = lines.filter((line) => !/^(Reference binding tags:|GPT Image 2 binding rules:|@渲染结构图|@风格参考图|Final image:|Keep local|Red light rule:|- )/i.test(line));
+  return (useful.length ? useful.slice(-6) : lines.slice(-6)).join("\n").slice(0, 1200);
 }
 
 function getRayinReferenceLabel(submitBody, url, index) {
