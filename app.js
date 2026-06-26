@@ -2339,6 +2339,7 @@ function openImageConfig(node) {
     imageRole: node.dataset.imageRole || imageOptions.imageRole || "general",
     quality: node.dataset.imageQuality || imageOptions.quality || "high",
   };
+  ensureImageProviderOptions();
   if (imageModelSelect) {
     imageModelSelect.value = node.dataset.imageModel || "gpt-image-2-official";
   }
@@ -2590,6 +2591,25 @@ function getImageProviderLabel(value) {
   if (provider === "rayinai") return "RayinAI";
   if (provider === "rhart") return "RHarT G31";
   return "ApiMart";
+}
+
+function ensureImageProviderOptions() {
+  if (!imageProviderSelect) return;
+  const options = [
+    ["apimart", "ApiMart"],
+    ["aihubmix", "AIHubMix"],
+    ["rhart", "RHarT G31"],
+    ["rayinai", "RayinAI"],
+  ];
+  const current = normalizeImageProvider(imageProviderSelect.value || "apimart");
+  options.forEach(([value, label], index) => {
+    if (imageProviderSelect.querySelector(`option[value="${value}"]`)) return;
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    imageProviderSelect.insertBefore(option, imageProviderSelect.options[index] || null);
+  });
+  imageProviderSelect.value = current;
 }
 
 function normalizeImageQualityForModel(quality, model) {
@@ -5868,6 +5888,7 @@ function escapeHtml(value = "") {
   });
 }
 
+ensureImageProviderOptions();
 loadImageOptions();
 loadProjectList();
 showPage("home");
