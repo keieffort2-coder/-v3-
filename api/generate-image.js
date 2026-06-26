@@ -742,18 +742,19 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const models = getRayinAiResponsesModels();
-  const attempts = models.flatMap((model) => [
-    {
-      url: `${baseUrl}/v1/images/generations`,
-      body: buildRayinImagesBody(rayinImageBody, model),
-      type: "images",
-    },
-    {
+  const attempts = models.flatMap((model) => {
+    const responsesAttempt = {
       url: `${baseUrl}/v1/responses`,
       body: buildRayinResponsesBody(rayinImageBody, model),
       type: "responses",
-    },
-  ]);
+    };
+    const imagesAttempt = {
+      url: `${baseUrl}/v1/images/generations`,
+      body: buildRayinImagesBody(rayinImageBody, model),
+      type: "images",
+    };
+    return hasReferences ? [responsesAttempt, imagesAttempt] : [imagesAttempt, responsesAttempt];
+  });
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
@@ -779,7 +780,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    if (![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
+    const canFallbackToNextRayinEndpoint = attempt.type === "responses" && [400, 404, 405, 422].includes(response.status);
+    if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
   }
 
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
@@ -945,10 +947,15 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
     content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
     content.push({ type: "input_image", image_url: url });
   });
-  return {
+  const body = {
     model,
+    tools: [{ type: "image_generation", quality: "auto", size: "auto", output_format: submitBody.output_format || "png" }],
     input: [{ type: "message", role: "user", content }],
+    quality: "auto",
+    size: "auto",
+    output_format: submitBody.output_format || "png",
   };
+  return body;
 }
 
 function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
