@@ -128,8 +128,56 @@ function sanitizeBearerToken(value) {
     .replace(/\s+/g, "");
 }
 
+async function proxyImage(req, res) {
+  const src = String(req.query?.src || "");
+  if (!src || !isImageReferenceValue(src)) {
+    res.status(400).json({ error: "Missing image src" });
+    return;
+  }
+  try {
+    const { buffer, contentType } = await readImageBytes(src);
+    if (!/^image\//i.test(contentType)) {
+      res.status(502).json({
+        error: "Upstream did not return an image",
+        contentType,
+      });
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(buffer);
+  } catch (error) {
+    res.status(502).json({
+      error: "Image proxy failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function buildImageProxyUrl(req, imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") return "";
+  if (/^data:image\//i.test(imageUrl)) return imageUrl;
+  const query = new URLSearchParams({
+    provider: "rhart",
+    image: "1",
+    src: imageUrl,
+  });
+  return `${getRequestPath(req)}?${query.toString()}`;
+}
+
+function getRequestPath(req) {
+  const raw = String(req.url || "/api/generate-image");
+  return raw.split("?")[0] || "/api/generate-image";
+}
+
 module.exports = async function handler(req, res) {
   if (req.method === "GET") {
+    if (req.query?.image === "1") {
+      await proxyImage(req, res);
+      return;
+    }
+
     const taskId = req.query?.taskId;
     if (!taskId) {
       res.status(405).json({ error: "Method not allowed" });
@@ -171,13 +219,15 @@ module.exports = async function handler(req, res) {
           ? await getRhartTask(apiKey, String(taskId))
           : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
+      const rawImageUrl = extractResultUrl(taskPayload);
       const imageUrl = provider === "rhart"
-        ? await materializeResultImage(extractResultUrl(taskPayload), taskId, { inlineFallback: true })
-        : await persistResultImage(extractResultUrl(taskPayload), taskId);
+        ? buildImageProxyUrl(req, rawImageUrl)
+        : await persistResultImage(rawImageUrl, taskId);
       res.status(200).json({
         taskId,
         status,
         imageUrl,
+        rawImageUrl: provider === "rhart" ? rawImageUrl : undefined,
         provider,
         rayinEndpoint: taskPayload?.rayinEndpoint,
         rhartEndpoint: taskPayload?.rhartEndpoint,
@@ -292,12 +342,14 @@ module.exports = async function handler(req, res) {
       const rhartSubmitBody = buildRhartSubmitBody(requestContext);
       const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
       if (rhartResult.ok) {
-        const imageUrl = await materializeResultImage(extractResultUrl(rhartResult.payload), `rhart-${Date.now()}`, { inlineFallback: true });
+        const rawImageUrl = extractResultUrl(rhartResult.payload);
+        const imageUrl = buildImageProxyUrl(req, rawImageUrl);
         const taskId = extractTaskId(rhartResult.payload);
         res.status(imageUrl ? 200 : 202).json({
           taskId,
           status: imageUrl ? "completed" : "submitted",
           imageUrl,
+          rawImageUrl,
           model: rhartSubmitBody.model,
           provider: "rhart",
           payload: imageUrl ? undefined : rhartResult.payload,
@@ -996,12 +1048,33 @@ async function readImageBytes(imageUrl) {
   if (!response.ok) {
     throw new Error(`Download generated image failed: HTTP ${response.status}`);
   }
-  const contentType = response.headers.get("content-type")?.split(";")[0] || "image/png";
+  const contentType = response.headers.get("content-type")?.split(";")[0] || "application/octet-stream";
   const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (!/^image\//i.test(contentType) && !looksLikeImageBuffer(buffer)) {
+    throw new Error(`Download generated image failed: upstream returned ${contentType}`);
+  }
   return {
-    contentType,
-    buffer: Buffer.from(arrayBuffer),
+    contentType: /^image\//i.test(contentType) ? contentType : inferImageContentType(buffer),
+    buffer,
   };
+}
+
+function looksLikeImageBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return false;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return true;
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true;
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return true;
+  if (buffer.slice(0, 3).toString("ascii") === "GIF") return true;
+  return false;
+}
+
+function inferImageContentType(buffer) {
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return "image/jpeg";
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "image/png";
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (buffer.slice(0, 3).toString("ascii") === "GIF") return "image/gif";
+  return "image/png";
 }
 
 function contentTypeToExtension(contentType) {
