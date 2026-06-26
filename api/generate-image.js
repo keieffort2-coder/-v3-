@@ -135,7 +135,12 @@ async function proxyImage(req, res) {
     return;
   }
   try {
-    const { buffer, contentType } = await readImageBytes(src);
+    const provider = normalizeProvider(req.query?.provider);
+    const apiKey = provider === "rhart" ? getRhartKey() : "";
+    const { buffer, contentType } = await readImageBytes(src, {
+      apiKey,
+      referer: provider === "rhart" ? getRhartBaseUrl() : "",
+    });
     if (!/^image\//i.test(contentType)) {
       res.status(502).json({
         error: "Upstream did not return an image",
@@ -219,7 +224,7 @@ module.exports = async function handler(req, res) {
           ? await getRhartTask(apiKey, String(taskId))
           : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
-      const rawImageUrl = extractResultUrl(taskPayload);
+      const rawImageUrl = provider === "rhart" ? extractRhartResultUrl(taskPayload) : extractResultUrl(taskPayload);
       const imageUrl = provider === "rhart"
         ? buildImageProxyUrl(req, rawImageUrl)
         : await persistResultImage(rawImageUrl, taskId);
@@ -342,7 +347,7 @@ module.exports = async function handler(req, res) {
       const rhartSubmitBody = buildRhartSubmitBody(requestContext);
       const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
       if (rhartResult.ok) {
-        const rawImageUrl = extractResultUrl(rhartResult.payload);
+        const rawImageUrl = extractRhartResultUrl(rhartResult.payload);
         const imageUrl = buildImageProxyUrl(req, rawImageUrl);
         const taskId = extractTaskId(rhartResult.payload);
         res.status(imageUrl ? 200 : 202).json({
@@ -1034,7 +1039,7 @@ async function materializeResultImage(imageUrl, taskId, options = {}) {
   }
 }
 
-async function readImageBytes(imageUrl) {
+async function readImageBytes(imageUrl, options = {}) {
   if (/^data:image\//i.test(imageUrl)) {
     const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) throw new Error("Invalid image data URL");
@@ -1044,7 +1049,10 @@ async function readImageBytes(imageUrl) {
     };
   }
 
-  const response = await fetch(imageUrl, { cache: "no-store" });
+  const response = await fetch(imageUrl, {
+    cache: "no-store",
+    headers: buildImageFetchHeaders(options),
+  });
   if (!response.ok) {
     throw new Error(`Download generated image failed: HTTP ${response.status}`);
   }
@@ -1058,6 +1066,13 @@ async function readImageBytes(imageUrl) {
     contentType: /^image\//i.test(contentType) ? contentType : inferImageContentType(buffer),
     buffer,
   };
+}
+
+function buildImageFetchHeaders(options = {}) {
+  const headers = {};
+  if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
+  if (options.referer) headers.Referer = options.referer;
+  return headers;
 }
 
 function looksLikeImageBuffer(buffer) {
@@ -1700,6 +1715,62 @@ function extractResultUrl(payload) {
   if (direct) return direct;
 
   return findImageUrl(payload);
+}
+
+function extractRhartResultUrl(payload) {
+  const containers = [
+    payload?.results,
+    payload?.data?.results,
+    payload?.result?.results,
+    payload?.data?.result?.results,
+    payload?.outputs,
+    payload?.data?.outputs,
+    payload?.files,
+    payload?.data?.files,
+  ];
+  for (const container of containers) {
+    const found = extractResultUrlFromItems(container);
+    if (found) return found;
+  }
+
+  const direct = [
+    payload?.url,
+    payload?.data?.url,
+    payload?.outputUrl,
+    payload?.data?.outputUrl,
+    payload?.output_url,
+    payload?.data?.output_url,
+    payload?.fileUrl,
+    payload?.data?.fileUrl,
+    payload?.file_url,
+    payload?.data?.file_url,
+  ].map(normalizeImageValue).find(Boolean);
+  return direct || "";
+}
+
+function extractResultUrlFromItems(value) {
+  if (!value) return "";
+  const items = Array.isArray(value) ? value : [value];
+  const imageItems = items.filter((item) => {
+    if (typeof item === "string") return /\.(?:png|jpe?g|webp|gif)(?:[?#]|$)/i.test(item) || /^data:image\//i.test(item);
+    const type = String(item?.outputType || item?.type || item?.mimeType || item?.mime_type || "").toLowerCase();
+    return /image|png|jpg|jpeg|webp|gif/.test(type) || item?.url || item?.download_url || item?.downloadUrl;
+  });
+  for (const item of imageItems.length ? imageItems : items) {
+    const url = [
+      typeof item === "string" ? item : "",
+      item?.url,
+      item?.download_url,
+      item?.downloadUrl,
+      item?.file_url,
+      item?.fileUrl,
+      item?.image_url,
+      item?.imageUrl,
+      item?.b64_json,
+    ].map(normalizeImageValue).find(Boolean);
+    if (url) return url;
+  }
+  return "";
 }
 
 function normalizeImageValue(value) {
