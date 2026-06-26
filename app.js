@@ -1615,7 +1615,20 @@ function hydrateRestoredNodeData(node, saved) {
   node.dataset.apimartChannel = "b";
   if (saved.fileName) node.dataset.fileName = saved.fileName;
   if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
+  if (Array.isArray(saved.imageDataKeys)) {
+    node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
+    restoreImageDataKeys(node, saved.imageDataKeys);
+  }
   if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
+  if (Array.isArray(saved.imageDataUrls)) {
+    const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
+    if (safeInlineUrls.length) {
+      node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
+      node.dataset.imageDataInlineUrl = safeInlineUrls[0];
+      const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
+      if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
+    }
+  }
   if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
   if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
   if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
@@ -1627,8 +1640,8 @@ function hydrateRestoredNodeData(node, saved) {
       renderNodeImagePreview(node);
     });
   }
-  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
-  if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(saved.imageGenerationRecords);
+  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
+  if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
   if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
   if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
   if (saved.tone) node.dataset.tone = saved.tone;
@@ -1745,6 +1758,7 @@ function createNode({
   x,
   y,
   fileName,
+  imageDataKeys,
   imageDataUrl,
   imageUrls,
   referenceImageDataUrl,
@@ -1789,6 +1803,10 @@ function createNode({
   node.dataset.tone = `slot-${["a", "b", "c", "d"][nodeCounter % 4]}`;
   if (fileName) node.dataset.fileName = fileName;
   if (Array.isArray(imageUrls)) node.dataset.imageUrls = JSON.stringify(imageUrls);
+  if (Array.isArray(imageDataKeys)) {
+    node.dataset.imageDataKeys = JSON.stringify(imageDataKeys);
+    restoreImageDataKeys(node, imageDataKeys);
+  }
   if (imageDataUrl) node.dataset.imageDataUrl = imageDataUrl;
   if (Array.isArray(referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(referenceImageUrls);
   if (referenceImageDataUrl) node.dataset.referenceImageDataUrl = referenceImageDataUrl;
@@ -2217,7 +2235,10 @@ function getImageGenerationRecords(node) {
 }
 
 function compactImageGenerationRecords(records, limit = 10) {
-  return arrayOrEmpty(records).slice(0, limit).map((record) => ({
+  return arrayOrEmpty(records)
+    .filter((record) => record?.imageUrl && !isDataImageUrl(record.imageUrl))
+    .slice(0, limit)
+    .map((record) => ({
     id: record.id || `gen-${Math.random().toString(36).slice(2, 8)}`,
     imageUrl: record.imageUrl || "",
     createdAt: record.createdAt || "",
@@ -3286,6 +3307,10 @@ function isRemoteImageUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function isDataImageUrl(value) {
+  return typeof value === "string" && /^data:image\//i.test(value);
+}
+
 function isImageReferenceValue(value) {
   return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
 }
@@ -3302,6 +3327,10 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function compactImageUrlsForLocalStorage(values, limit = 6) {
+  return uniqueValues(arrayOrEmpty(values).filter((url) => !isDataImageUrl(url))).slice(0, limit);
 }
 
 function parseTextNodeFields(value = "") {
@@ -3376,16 +3405,14 @@ function duplicateNode(node) {
     imageNaturalWidth: node.dataset.imageNaturalWidth || "",
     imageNaturalHeight: node.dataset.imageNaturalHeight || "",
     imageUrls: parseJsonArray(node.dataset.imageUrls),
-    imageDataUrl: node.dataset.imageDataUrl || "",
-    imageDataUrls: parseJsonArray(node.dataset.imageDataUrls),
-    imageDataInlineUrl: node.dataset.imageDataInlineUrl || "",
+    imageDataKey: node.dataset.imageDataKey || "",
+    imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
+    imageDataUrl: isDataImageUrl(node.dataset.imageDataUrl) ? "" : node.dataset.imageDataUrl || "",
     referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
-    referenceImageDataUrl: node.dataset.referenceImageDataUrl || "",
-    referenceImageDataUrls: parseJsonArray(node.dataset.referenceImageDataUrls),
-    referenceImageDataInlineUrl: node.dataset.referenceImageDataInlineUrl || "",
+    referenceImageDataUrl: isDataImageUrl(node.dataset.referenceImageDataUrl) ? "" : node.dataset.referenceImageDataUrl || "",
     referenceFileName: node.dataset.referenceFileName || "",
-    generatedImageUrl: node.dataset.generatedImageUrl || "",
-    generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
+    generatedImageUrl: isDataImageUrl(node.dataset.generatedImageUrl) ? "" : node.dataset.generatedImageUrl || "",
+    generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls)),
     imageGenerationRecords: getImageGenerationRecords(node),
     generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
     generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
@@ -3791,7 +3818,13 @@ async function runImageGeneration(node) {
       : hasLocalOnlyReferences
         ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
       : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
-    node.dataset.lastImagePayload = JSON.stringify(payload);
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...payload,
+      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+      structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
+      styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
+      editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
+    });
 
     const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
     if (!finalResult.imageUrl) {
@@ -3814,7 +3847,7 @@ async function runImageGeneration(node) {
       if (!dimensions) return;
       node.dataset.generatedImageNaturalWidth = String(dimensions.width);
       node.dataset.generatedImageNaturalHeight = String(dimensions.height);
-      saveCurrentProject();
+      saveCurrentProject({ silent: selectedProvider === "rhart" });
     });
     renderNodeImagePreview(node);
     status.textContent = "图片生成完成。";
@@ -3835,7 +3868,7 @@ async function runImageGeneration(node) {
     imageGenerationControllers.delete(node.id);
     syncImageSubmitButton(node);
     node.classList.remove("running");
-    saveCurrentProject();
+    saveCurrentProject({ silent: selectedProvider === "rhart" });
   }
 }
 
@@ -3969,7 +4002,10 @@ async function submitAndPollImageTask(payload, status, preview, node, signal) {
       imageDataUrls: [],
       imageName: "",
     };
-    node.dataset.lastImagePayload = JSON.stringify(saferPayload);
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...saferPayload,
+      imageDataUrls: [],
+    });
     return submitAndPollImageTaskOnce(saferPayload, status, preview, node, signal);
   }
 }
@@ -3981,7 +4017,10 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
   if (!response.ok && shouldRetryWithSaferPrompt(result)) {
     status.textContent = "提示词触发上游拦截，正在安全改写后重试提交...";
     payload.prompt = makePromptSafer(payload.prompt);
-    node.dataset.lastImagePayload = JSON.stringify(payload);
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...payload,
+      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+    });
     response = await fetchImageGenerationApi(payload, signal);
     result = await readResponseJson(response);
   }
@@ -4772,6 +4811,30 @@ function ensureNodeStatus(node) {
   return status;
 }
 
+function storeImageDataUrlsForNode(node, dataUrls, slotPrefix = "upload") {
+  if (!node || !currentProject) return [];
+  return arrayOrEmpty(dataUrls)
+    .filter(isDataImageUrl)
+    .map((dataUrl, index) => {
+      const key = projectImageKey(currentProject, node.id, `${slotPrefix}-${index}`);
+      storeProjectImage(key, dataUrl);
+      return key;
+    });
+}
+
+function restoreImageDataKeys(node, keys) {
+  const safeKeys = arrayOrEmpty(keys);
+  if (!node || !safeKeys.length) return;
+  Promise.all(safeKeys.map((key) => loadProjectImage(key))).then((values) => {
+    const dataUrls = values.filter(isDataImageUrl);
+    if (!dataUrls.length) return;
+    node.dataset.imageDataUrls = JSON.stringify(dataUrls);
+    node.dataset.imageDataInlineUrl = dataUrls[0];
+    if (!node.dataset.imageDataUrl) node.dataset.imageDataUrl = dataUrls[0];
+    renderNodeImagePreview(node);
+  });
+}
+
 function uploadFilesToImageNode(node, files) {
   const imageFiles = files.filter((file) => file.type.startsWith("image/"));
   if (!node || !imageFiles.length) return;
@@ -4799,12 +4862,15 @@ function uploadFilesToImageNode(node, files) {
     Promise.all(imageFiles.map((file) => fileToDataUrl(file))),
   ])
     .then(([uploadedUrls, inlineDataUrls]) => {
-      node.dataset.imageUrls = JSON.stringify(uploadedUrls);
-      node.dataset.imageDataUrl = uploadedUrls[0] || "";
+      const remoteUrls = uploadedUrls.filter(Boolean);
+      const inlineKeys = storeImageDataUrlsForNode(node, inlineDataUrls, "upload");
+      node.dataset.imageUrls = JSON.stringify(remoteUrls);
+      node.dataset.imageDataUrl = remoteUrls[0] || "";
+      node.dataset.imageDataKeys = JSON.stringify(inlineKeys);
       node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
       node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
       renderNodeImagePreview(node);
-      const remoteCount = uploadedUrls.filter(isRemoteImageUrl).length;
+      const remoteCount = remoteUrls.filter(isRemoteImageUrl).length;
       status.textContent = remoteCount
         ? `${remoteCount} 张图片已上传并保存。`
         : `${inlineDataUrls.length} 张图片已作为本地引用使用。`;
@@ -5139,7 +5205,7 @@ function updateConnections() {
   });
 }
 
-function saveCurrentProject() {
+function saveCurrentProject(options = {}) {
   if (!currentProject || isRestoring) return;
   if (activeFolder) {
     saveActiveFolder();
@@ -5147,12 +5213,12 @@ function saveCurrentProject() {
   }
   const data = serializeCanvasData();
   if (!shouldSaveProjectData(currentProject, data)) return;
-  const saved = writeProjectDataWithFallback(currentProject, data);
+  const saved = writeProjectDataWithFallback(currentProject, data, options);
   if (!saved) return;
   updateProjectCardThumbnail(currentProject, data);
 }
 
-function writeProjectDataWithFallback(name, data) {
+function writeProjectDataWithFallback(name, data, options = {}) {
   const key = projectKey(name);
   try {
     localStorage.setItem(key, JSON.stringify(data));
@@ -5162,15 +5228,55 @@ function writeProjectDataWithFallback(name, data) {
   }
 
   const slim = slimProjectDataForLocalStorage(data);
+  const existing = localStorage.getItem(key);
   try {
+    localStorage.removeItem(key);
     localStorage.setItem(key, JSON.stringify(slim));
-    notifyProjectSaveIssue("本地存储空间不足，已自动精简图片历史后保存。");
+    notifyProjectSaveIssue("本地存储空间不足，已自动精简图片历史后保存。", options);
     return true;
   } catch (retryError) {
     console.error("Project slim save failed", retryError);
-    notifyProjectSaveIssue("项目保存失败：浏览器本地存储空间不足。请导出备份或清理旧项目/图片历史。");
+    cleanupLocalStorageForProjectSave(name);
+    try {
+      localStorage.setItem(key, JSON.stringify(slim));
+      notifyProjectSaveIssue("本地存储空间不足，已清理旧备份并精简保存。", options);
+      return true;
+    } catch (cleanupRetryError) {
+      console.error("Project slim save after cleanup failed", cleanupRetryError);
+    }
+    if (existing) {
+      try {
+        localStorage.setItem(key, existing);
+      } catch (restoreError) {
+        console.error("Project restore after slim save failed", restoreError);
+      }
+    }
+    notifyProjectSaveIssue("项目保存失败：浏览器本地存储空间不足。请导出备份或清理旧项目/图片历史。", options);
     return false;
   }
+}
+
+function cleanupLocalStorageForProjectSave(activeName) {
+  const removable = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key) continue;
+    if (key.endsWith(".backup")) {
+      removable.push(key);
+      continue;
+    }
+    if (key.startsWith("aivideobox.project.v2:") && key !== projectKey(activeName)) {
+      const value = localStorage.getItem(key) || "";
+      if (value.includes("data:image/")) removable.push(key);
+    }
+  }
+  removable.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.warn("Failed to remove old localStorage entry", key, error);
+    }
+  });
 }
 
 function slimProjectDataForLocalStorage(data) {
@@ -5178,15 +5284,30 @@ function slimProjectDataForLocalStorage(data) {
     ...data,
     nodes: (data.nodes || []).map((node) => ({
       ...node,
-      generatedImageUrls: arrayOrEmpty(node.generatedImageUrls).slice(-3),
+      imageDataUrl: isDataImageUrl(node.imageDataUrl) ? "" : node.imageDataUrl,
+      imageDataUrls: undefined,
+      imageDataInlineUrl: undefined,
+      referenceImageDataUrl: isDataImageUrl(node.referenceImageDataUrl) ? "" : node.referenceImageDataUrl,
+      referenceImageDataUrls: undefined,
+      referenceImageDataInlineUrl: undefined,
+      generatedImageUrl: isDataImageUrl(node.generatedImageUrl) ? "" : node.generatedImageUrl,
+      generatedImageUrls: compactImageUrlsForLocalStorage(node.generatedImageUrls, 3),
       imageGenerationRecords: compactImageGenerationRecords(node.imageGenerationRecords, 8),
       folderNodes: Array.isArray(node.folderNodes) ? slimProjectDataForLocalStorage({ nodes: node.folderNodes }).nodes : node.folderNodes,
     })),
   };
 }
 
-function notifyProjectSaveIssue(message) {
+function notifyProjectSaveIssue(message, options = {}) {
+  if (options.silent) {
+    console.warn(message);
+    return;
+  }
   const target = selectedNode || [...canvasContent.querySelectorAll(".node")].at(-1);
+  if (target?.classList.contains("running")) {
+    console.warn(message);
+    return;
+  }
   if (target) {
     ensureNodeStatus(target).textContent = message;
     return;
@@ -5320,11 +5441,11 @@ function serializeCanvasData() {
 
 function serializeNodes(nodes) {
   return nodes.map((node) => {
-    const imageIsData = node.dataset.imageDataUrl?.startsWith("data:image/");
+    const imageIsData = isDataImageUrl(node.dataset.imageDataUrl);
     const imageDataKey = imageIsData ? projectImageKey(currentProject, node.id, "upload") : "";
-    const referenceIsData = node.dataset.referenceImageDataUrl?.startsWith("data:image/");
+    const referenceIsData = isDataImageUrl(node.dataset.referenceImageDataUrl);
     const referenceImageDataKey = referenceIsData ? projectImageKey(currentProject, node.id, "reference") : "";
-    const generatedIsData = node.dataset.generatedImageUrl?.startsWith("data:image/");
+    const generatedIsData = isDataImageUrl(node.dataset.generatedImageUrl);
     const generatedImageDataKey = generatedIsData ? projectImageKey(currentProject, node.id, "generated") : "";
 
     if (imageDataKey) storeProjectImage(imageDataKey, node.dataset.imageDataUrl);
@@ -5348,6 +5469,7 @@ function serializeNodes(nodes) {
       imageNaturalWidth: node.dataset.imageNaturalWidth || "",
       imageNaturalHeight: node.dataset.imageNaturalHeight || "",
       imageUrls: parseJsonArray(node.dataset.imageUrls),
+      imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
       imageDataKey,
       imageDataUrl: imageDataKey ? "" : node.dataset.imageDataUrl || "",
       referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
@@ -5356,7 +5478,7 @@ function serializeNodes(nodes) {
       referenceFileName: node.dataset.referenceFileName || "",
       generatedImageDataKey,
       generatedImageUrl: generatedImageDataKey ? "" : node.dataset.generatedImageUrl || "",
-      generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls).slice(0, 6),
+      generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls), 6),
       imageGenerationRecords: compactImageGenerationRecords(getImageGenerationRecords(node)),
       generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
       generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
@@ -5472,9 +5594,21 @@ function restoreCanvasData(data) {
     if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
     if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
     if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
+    if (Array.isArray(saved.imageDataKeys)) {
+      node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
+      restoreImageDataKeys(node, saved.imageDataKeys);
+    }
     if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
-    if (Array.isArray(saved.imageDataUrls)) node.dataset.imageDataUrls = JSON.stringify(saved.imageDataUrls);
-    if (saved.imageDataInlineUrl) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
+    if (Array.isArray(saved.imageDataUrls)) {
+      const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
+      if (safeInlineUrls.length) {
+        node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
+        node.dataset.imageDataInlineUrl = safeInlineUrls[0];
+        const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
+        if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
+      }
+    }
+    if (saved.imageDataInlineUrl && isDataImageUrl(saved.imageDataInlineUrl)) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
     if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
     if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
     if (Array.isArray(saved.referenceImageDataUrls)) node.dataset.referenceImageDataUrls = JSON.stringify(saved.referenceImageDataUrls);
@@ -5488,8 +5622,8 @@ function restoreCanvasData(data) {
         renderNodeImagePreview(node);
       });
     }
-    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
-    if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(saved.imageGenerationRecords);
+    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
+    if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
     if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
     if (saved.generatedImageNaturalHeight) node.dataset.generatedImageNaturalHeight = saved.generatedImageNaturalHeight;
     if (Array.isArray(saved.videoUrls)) node.dataset.videoUrls = JSON.stringify(saved.videoUrls);
