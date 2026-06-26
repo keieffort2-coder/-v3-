@@ -750,10 +750,15 @@ async function submitRayinImageTask(apiKey, submitBody) {
     };
     const imagesAttempt = {
       url: `${baseUrl}/v1/images/generations`,
+      body: buildRayinImagesBody(rayinImageBody, model, { minimal: true }),
+      type: "images-web-like",
+    };
+    const compatImagesAttempt = {
+      url: `${baseUrl}/v1/images/generations`,
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
     };
-    return hasReferences ? [responsesAttempt, imagesAttempt] : [imagesAttempt, responsesAttempt];
+    return hasReferences ? [responsesAttempt, imagesAttempt, compatImagesAttempt] : [imagesAttempt, responsesAttempt, compatImagesAttempt];
   });
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
@@ -958,7 +963,7 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
   return body;
 }
 
-function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
+function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), options = {}) {
   const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
   const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
   const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
@@ -974,6 +979,23 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel()) {
     ...styleUrls,
     ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
   ]).slice(0, 16);
+  if (options.minimal) {
+    return {
+      key_id: getRayinAiKeyId(),
+      provider: "gpt",
+      operation: roleInputUrls.length ? "edit" : "generation",
+      model,
+      prompt: submitBody.prompt,
+      size: "auto",
+      aspect_ratio: "auto",
+      base_resolution: "auto",
+      quality: "auto",
+      output_format: submitBody.output_format || "png",
+      moderation: "auto",
+      n: 1,
+      input_images: roleInputUrls.map(toRayinTaskInputImage),
+    };
+  }
   const body = {
     key_id: getRayinAiKeyId(),
     provider: "gpt",
