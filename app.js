@@ -4435,6 +4435,9 @@ function formatApiErrorDiagnostic(result) {
 function extractApiErrorMessage(value, seen = new Set()) {
   if (!value) return "";
   if (typeof value === "string") {
+    if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(value)) {
+      return "RHarT G31 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。已默认使用低价渠道版 endpoint；如果仍看到此错误，请确认 RunningHub 后台 key 权限。";
+    }
     if (/internal server error|server_error/i.test(value)) return "上游图片生成服务内部错误，请稍后重试，或切换 ApiMart 通道后再试。";
     return value;
   }
