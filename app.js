@@ -2579,12 +2579,14 @@ function normalizeImageModel(value) {
 
 function normalizeImageProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
+  if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
   if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
   return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
 }
 
 function getImageProviderLabel(value) {
   const provider = normalizeImageProvider(value);
+  if (provider === "aihubmix") return "AIHubMix";
   if (provider === "rayinai") return "RayinAI";
   if (provider === "rhart") return "RHarT G31";
   return "ApiMart";
@@ -2876,7 +2878,7 @@ function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
 
 function getProviderRoleImages(roleImages, provider = "apimart") {
   const normalizedProvider = normalizeImageProvider(provider);
-  if (!["apimart", "rayinai"].includes(normalizedProvider)) return roleImages;
+  if (!["apimart", "rayinai", "aihubmix"].includes(normalizedProvider)) return roleImages;
   return {
     ...roleImages,
     editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
@@ -3902,6 +3904,8 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
       ? "RayinAI 已直接返回图片。"
       : result.provider === "rhart"
         ? "RHarT G31 图片生成完成。"
+        : result.provider === "aihubmix"
+          ? "AIHubMix 图片生成完成。"
         : "图片生成完成。";
     return result;
   }
