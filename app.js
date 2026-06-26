@@ -2072,7 +2072,7 @@ function renderNodeImagePreview(node) {
     const historyCount = Math.max(0, generated.length - 1);
     preview.classList.add("output-preview");
     preview.innerHTML = `
-      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">
+      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">
       ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
       <div class="output-history-popover" aria-hidden="true">
         ${renderImageGenerationRecords(records.length ? records : generated.map((src) => ({ id: src, imageUrl: src })))}
@@ -2086,7 +2086,7 @@ function renderNodeImagePreview(node) {
   const sources = [...uploaded, node.dataset.imageDataUrl].filter(Boolean);
   const uniqueSources = uniqueValues(sources);
   if (uniqueSources.length) {
-    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`).join("");
+    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`).join("");
     bindPreviewDimensionCapture(node, preview);
     refreshConnectionsAfterImages(preview);
   }
@@ -3734,7 +3734,7 @@ async function runImageGeneration(node) {
     }
 
     if (preview) {
-      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`;
+      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`;
     }
     node.dataset.generatedImageUrl = finalResult.imageUrl;
     node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
