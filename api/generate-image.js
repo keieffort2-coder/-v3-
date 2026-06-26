@@ -832,7 +832,8 @@ async function submitRhartImageTask(apiKey, body) {
       },
     };
   }
-  const imageUrls = await resolveRhartImageUrls(apiKey, body.sourceImageUrls || body.imageUrls || []);
+  const resolvedReferences = await resolveRhartImageUrls(apiKey, body.sourceImageUrls || body.imageUrls || []);
+  const imageUrls = resolvedReferences.urls;
   if (!imageUrls.length) {
     return {
       ok: false,
@@ -843,6 +844,7 @@ async function submitRhartImageTask(apiKey, body) {
         rhartEndpoint: endpoint,
         referenceCount: body.referenceCount || 0,
         publicReferenceCount: imageUrls.length,
+        uploadAttempts: resolvedReferences.uploadAttempts,
       },
     };
   }
@@ -882,6 +884,7 @@ async function submitRhartImageTask(apiKey, body) {
       resolution: submitBody.resolution,
       referenceCount: body.referenceCount || 0,
       publicReferenceCount: imageUrls.length,
+      uploadAttempts: resolvedReferences.uploadAttempts,
     };
   }
   const imageUrl = extractRhartResultUrl(payload);
@@ -895,6 +898,7 @@ async function submitRhartImageTask(apiKey, body) {
 
 async function resolveRhartImageUrls(apiKey, imageUrls) {
   const resolved = [];
+  const uploadAttempts = [];
   const references = imageUrls.filter(isImageReferenceValue).slice(0, 14);
   for (let index = 0; index < references.length; index += 1) {
     const reference = references[index];
@@ -903,11 +907,16 @@ async function resolveRhartImageUrls(apiKey, imageUrls) {
       continue;
     }
     if (/^data:image\//i.test(reference)) {
-      const uploaded = await uploadRhartImageReference(apiKey, reference, index);
+      const uploadResult = await uploadRhartImageReference(apiKey, reference, index);
+      const uploaded = uploadResult.url;
+      uploadAttempts.push(uploadResult.report);
       if (uploaded) resolved.push(uploaded);
     }
   }
-  return uniqueValues(resolved).slice(0, 14);
+  return {
+    urls: uniqueValues(resolved).slice(0, 14),
+    uploadAttempts,
+  };
 }
 
 async function uploadRhartImageReference(apiKey, imageUrl, index) {
@@ -932,7 +941,10 @@ async function uploadRhartImageReference(apiKey, imageUrl, index) {
       upstream: payload,
     }));
   }
-  return extractUploadUrl(payload);
+  return {
+    url: extractUploadUrl(payload),
+    report: summarizeRhartUploadPayload(response.status, endpoint, payload),
+  };
 }
 
 function extractUploadUrl(payload) {
@@ -940,11 +952,81 @@ function extractUploadUrl(payload) {
     payload?.data?.download_url,
     payload?.data?.downloadUrl,
     payload?.data?.url,
+    payload?.data?.file_url,
+    payload?.data?.fileUrl,
+    payload?.data?.image_url,
+    payload?.data?.imageUrl,
+    payload?.data?.view_url,
+    payload?.data?.viewUrl,
     payload?.download_url,
     payload?.downloadUrl,
     payload?.url,
+    payload?.file_url,
+    payload?.fileUrl,
+    payload?.image_url,
+    payload?.imageUrl,
+    payload?.view_url,
+    payload?.viewUrl,
   ];
-  return candidates.find((value) => typeof value === "string" && /^https?:\/\//i.test(value)) || findImageUrl(payload);
+  if (Array.isArray(payload?.data)) {
+    candidates.push(
+      payload.data[0]?.download_url,
+      payload.data[0]?.downloadUrl,
+      payload.data[0]?.url,
+      payload.data[0]?.file_url,
+      payload.data[0]?.fileUrl,
+      payload.data[0]?.image_url,
+      payload.data[0]?.imageUrl,
+      payload.data[0]?.view_url,
+      payload.data[0]?.viewUrl,
+    );
+  }
+  const direct = candidates.find((value) => typeof value === "string" && /^https?:\/\//i.test(value)) || findImageUrl(payload);
+  if (direct) return direct;
+  const filename = extractRunningHubFilename(payload);
+  return filename ? buildRunningHubViewUrl(filename) : "";
+}
+
+function extractRunningHubFilename(payload) {
+  const candidates = [
+    payload?.data?.filename,
+    payload?.data?.fileName,
+    payload?.data?.file_name,
+    payload?.data?.name,
+    payload?.data?.key,
+    payload?.filename,
+    payload?.fileName,
+    payload?.file_name,
+    payload?.name,
+    payload?.key,
+  ];
+  if (Array.isArray(payload?.data)) {
+    candidates.push(
+      payload.data[0]?.filename,
+      payload.data[0]?.fileName,
+      payload.data[0]?.file_name,
+      payload.data[0]?.name,
+      payload.data[0]?.key,
+    );
+  }
+  return candidates.find((value) => typeof value === "string" && value.trim()) || "";
+}
+
+function buildRunningHubViewUrl(filename) {
+  const base = getRhartBaseUrl().replace(/\/+$/, "");
+  return `${base}/view?filename=${encodeURIComponent(String(filename).trim())}`;
+}
+
+function summarizeRhartUploadPayload(status, endpoint, payload) {
+  return {
+    status,
+    endpoint,
+    code: payload?.code,
+    message: payload?.message || payload?.msg || payload?.error || "",
+    dataKeys: payload?.data && typeof payload.data === "object" ? Object.keys(payload.data).slice(0, 20) : [],
+    url: extractUploadUrl(payload),
+    filename: extractRunningHubFilename(payload),
+  };
 }
 
 async function getRhartTask(apiKey, taskId) {
