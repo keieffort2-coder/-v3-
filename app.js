@@ -4414,14 +4414,21 @@ function formatApiError(result, fallback) {
 
 function formatApiErrorDiagnostic(result) {
   const request = result?.request;
-  if (!request || typeof request !== "object") return "";
   const parts = [];
-  if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
-  if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
-  if (request.rayinRequestType) parts.push(`type: ${request.rayinRequestType}`);
-  if (request.upstreamStatus) parts.push(`status: ${request.upstreamStatus}`);
-  if (request.upstreamMessage) parts.push(`upstream: ${String(request.upstreamMessage).slice(0, 160)}`);
-  if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
+  if (request && typeof request === "object") {
+    if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
+    if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
+    if (request.rayinRequestType) parts.push(`type: ${request.rayinRequestType}`);
+    if (request.upstreamStatus) parts.push(`status: ${request.upstreamStatus}`);
+    if (request.upstreamMessage) parts.push(`upstream: ${String(request.upstreamMessage).slice(0, 160)}`);
+    if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
+  }
+  const upstream = result?.upstream;
+  if (upstream && typeof upstream === "object") {
+    if (upstream.errorCode || upstream.code) parts.push(`code: ${upstream.errorCode || upstream.code}`);
+    if (upstream.rhartQueryShape) parts.push(`query: ${upstream.rhartQueryShape}`);
+    if (upstream.rhartEndpoint) parts.push(`endpoint: ${upstream.rhartEndpoint}`);
+  }
   return parts.join("，");
 }
 
@@ -4433,7 +4440,7 @@ function extractApiErrorMessage(value, seen = new Set()) {
   }
   if (typeof value !== "object" || seen.has(value)) return "";
   seen.add(value);
-  const direct = value.message || value.error || value.detail || value.code;
+  const direct = value.errorMessage || value.failedReason || value.promptTips || value.message || value.error || value.detail || value.code || value.errorCode;
   const directMessage = extractApiErrorMessage(direct, seen);
   if (directMessage) return directMessage;
   for (const item of Object.values(value)) {
