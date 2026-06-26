@@ -1,7 +1,10 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
-const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
-const RHART_ENDPOINT_PATH = "/v1/rhart-image-n-g31-flash/image-to-image";
+const RHART_MODEL = "rhart-image-n-g31-flash-official/image-to-image";
+const RHART_DEFAULT_BASE = "https://www.runninghub.cn";
+const RHART_ENDPOINT_PATH = "/openapi/v2/rhart-image-n-g31-flash-official/image-to-image";
+const RHART_QUERY_PATH = "/openapi/v2/query";
+const RHART_UPLOAD_PATH = "/openapi/v2/media/upload/binary";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
 const AIHUBMIX_DEFAULT_BASE = "https://aihubmix.com/v1";
 
@@ -77,15 +80,19 @@ function isLegacyRayinAiBaseUrl(value) {
 }
 
 function getRhartBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL);
-  const withoutName = raw.replace(/^RHART(?:_G31)?_BASE_URL\s*=\s*/i, "");
+  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL || process.env.RUNNINGHUB_BASE_URL || RHART_DEFAULT_BASE);
+  const withoutName = raw.replace(/^(?:RHART(?:_G31)?|RUNNINGHUB)_BASE_URL\s*=\s*/i, "");
   const value = withoutName
+    .replace(/\/openapi\/v2\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
+    .replace(/\/openapi\/v2\/query\/?$/i, "")
     .replace(/\/v1\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
     .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
+    .replace(/\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
+    .replace(/\/openapi\/v2\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
     .replace(/\/+$/, "");
   if (/^https?:\/\//i.test(value)) return value;
-  return "";
+  return RHART_DEFAULT_BASE;
 }
 
 function buildRhartEndpoint() {
@@ -93,8 +100,21 @@ function buildRhartEndpoint() {
   if (/^https?:\/\//i.test(explicit)) return explicit;
   if (explicit) return explicit;
   const base = getRhartBaseUrl();
-  if (!base) return "";
   return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
+}
+
+function buildRhartQueryEndpoint() {
+  const explicit = sanitizeHeaderValue(process.env.RHART_QUERY_ENDPOINT_URL || process.env.RHART_G31_QUERY_ENDPOINT_URL);
+  if (/^https?:\/\//i.test(explicit)) return explicit;
+  const base = getRhartBaseUrl();
+  return new URL(RHART_QUERY_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
+}
+
+function buildRhartUploadEndpoint() {
+  const explicit = sanitizeHeaderValue(process.env.RHART_UPLOAD_ENDPOINT_URL || process.env.RHART_G31_UPLOAD_ENDPOINT_URL);
+  if (/^https?:\/\//i.test(explicit)) return explicit;
+  const base = getRhartBaseUrl();
+  return new URL(RHART_UPLOAD_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
 }
 
 function sanitizeHeaderValue(value) {
@@ -147,7 +167,9 @@ module.exports = async function handler(req, res) {
     try {
       const taskPayload = provider === "rayinai"
         ? await getRayinTask(apiKey, String(taskId))
-        : await getTask(apiKey, String(taskId));
+        : provider === "rhart"
+          ? await getRhartTask(apiKey, String(taskId))
+          : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
       const imageUrl = await persistResultImage(extractResultUrl(taskPayload), taskId);
       res.status(200).json({
@@ -156,6 +178,7 @@ module.exports = async function handler(req, res) {
         imageUrl,
         provider,
         rayinEndpoint: taskPayload?.rayinEndpoint,
+        rhartEndpoint: taskPayload?.rhartEndpoint,
         message: formatUpstreamError(taskPayload),
         payload: imageUrl ? undefined : taskPayload,
       });
@@ -288,8 +311,10 @@ module.exports = async function handler(req, res) {
           model: rhartSubmitBody.model,
           size: rhartSubmitBody.size,
           quality: rhartSubmitBody.quality,
-          output_format: rhartSubmitBody.output_format,
-          referenceCount: rhartSubmitBody.image_urls?.length || 0,
+          aspectRatio: rhartSubmitBody.aspectRatio,
+          resolution: rhartSubmitBody.resolution,
+          referenceCount: rhartSubmitBody.referenceCount || 0,
+          publicReferenceCount: rhartSubmitBody.publicReferenceCount || 0,
         },
       });
       return;
@@ -503,29 +528,80 @@ function buildRayinSubmitBody(context) {
 
 function buildRhartSubmitBody(context) {
   const imageUrls = Array.isArray(context.image_urls) ? context.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
+  const publicImageUrls = imageUrls.filter((url) => /^https?:\/\//i.test(url));
   const next = {
     model: RHART_MODEL,
-    prompt: context.prompt,
-    n: context.n || 1,
-    output_format: context.output_format || "png",
+    imageUrls: publicImageUrls,
+    sourceImageUrls: imageUrls,
+    prompt: buildRhartPrompt(context),
+    aspectRatio: sizeToAspectRatio(context.size),
+    resolution: qualityToRhartResolution(context.quality),
   };
-  if (context.quality) next.quality = context.quality;
-  if (context.size) next.size = context.size;
-  if (imageUrls.length) {
-    next.image_urls = imageUrls;
-    next.images = imageUrls.map((url) => ({ image_url: url, url }));
-    next.input_images = imageUrls.map((url) => ({ image_url: url, url }));
-  }
   if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
-    next.structure_image_urls = context.structure_image_urls.filter(isImageReferenceValue).slice(0, 4);
+    next.structureImageUrls = context.structure_image_urls.filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
   }
   if (Array.isArray(context.style_image_urls) && context.style_image_urls.length) {
-    next.style_image_urls = context.style_image_urls.filter(isImageReferenceValue).slice(0, 4);
+    next.styleImageUrls = context.style_image_urls.filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
   }
-  if (Array.isArray(context.edit_image_urls) && context.edit_image_urls.length) {
-    next.edit_image_urls = context.edit_image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
+  next.referenceCount = imageUrls.length;
+  next.publicReferenceCount = publicImageUrls.length;
   return next;
+}
+
+function buildRhartPrompt(context) {
+  const structureCount = Array.isArray(context.structure_image_urls) ? context.structure_image_urls.length : 0;
+  const styleCount = Array.isArray(context.style_image_urls) ? context.style_image_urls.length : 0;
+  if (!structureCount && !styleCount) return context.prompt;
+  return [
+    "参考图说明：imageUrls 按顺序传入。前面的结构图用于锁定构图、镜头、空间关系、物体位置、场景内容和画布比例；后面的风格图只用于色块笔触、美术样式、色彩氛围、光影和质感。",
+    structureCount ? `前 ${structureCount} 张是渲染结构图，必须优先保持其结构、内容和物体位置。` : "",
+    styleCount ? `随后 ${styleCount} 张是风格参考图，只提取风格，不照搬其构图或对象。` : "",
+    context.basePrompt || context.prompt,
+  ].filter(Boolean).join("\n");
+}
+
+function qualityToRhartResolution(quality) {
+  const value = String(quality || "").trim().toLowerCase();
+  if (value === "4k" || value === "high" || value === "ultra") return "4k";
+  if (value === "2k" || value === "medium" || value === "hd") return "2k";
+  return "1k";
+}
+
+function sizeToAspectRatio(size) {
+  const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
+  const known = {
+    "1024x1024": "1:1",
+    "1536x864": "16:9",
+    "864x1536": "9:16",
+  };
+  if (known[value]) return known[value];
+  const match = value.match(/^(\d{3,5})x(\d{3,5})$/);
+  if (!match) return "16:9";
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "16:9";
+  return reduceAspectRatio(width, height);
+}
+
+function reduceAspectRatio(width, height) {
+  const divisor = greatestCommonDivisor(width, height);
+  const reducedWidth = Math.round(width / divisor);
+  const reducedHeight = Math.round(height / divisor);
+  const allowed = new Set(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"]);
+  const ratio = `${reducedWidth}:${reducedHeight}`;
+  if (allowed.has(ratio)) return ratio;
+  return width >= height ? "16:9" : "9:16";
+}
+
+function greatestCommonDivisor(a, b) {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
 }
 
 function buildAiHubMixSubmitBody(context) {
@@ -636,6 +712,26 @@ async function submitRhartImageTask(apiKey, body) {
       },
     };
   }
+  const imageUrls = await resolveRhartImageUrls(apiKey, body.sourceImageUrls || body.imageUrls || []);
+  if (!imageUrls.length) {
+    return {
+      ok: false,
+      status: 400,
+      payload: {
+        error: "RHarT G31 requires public imageUrls",
+        message: "RunningHub RHarT G31 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。",
+        rhartEndpoint: endpoint,
+        referenceCount: body.referenceCount || 0,
+        publicReferenceCount: imageUrls.length,
+      },
+    };
+  }
+  const submitBody = {
+    imageUrls,
+    prompt: body.prompt,
+    aspectRatio: body.aspectRatio || "16:9",
+    resolution: body.resolution || "1k",
+  };
   let response;
   try {
     response = await fetch(endpoint, {
@@ -644,7 +740,7 @@ async function submitRhartImageTask(apiKey, body) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(submitBody),
     });
   } catch (error) {
     return {
@@ -660,6 +756,13 @@ async function submitRhartImageTask(apiKey, body) {
   const payload = await readJson(response);
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     payload.rhartEndpoint = endpoint;
+    payload.rhartRequest = {
+      model: body.model,
+      aspectRatio: submitBody.aspectRatio,
+      resolution: submitBody.resolution,
+      referenceCount: body.referenceCount || 0,
+      publicReferenceCount: imageUrls.length,
+    };
   }
   const imageUrl = extractResultUrl(payload);
   const taskId = extractTaskId(payload);
@@ -668,6 +771,78 @@ async function submitRhartImageTask(apiKey, body) {
     status: response.status,
     payload,
   };
+}
+
+async function resolveRhartImageUrls(apiKey, imageUrls) {
+  const resolved = [];
+  const references = imageUrls.filter(isImageReferenceValue).slice(0, 14);
+  for (let index = 0; index < references.length; index += 1) {
+    const reference = references[index];
+    if (/^https?:\/\//i.test(reference)) {
+      resolved.push(reference);
+      continue;
+    }
+    if (/^data:image\//i.test(reference)) {
+      const uploaded = await uploadRhartImageReference(apiKey, reference, index);
+      if (uploaded) resolved.push(uploaded);
+    }
+  }
+  return uniqueValues(resolved).slice(0, 14);
+}
+
+async function uploadRhartImageReference(apiKey, imageUrl, index) {
+  const endpoint = buildRhartUploadEndpoint();
+  const { buffer, contentType } = await readImageBytes(imageUrl);
+  const extension = contentTypeToExtension(contentType);
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: contentType }), `reference-${index + 1}.${extension}`);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: form,
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(JSON.stringify({
+      error: "RHarT reference upload failed",
+      message: formatUpstreamError(payload),
+      rhartEndpoint: endpoint,
+      upstream: payload,
+    }));
+  }
+  return extractUploadUrl(payload);
+}
+
+function extractUploadUrl(payload) {
+  const candidates = [
+    payload?.data?.download_url,
+    payload?.data?.downloadUrl,
+    payload?.data?.url,
+    payload?.download_url,
+    payload?.downloadUrl,
+    payload?.url,
+  ];
+  return candidates.find((value) => typeof value === "string" && /^https?:\/\//i.test(value)) || findImageUrl(payload);
+}
+
+async function getRhartTask(apiKey, taskId) {
+  const endpoint = buildRhartQueryEndpoint();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ taskId }),
+  });
+  const payload = await readJson(response);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    payload.rhartEndpoint = endpoint;
+  }
+  if (!response.ok) throw new Error(JSON.stringify(payload));
+  return payload;
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
@@ -1299,7 +1474,12 @@ function getRayinReferenceLabel(submitBody, url, index) {
 }
 
 function getTaskStatus(payload) {
-  return payload?.data?.status || payload?.status || payload?.data?.state || payload?.state || "unknown";
+  const status = payload?.data?.status || payload?.status || payload?.data?.state || payload?.state || "unknown";
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "SUCCESS") return "completed";
+  if (normalized === "FAILED") return "failed";
+  if (normalized === "RUNNING" || normalized === "QUEUED") return normalized.toLowerCase();
+  return status;
 }
 
 async function readJson(response) {
@@ -1320,9 +1500,11 @@ async function readJson(response) {
 }
 
 function extractTaskId(payload) {
+  if (payload?.data?.taskId) return String(payload.data.taskId);
   if (payload?.data?.task_id) return String(payload.data.task_id);
   if (payload?.data?.task_no) return String(payload.data.task_no);
   if (payload?.data?.id) return String(payload.data.id);
+  if (payload?.taskId) return String(payload.taskId);
   if (payload?.task?.id) return String(payload.task.id);
   if (payload?.task?.task_id) return String(payload.task.task_id);
   if (payload?.task?.task_no) return String(payload.task.task_no);
@@ -1373,6 +1555,10 @@ function extractResultUrl(payload) {
     data?.image,
     data?.url,
     data?.image_url,
+    data?.results,
+    data?.results?.[0]?.url,
+    data?.results?.[0]?.image_url,
+    data?.results?.[0]?.file_url,
     Array.isArray(data) ? data[0]?.url : null,
     Array.isArray(data) ? data[0]?.image_url : null,
     Array.isArray(data) ? data[0]?.b64_json : null,
@@ -1385,6 +1571,10 @@ function extractResultUrl(payload) {
     payload?.image,
     payload?.url,
     payload?.image_url,
+    payload?.results,
+    payload?.results?.[0]?.url,
+    payload?.results?.[0]?.image_url,
+    payload?.results?.[0]?.file_url,
   ];
 
   if (Array.isArray(data?.result?.images)) {
@@ -1398,6 +1588,18 @@ function extractResultUrl(payload) {
   }
   if (Array.isArray(payload?.images)) {
     candidates.push(payload.images[0]?.url, payload.images[0]?.image_url, payload.images[0]?.b64_json);
+  }
+  if (Array.isArray(data?.outputs)) {
+    candidates.push(data.outputs[0]?.url, data.outputs[0]?.image_url, data.outputs[0]?.file_url, data.outputs[0]?.b64_json);
+  }
+  if (Array.isArray(payload?.outputs)) {
+    candidates.push(payload.outputs[0]?.url, payload.outputs[0]?.image_url, payload.outputs[0]?.file_url, payload.outputs[0]?.b64_json);
+  }
+  if (Array.isArray(data?.files)) {
+    candidates.push(data.files[0]?.url, data.files[0]?.image_url, data.files[0]?.file_url);
+  }
+  if (Array.isArray(payload?.files)) {
+    candidates.push(payload.files[0]?.url, payload.files[0]?.image_url, payload.files[0]?.file_url);
   }
   if (Array.isArray(data?.assets)) {
     const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
@@ -1442,6 +1644,10 @@ function findImageUrl(value, seen = new Set()) {
     "output_url",
     "result_url",
     "file_url",
+    "fileUrl",
+    "results",
+    "outputs",
+    "files",
     "b64_json",
     "base64",
     "image",
