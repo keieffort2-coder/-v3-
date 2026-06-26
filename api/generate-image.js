@@ -835,12 +835,13 @@ async function submitRhartImageTask(apiKey, body) {
   const resolvedReferences = await resolveRhartImageUrls(apiKey, body.sourceImageUrls || body.imageUrls || []);
   const imageUrls = resolvedReferences.urls;
   if (!imageUrls.length) {
+    const uploadSummary = formatRhartUploadAttempts(resolvedReferences.uploadAttempts);
     return {
       ok: false,
       status: 400,
       payload: {
         error: "RHarT requires public imageUrls",
-        message: "RunningHub RHarT 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。",
+        message: `RunningHub RHarT 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。${uploadSummary ? ` 上传摘要：${uploadSummary}` : ""}`,
         rhartEndpoint: endpoint,
         referenceCount: body.referenceCount || 0,
         publicReferenceCount: imageUrls.length,
@@ -1027,6 +1028,20 @@ function summarizeRhartUploadPayload(status, endpoint, payload) {
     url: extractUploadUrl(payload),
     filename: extractRunningHubFilename(payload),
   };
+}
+
+function formatRhartUploadAttempts(attempts) {
+  if (!Array.isArray(attempts) || !attempts.length) return "";
+  return attempts.map((attempt, index) => {
+    const parts = [`#${index + 1}`];
+    if (attempt.status) parts.push(`status=${attempt.status}`);
+    if (attempt.code !== undefined && attempt.code !== null) parts.push(`code=${attempt.code}`);
+    if (attempt.message) parts.push(`message=${String(attempt.message).slice(0, 120)}`);
+    if (attempt.url) parts.push(`url=${attempt.url}`);
+    if (attempt.filename) parts.push(`filename=${attempt.filename}`);
+    if (Array.isArray(attempt.dataKeys) && attempt.dataKeys.length) parts.push(`dataKeys=${attempt.dataKeys.join("|")}`);
+    return parts.join(", ");
+  }).join("; ");
 }
 
 async function getRhartTask(apiKey, taskId) {
