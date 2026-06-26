@@ -350,6 +350,14 @@ module.exports = async function handler(req, res) {
         const rawImageUrl = extractRhartResultUrl(rhartResult.payload);
         const imageUrl = buildImageProxyUrl(req, rawImageUrl);
         const taskId = extractTaskId(rhartResult.payload);
+        if (!imageUrl && !taskId) {
+          res.status(502).json({
+            error: "RHarT G31 submit returned no taskId or image",
+            message: "RHarT G31 上游已响应，但响应里没有可识别的 taskId 或图片地址。",
+            upstream: rhartResult.payload,
+          });
+          return;
+        }
         res.status(imageUrl ? 200 : 202).json({
           taskId,
           status: imageUrl ? "completed" : "submitted",
@@ -823,7 +831,7 @@ async function submitRhartImageTask(apiKey, body) {
       publicReferenceCount: imageUrls.length,
     };
   }
-  const imageUrl = extractResultUrl(payload);
+  const imageUrl = extractRhartResultUrl(payload);
   const taskId = extractTaskId(payload);
   return {
     ok: response.ok && Boolean(imageUrl || taskId),
@@ -1608,18 +1616,50 @@ function extractTaskId(payload) {
   if (payload?.data?.taskId) return String(payload.data.taskId);
   if (payload?.data?.task_id) return String(payload.data.task_id);
   if (payload?.data?.task_no) return String(payload.data.task_no);
+  if (payload?.data?.taskNo) return String(payload.data.taskNo);
   if (payload?.data?.id) return String(payload.data.id);
   if (payload?.taskId) return String(payload.taskId);
+  if (payload?.taskNo) return String(payload.taskNo);
   if (payload?.task?.id) return String(payload.task.id);
   if (payload?.task?.task_id) return String(payload.task.task_id);
   if (payload?.task?.task_no) return String(payload.task.task_no);
+  if (payload?.task?.taskId) return String(payload.task.taskId);
+  if (payload?.task?.taskNo) return String(payload.task.taskNo);
   if (payload?.task_no) return String(payload.task_no);
   if (payload?.task_id) return String(payload.task_id);
   if (payload?.id) return String(payload.id);
   if (Array.isArray(payload?.data) && payload.data[0]?.task_id) {
     return String(payload.data[0].task_id);
   }
+  return findTaskId(payload);
+}
+
+function findTaskId(value, seen = new Set()) {
+  if (!value || typeof value !== "object") return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+  const keys = ["taskId", "task_id", "taskNo", "task_no"];
+  for (const key of keys) {
+    const candidate = value[key];
+    if (candidate !== undefined && candidate !== null && isLikelyTaskId(candidate)) return String(candidate);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findTaskId(item, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const item of Object.values(value)) {
+    const found = findTaskId(item, seen);
+    if (found) return found;
+  }
   return null;
+}
+
+function isLikelyTaskId(value) {
+  const text = String(value || "").trim();
+  return text.length >= 8 && /^[A-Za-z0-9_-]+$/.test(text);
 }
 
 function findTaskById(payload, taskId, seen = new Set()) {
