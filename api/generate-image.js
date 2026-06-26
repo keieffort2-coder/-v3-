@@ -240,9 +240,11 @@ module.exports = async function handler(req, res) {
         payload: imageUrl ? undefined : taskPayload,
       });
     } catch (error) {
+      const upstream = parseErrorPayload(error);
       res.status(500).json({
         error: "Task polling failed",
-        message: error instanceof Error ? error.message : String(error),
+        message: upstream ? formatUpstreamError(upstream) : error instanceof Error ? error.message : String(error),
+        upstream,
       });
     }
     return;
@@ -896,20 +898,42 @@ function extractUploadUrl(payload) {
 
 async function getRhartTask(apiKey, taskId) {
   const endpoint = buildRhartQueryEndpoint();
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ taskId }),
-  });
-  const payload = await readJson(response);
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.rhartEndpoint = endpoint;
+  const attempts = [
+    { taskId },
+    { apiKey, taskId },
+    { task_id: taskId },
+    { api_key: apiKey, taskId },
+  ];
+  let lastPayload = null;
+  let lastStatus = 0;
+  for (const body of attempts) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await readJson(response);
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      payload.rhartEndpoint = endpoint;
+      payload.rhartQueryShape = Object.keys(body).join(",");
+    }
+    if (response.ok && !isRhartQueryRejected(payload)) return payload;
+    lastPayload = payload;
+    lastStatus = response.status;
   }
-  if (!response.ok) throw new Error(JSON.stringify(payload));
-  return payload;
+  const error = new Error(JSON.stringify(lastPayload || { error: "RHarT query failed", status: lastStatus }));
+  error.status = lastStatus;
+  throw error;
+}
+
+function isRhartQueryRejected(payload) {
+  const code = String(payload?.errorCode || payload?.code || payload?.data?.errorCode || payload?.data?.code || "").trim();
+  const status = String(payload?.status || payload?.data?.status || "").toUpperCase();
+  if (status === "FAILED") return false;
+  return Boolean(code && code !== "0");
 }
 
 function shouldTryRayinAi(provider, model, apiKey) {
@@ -946,7 +970,7 @@ function findMessage(value, seen = new Set()) {
   if (typeof value === "string") return value;
   if (typeof value !== "object" || seen.has(value)) return "";
   seen.add(value);
-  const direct = value.message || value.error || value.detail || value.code;
+  const direct = value.errorMessage || value.failedReason || value.promptTips || value.message || value.error || value.detail || value.code || value.errorCode;
   const directMessage = findMessage(direct, seen);
   if (directMessage) return directMessage;
   for (const item of Object.values(value)) {
@@ -954,6 +978,16 @@ function findMessage(value, seen = new Set()) {
     if (nested) return nested;
   }
   return "";
+}
+
+function parseErrorPayload(error) {
+  const text = error instanceof Error ? error.message : String(error || "");
+  if (!text || !/^[\[{]/.test(text.trim())) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeModel(model) {
