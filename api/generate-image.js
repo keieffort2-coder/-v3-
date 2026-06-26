@@ -1,8 +1,8 @@
 const API_BASE = "https://api.apimart.ai/v1";
 
-const RHART_MODEL = "rhart-image-n-g31-flash-official/image-to-image";
+const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_DEFAULT_BASE = "https://www.runninghub.cn";
-const RHART_ENDPOINT_PATH = "/openapi/v2/rhart-image-n-g31-flash-official/image-to-image";
+const RHART_ENDPOINT_PATH = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
 const RHART_QUERY_PATH = "/openapi/v2/query";
 const RHART_UPLOAD_PATH = "/openapi/v2/media/upload/binary";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
@@ -84,6 +84,7 @@ function getRhartBaseUrl() {
   const withoutName = raw.replace(/^(?:RHART(?:_G31)?|RUNNINGHUB)_BASE_URL\s*=\s*/i, "");
   const value = withoutName
     .replace(/\/openapi\/v2\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
+    .replace(/\/openapi\/v2\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
     .replace(/\/openapi\/v2\/query\/?$/i, "")
     .replace(/\/v1\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
     .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
@@ -943,6 +944,9 @@ function shouldTryRayinAi(provider, model, apiKey) {
 
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
+  if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(message)) {
+    return "RHarT G31 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。已默认使用低价渠道版 endpoint；如果仍看到此错误，请确认 RunningHub 后台选择的是企业级共享 key，或确认该低价渠道 API 已对你的 key 开通。";
+  }
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
   }
