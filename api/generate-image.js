@@ -601,7 +601,7 @@ async function submitAiHubMixImageEdit(apiKey, baseUrl, body) {
   ].filter(isImageReferenceValue)).slice(0, 8);
   for (let index = 0; index < images.length; index += 1) {
     const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
-    form.append("image", blob, filename);
+    form.append(images.length > 1 ? "image[]" : "image", blob, filename);
   }
   return fetch(`${baseUrl}/images/edits`, {
     method: "POST",
