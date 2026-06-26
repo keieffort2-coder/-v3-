@@ -2,7 +2,11 @@ const API_BASE = "https://api.apimart.ai/v1";
 
 const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
 const RHART_DEFAULT_BASE = "https://www.runninghub.cn";
-const RHART_ENDPOINT_PATH = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
+const RHART_ENDPOINT_PATHS = {
+  "rhart-image-n-g31-flash/image-to-image": "/openapi/v2/rhart-image-n-g31-flash/image-to-image",
+  "rhart-image-g-2/image-to-image": "/openapi/v2/rhart-image-g-2/image-to-image",
+  "rhart-image-g-2-official/image-to-image": "/openapi/v2/rhart-image-g-2-official/image-to-image",
+};
 const RHART_QUERY_PATH = "/openapi/v2/query";
 const RHART_UPLOAD_PATH = "/openapi/v2/media/upload/binary";
 const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
@@ -85,9 +89,13 @@ function getRhartBaseUrl() {
   const value = withoutName
     .replace(/\/openapi\/v2\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
     .replace(/\/openapi\/v2\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
+    .replace(/\/openapi\/v2\/rhart-image-g-2\/image-to-image\/?$/i, "")
+    .replace(/\/openapi\/v2\/rhart-image-g-2-official\/image-to-image\/?$/i, "")
     .replace(/\/openapi\/v2\/query\/?$/i, "")
     .replace(/\/v1\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
     .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
+    .replace(/\/rhart-image-g-2\/image-to-image\/?$/i, "")
+    .replace(/\/rhart-image-g-2-official\/image-to-image\/?$/i, "")
     .replace(/\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
     .replace(/\/openapi\/v2\/?$/i, "")
     .replace(/\/v1\/?$/i, "")
@@ -96,12 +104,13 @@ function getRhartBaseUrl() {
   return RHART_DEFAULT_BASE;
 }
 
-function buildRhartEndpoint() {
+function buildRhartEndpoint(model = RHART_MODEL) {
   const explicit = sanitizeHeaderValue(process.env.RHART_ENDPOINT_URL || process.env.RHART_G31_ENDPOINT_URL);
   if (/^https?:\/\//i.test(explicit)) return explicit;
   if (explicit) return explicit;
   const base = getRhartBaseUrl();
-  return new URL(RHART_ENDPOINT_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
+  const endpointPath = RHART_ENDPOINT_PATHS[normalizeRhartModel(model)] || RHART_ENDPOINT_PATHS[RHART_MODEL];
+  return new URL(endpointPath.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
 }
 
 function buildRhartQueryEndpoint() {
@@ -355,8 +364,8 @@ module.exports = async function handler(req, res) {
         const taskId = extractTaskId(rhartResult.payload);
         if (!imageUrl && !taskId) {
           res.status(502).json({
-            error: "RHarT G31 submit returned no taskId or image",
-            message: "RHarT G31 上游已响应，但响应里没有可识别的 taskId 或图片地址。",
+            error: "RHarT submit returned no taskId or image",
+            message: "RHarT 上游已响应，但响应里没有可识别的 taskId 或图片地址。",
             upstream: rhartResult.payload,
           });
           return;
@@ -374,7 +383,7 @@ module.exports = async function handler(req, res) {
       }
 
       res.status(rhartResult.status || 502).json({
-        error: "RHarT G31 submit failed",
+        error: "RHarT submit failed",
         message: formatUpstreamError(rhartResult.payload),
         upstream: rhartResult.payload,
         request: {
@@ -385,7 +394,7 @@ module.exports = async function handler(req, res) {
           resolution: rhartSubmitBody.resolution,
           referenceCount: rhartSubmitBody.referenceCount || 0,
           publicReferenceCount: rhartSubmitBody.publicReferenceCount || 0,
-          rhartEndpoint: rhartResult.payload?.rhartEndpoint || buildRhartEndpoint(),
+          rhartEndpoint: rhartResult.payload?.rhartEndpoint || buildRhartEndpoint(rhartSubmitBody.model),
           rhartKeyHint: getKeyHint(rhartKey),
         },
       });
@@ -496,9 +505,20 @@ module.exports = async function handler(req, res) {
 function normalizeProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
   if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
-  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
+  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image" || provider === "rhart-image-g-2/image-to-image" || provider === "rhart-image-g-2-official/image-to-image") return "rhart";
   if (provider === "rayinai" || provider === "rayincode") return "rayinai";
   return "apimart";
+}
+
+function normalizeRhartModel(value) {
+  const model = String(value || "").trim().replace(/^\/+/, "");
+  if (model === "rhart-image-g-2/image-to-image" || model === "rhart-g2" || model === "g-2" || model === "g2") {
+    return "rhart-image-g-2/image-to-image";
+  }
+  if (model === "rhart-image-g-2-official/image-to-image" || model === "rhart-g2-official" || model === "g-2-official" || model === "g2-official") {
+    return "rhart-image-g-2-official/image-to-image";
+  }
+  return RHART_MODEL;
 }
 
 function isImageReferenceValue(value) {
@@ -510,7 +530,8 @@ function uniqueValues(values) {
 }
 
 function buildImageRequestContext(body) {
-  const model = normalizeModel(body.model);
+  const provider = normalizeProvider(body.provider);
+  const model = provider === "rhart" ? normalizeRhartModel(body.model) : normalizeModel(body.model);
   const basePrompt = String(body.prompt || "");
   const references = Array.isArray(body.imageDataUrls)
     ? body.imageDataUrls
@@ -770,7 +791,7 @@ async function imageReferenceToBlob(value, filename) {
 }
 
 async function submitRhartImageTask(apiKey, body) {
-  const endpoint = buildRhartEndpoint();
+  const endpoint = buildRhartEndpoint(body.model);
   if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
     return {
       ok: false,
@@ -778,8 +799,8 @@ async function submitRhartImageTask(apiKey, body) {
       payload: {
         error: "RHART_ENDPOINT_URL / RHART_BASE_URL is invalid",
         message: endpoint
-          ? `RHarT G31 是独立生成后端，但当前 endpoint 不是完整 URL：${endpoint}。请把 RHART_ENDPOINT_URL 配成 https:// 开头的完整接口地址。`
-          : "RHarT G31 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
+          ? `RHarT 是独立生成后端，但当前 endpoint 不是完整 URL：${endpoint}。请把 RHART_ENDPOINT_URL 配成 https:// 开头的完整接口地址。`
+          : "RHarT 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
         rhartEndpoint: endpoint || "",
       },
     };
@@ -790,8 +811,8 @@ async function submitRhartImageTask(apiKey, body) {
       ok: false,
       status: 400,
       payload: {
-        error: "RHarT G31 requires public imageUrls",
-        message: "RunningHub RHarT G31 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。",
+        error: "RHarT requires public imageUrls",
+        message: "RunningHub RHarT 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。",
         rhartEndpoint: endpoint,
         referenceCount: body.referenceCount || 0,
         publicReferenceCount: imageUrls.length,
@@ -819,7 +840,7 @@ async function submitRhartImageTask(apiKey, body) {
       ok: false,
       status: 500,
       payload: {
-        error: "RHarT G31 request failed before reaching upstream",
+        error: "RHarT request failed before reaching upstream",
         message: error instanceof Error ? error.message : String(error),
         rhartEndpoint: endpoint,
       },
@@ -947,7 +968,7 @@ function shouldTryRayinAi(provider, model, apiKey) {
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
   if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(message)) {
-    return "RHarT G31 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。已默认使用低价渠道版 endpoint；如果仍看到此错误，请确认 RunningHub 后台选择的是企业级共享 key，或确认该低价渠道 API 已对你的 key 开通。";
+    return "RHarT 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。请确认 RunningHub 后台 key 权限，或确认所选 RHarT 接口已对你的 key 开通。";
   }
   if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
     return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
@@ -1013,7 +1034,12 @@ function normalizeRayinModel(model) {
 function normalizeQuality(quality, model) {
   const value = String(quality || "").trim().toLowerCase();
   if (!value) return "";
-  if (model === "rhart-image-n-g31-flash/image-to-image") return "";
+  if (isRhartModel(model)) {
+    if (value === "low" || value === "standard" || value === "1k") return "1k";
+    if (value === "medium" || value === "hd" || value === "2k") return "2k";
+    if (value === "high" || value === "4k" || value === "ultra") return "4k";
+    return value;
+  }
   if (model === "gpt-image-2") {
     if (value === "low" || value === "standard" || value === "1k") return "1k";
     if (value === "medium" || value === "hd" || value === "2k") return "2k";
@@ -1023,6 +1049,12 @@ function normalizeQuality(quality, model) {
   if (value === "medium") return "standard";
   if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
   return "high";
+}
+
+function isRhartModel(model) {
+  const value = String(model || "").trim().replace(/^\/+/, "");
+  return Object.prototype.hasOwnProperty.call(RHART_ENDPOINT_PATHS, value)
+    || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(value);
 }
 
 function shouldSendSize(model) {
