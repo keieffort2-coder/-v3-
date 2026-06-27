@@ -55,6 +55,9 @@ const IMAGE_OPTIONS_KEY = "aivideobox.imageOptions.v1";
 const WORKSPACE_SIDE_STATE_KEY = "aivideobox.workspaceSidebarsHidden.v1";
 const IMAGE_DB_NAME = "aivideobox.images";
 const IMAGE_STORE_NAME = "images";
+const PROJECT_DB_NAME = "aivideobox.projects.db";
+const PROJECT_STORE_NAME = "projects";
+const PROJECT_BACKUP_STORE_NAME = "projectBackups";
 const typeLabels = { text: "Text", image: "Image", video: "Video", folder: "Folder" };
 const typeNames = { text: "文本", image: "图片", video: "视频", folder: "文件夹" };
 const roleLabels = {
@@ -133,6 +136,7 @@ let imageOptions = {
 };
 let isRestoring = false;
 let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
+const projectDataCache = new Map();
 
 connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
 ensureMemoryUi();
@@ -1093,8 +1097,9 @@ function upsertProject(name) {
 
 function createFreshProject(baseName) {
   const name = uniqueProjectName(baseName);
-  localStorage.removeItem(projectKey(name));
-  localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [] }));
+  rememberProjectData(name, { nodes: [], connections: [] });
+  storeProjectRecord(name, { nodes: [], connections: [] });
+  writeProjectStub(name);
   addProjectCard(name);
   updateProjectGridState();
   saveProjectList();
@@ -1167,11 +1172,25 @@ function renameProject(oldName, nextName, card) {
   if (!oldName || !nextName || oldName === nextName) return;
   const oldKey = projectKey(oldName);
   const nextKey = projectKey(nextName);
-  const savedProject = localStorage.getItem(oldKey);
-  if (savedProject !== null) {
-    localStorage.setItem(nextKey, savedProject);
-    localStorage.removeItem(oldKey);
+  const cached = readCachedProjectData(oldName, null);
+  const cachedBackup = projectDataCache.get(`${oldName}::backup`);
+  if (cached) {
+    rememberProjectData(nextName, cached);
+    storeProjectRecord(nextName, cached);
+    projectDataCache.delete(oldName);
+    deleteProjectRecord(oldName);
+    writeProjectStub(nextName);
+  } else {
+    const savedProject = localStorage.getItem(oldKey);
+    if (savedProject !== null) localStorage.setItem(nextKey, savedProject);
   }
+  if (cachedBackup) {
+    projectDataCache.set(`${nextName}::backup`, cachedBackup);
+    projectDataCache.delete(`${oldName}::backup`);
+    storeProjectRecord(nextName, cachedBackup, PROJECT_BACKUP_STORE_NAME);
+  }
+  localStorage.removeItem(oldKey);
+  localStorage.removeItem(`${oldKey}.backup`);
   card.dataset.project = nextName;
   const openButton = card.querySelector("[data-open-project]");
   if (openButton) openButton.dataset.openProject = nextName;
@@ -1216,8 +1235,8 @@ function addProjectCard(name, date = new Date().toLocaleDateString("zh-CN"), cod
 }
 
 function getProjectStorageStats(name) {
-  const data = readJson(projectKey(name), null);
-  const backup = readJson(`${projectKey(name)}.backup`, null);
+  const data = readCachedProjectData(name, null);
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
   return {
     nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
     backupNodes: Array.isArray(backup?.nodes) ? backup.nodes.length : 0,
@@ -1225,7 +1244,7 @@ function getProjectStorageStats(name) {
 }
 
 function getProjectThumbnailFromLocal(name) {
-  return getProjectThumbnail(readJson(projectKey(name), null));
+  return getProjectThumbnail(readCachedProjectData(name, null));
 }
 
 function getProjectThumbnail(data) {
@@ -1279,6 +1298,7 @@ function loadProjectList() {
   const projects = repairProjectListFromStorage(Array.isArray(saved) ? saved : []);
   projectGrid.innerHTML = "";
   projects.reverse().forEach((project) => addProjectCard(project.name, project.date, project.code));
+  migrateProjectsToIndexedDB(projects);
   try {
     localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects.slice().reverse()));
   } catch (error) {
@@ -1304,6 +1324,28 @@ function repairProjectListFromStorage(projects) {
     });
   }
   return [...byName.values()].filter((project) => project?.name);
+}
+
+async function migrateProjectsToIndexedDB(projects = []) {
+  for (const project of projects) {
+    const name = project?.name;
+    if (!name) continue;
+    const key = projectKey(name);
+    const localData = readJson(key, null);
+    if (localData && Array.isArray(localData.nodes) && !localData.storedInIndexedDB) {
+      rememberProjectData(name, localData);
+      await storeProjectRecord(name, localData);
+      writeProjectStub(name);
+    }
+    const localBackup = readJson(`${key}.backup`, null);
+    if (localBackup && Array.isArray(localBackup.nodes)) {
+      projectDataCache.set(`${name}::backup`, localBackup);
+      await storeProjectRecord(name, localBackup, PROJECT_BACKUP_STORE_NAME);
+      try {
+        localStorage.removeItem(`${key}.backup`);
+      } catch {}
+    }
+  }
 }
 
 
@@ -1334,7 +1376,10 @@ function deleteProject(name) {
   const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
   const code = card?.dataset.code;
   card?.remove();
+  projectDataCache.delete(name);
+  deleteProjectRecord(name);
   localStorage.removeItem(projectKey(name));
+  localStorage.removeItem(`${projectKey(name)}.backup`);
   if (code) removeProjectCode(code);
   if (currentProject === name) {
     currentProject = "";
@@ -1357,7 +1402,7 @@ async function publishProjectCode(card) {
   writeProjectCodeIndex(index);
   saveProjectList();
 
-  const data = readJson(projectKey(name), null);
+  const data = readCachedProjectData(name, null);
   if (hasProjectNodes(data)) {
     const shareableData = await ensureSharedProjectImages(name, data);
     await saveSharedProject(code, name, shareableData || data);
@@ -1370,7 +1415,8 @@ async function cloneProjectByCode(code) {
   if (!normalized) return "";
   const localName = findProjectNameByCode(normalized);
   let sourceName = localName;
-  let sourceData = localName ? localStorage.getItem(projectKey(localName)) : "";
+  let sourceProjectData = localName ? readCachedProjectData(localName, null) || rememberProjectData(localName, await loadProjectRecord(localName)) : null;
+  let sourceData = sourceProjectData ? JSON.stringify(sourceProjectData) : "";
 
   if (!sourceData) {
     const shared = await loadSharedProjectByCode(normalized);
@@ -1380,7 +1426,13 @@ async function cloneProjectByCode(code) {
   }
 
   const name = uniqueProjectName(`${sourceName} 副本`);
-  localStorage.setItem(projectKey(name), sourceData);
+  if (sourceProjectData) {
+    rememberProjectData(name, sourceProjectData);
+    storeProjectRecord(name, sourceProjectData);
+    writeProjectStub(name);
+  } else {
+    localStorage.setItem(projectKey(name), sourceData);
+  }
   addProjectCard(name, new Date().toLocaleDateString("zh-CN"));
   updateProjectGridState();
   saveProjectList();
@@ -1453,7 +1505,7 @@ function updateProjectGridState() {
   projectGrid?.classList.toggle("empty", !projectGrid.querySelector(".project-card"));
 }
 
-function openProject(name) {
+async function openProject(name) {
   if (currentProject) saveCurrentProject();
   activeFolder = null;
   ensureMemoryUi();
@@ -1464,6 +1516,8 @@ function openProject(name) {
     card.classList.toggle("active", card.dataset.project === name);
   });
   clearCanvas();
+  const stored = await loadProjectRecord(name);
+  if (stored) rememberProjectData(name, stored);
   restoreProject(name);
   syncFolderUi();
   showPage("workspace");
@@ -3583,18 +3637,16 @@ function exitFolder() {
 
 function saveActiveFolder() {
   if (!activeFolder || !currentProject) return;
-  const root = readJson(projectKey(currentProject), { nodes: [], connections: [], memories: conversationMemories });
+  const root = readCachedProjectData(currentProject, { nodes: [], connections: [], memories: conversationMemories });
   const folder = root.nodes?.find((node) => node.id === activeFolder.id);
   if (!folder) return;
   const data = serializeCanvasData();
   folder.folderNodes = data.nodes;
   folder.folderConnections = data.connections;
   folder.content = `文件夹内包含 ${data.nodes.length} 个节点。`;
-  try {
-    localStorage.setItem(projectKey(currentProject), JSON.stringify(root));
-  } catch (error) {
-    console.error("Folder save failed", error);
-  }
+  rememberProjectData(currentProject, root);
+  storeProjectRecord(currentProject, root);
+  writeProjectStub(currentProject);
 }
 
 function syncFolderUi() {
@@ -5238,41 +5290,12 @@ function saveCurrentProject(options = {}) {
 }
 
 function writeProjectDataWithFallback(name, data, options = {}) {
-  const key = projectKey(name);
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-    return true;
-  } catch (error) {
-    console.error("Project save failed", error);
-  }
-
-  const slim = slimProjectDataForLocalStorage(data);
-  const existing = localStorage.getItem(key);
-  try {
-    localStorage.removeItem(key);
-    localStorage.setItem(key, JSON.stringify(slim));
-    notifyProjectSaveIssue("本地存储空间不足，已自动精简图片历史后保存。", options);
-    return true;
-  } catch (retryError) {
-    console.error("Project slim save failed", retryError);
-    cleanupLocalStorageForProjectSave(name);
-    try {
-      localStorage.setItem(key, JSON.stringify(slim));
-      notifyProjectSaveIssue("本地存储空间不足，已清理旧备份并精简保存。", options);
-      return true;
-    } catch (cleanupRetryError) {
-      console.error("Project slim save after cleanup failed", cleanupRetryError);
-    }
-    if (existing) {
-      try {
-        localStorage.setItem(key, existing);
-      } catch (restoreError) {
-        console.error("Project restore after slim save failed", restoreError);
-      }
-    }
-    notifyProjectSaveIssue("项目保存失败：浏览器本地存储空间不足。请导出备份或清理旧项目/图片历史。", options);
-    return false;
-  }
+  rememberProjectData(name, data);
+  storeProjectRecord(name, data).then((saved) => {
+    if (!saved) notifyProjectSaveIssue("项目保存失败：IndexedDB 写入失败。请导出备份后刷新重试。", options);
+  });
+  writeProjectStub(name);
+  return true;
 }
 
 function cleanupLocalStorageForProjectSave(activeName) {
@@ -5337,8 +5360,8 @@ function notifyProjectSaveIssue(message, options = {}) {
 function shouldSaveProjectData(name, nextData) {
   const nextNodeCount = Array.isArray(nextData?.nodes) ? nextData.nodes.length : 0;
   if (nextNodeCount > 0) return true;
-  const existing = readJson(projectKey(name), null);
-  const backup = readJson(`${projectKey(name)}.backup`, null);
+  const existing = readCachedProjectData(name, null);
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
   const existingNodeCount = Array.isArray(existing?.nodes) ? existing.nodes.length : 0;
   const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
   if (existingNodeCount > 0 || backupNodeCount > 0) {
@@ -5547,17 +5570,15 @@ function restoreProject(name) {
 }
 
 function readProjectDataWithBackup(name) {
-  const data = readJson(projectKey(name), { nodes: [], connections: [], memories: [] });
-  const backup = readJson(`${projectKey(name)}.backup`, null);
+  const data = readCachedProjectData(name, { nodes: [], connections: [], memories: [] });
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
   const dataNodeCount = Array.isArray(data?.nodes) ? data.nodes.length : 0;
   const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
   if (dataNodeCount === 0 && backupNodeCount > 0) {
-    try {
-      localStorage.setItem(projectKey(name), JSON.stringify(backup));
-      console.warn(`Restored ${name} from local backup`);
-    } catch (error) {
-      console.warn("Project backup restore save failed", error);
-    }
+    rememberProjectData(name, backup);
+    storeProjectRecord(name, backup);
+    writeProjectStub(name);
+    console.warn(`Restored ${name} from local backup`);
     return backup;
   }
   return data;
@@ -5566,7 +5587,7 @@ function readProjectDataWithBackup(name) {
 async function loadSharedProject(name) { return; }
 
 function shouldUseSharedProjectData(name, sharedData) {
-  const localData = readJson(projectKey(name), null);
+  const localData = readCachedProjectData(name, null);
   const localNodeCount = Array.isArray(localData?.nodes) ? localData.nodes.length : 0;
   const sharedNodeCount = Array.isArray(sharedData?.nodes) ? sharedData.nodes.length : 0;
   if (localNodeCount > 0 && sharedNodeCount < localNodeCount) {
@@ -5578,11 +5599,8 @@ function shouldUseSharedProjectData(name, sharedData) {
 
 function backupProjectData(name, data) {
   if (!name || !data || !Array.isArray(data.nodes) || !data.nodes.length) return;
-  try {
-    localStorage.setItem(`${projectKey(name)}.backup`, JSON.stringify(data));
-  } catch (error) {
-    console.warn("Project backup failed", error);
-  }
+  projectDataCache.set(`${name}::backup`, data);
+  storeProjectRecord(name, data, PROJECT_BACKUP_STORE_NAME);
 }
 
 function restoreCanvasData(data) {
@@ -5935,6 +5953,89 @@ function projectKey(name) {
 
 function projectImageKey(projectName, nodeId, slot) {
   return `${projectName}::${nodeId}::${slot}`;
+}
+
+function openProjectDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PROJECT_STORE_NAME)) db.createObjectStore(PROJECT_STORE_NAME);
+      if (!db.objectStoreNames.contains(PROJECT_BACKUP_STORE_NAME)) db.createObjectStore(PROJECT_BACKUP_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function storeProjectRecord(name, data, storeName = PROJECT_STORE_NAME) {
+  if (!name || !data) return false;
+  try {
+    const db = await openProjectDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).put(data, name);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+    return true;
+  } catch (error) {
+    console.error("Project IndexedDB save failed", error);
+    return false;
+  }
+}
+
+async function loadProjectRecord(name, storeName = PROJECT_STORE_NAME) {
+  if (!name) return null;
+  try {
+    const db = await openProjectDb();
+    const value = await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readonly");
+      const request = transaction.objectStore(storeName).get(name);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  } catch (error) {
+    console.error("Project IndexedDB load failed", error);
+    return null;
+  }
+}
+
+async function deleteProjectRecord(name) {
+  if (!name) return;
+  try {
+    const db = await openProjectDb();
+    await Promise.all([PROJECT_STORE_NAME, PROJECT_BACKUP_STORE_NAME].map((storeName) => new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).delete(name);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    })));
+    db.close();
+  } catch (error) {
+    console.error("Project IndexedDB delete failed", error);
+  }
+}
+
+function rememberProjectData(name, data) {
+  if (!name || !data) return data;
+  projectDataCache.set(name, data);
+  return data;
+}
+
+function readCachedProjectData(name, fallback = null) {
+  return projectDataCache.get(name) || readJson(projectKey(name), fallback);
+}
+
+function writeProjectStub(name) {
+  try {
+    localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [], storedInIndexedDB: true }));
+  } catch (error) {
+    console.warn("Project stub save failed", error);
+  }
 }
 
 function openImageDb() {
