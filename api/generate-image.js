@@ -594,8 +594,8 @@ function buildRayinSubmitBody(context) {
     prompt: context.prompt,
     n: context.n || 1,
     output_format: context.output_format || "png",
-    quality: "auto",
-    size: "auto",
+    quality: context.quality || "auto",
+    size: context.size || "auto",
   };
   if (Array.isArray(context.image_urls) && context.image_urls.length) next.image_urls = context.image_urls.slice(0, 16);
   if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
@@ -1376,12 +1376,15 @@ async function getRayinTask(apiKey, taskId) {
 
 async function submitRayinImageTask(apiKey, submitBody) {
   const baseUrl = getRayinAiBaseUrl();
-  const headers = {
+  const baseHeaders = {
     Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
     Accept: "*/*",
     Host: new URL(baseUrl).host,
     Connection: "keep-alive",
+  };
+  const jsonHeaders = {
+    ...baseHeaders,
+    "Content-Type": "application/json",
   };
   const imageBody = {
     ...submitBody,
@@ -1394,7 +1397,17 @@ async function submitRayinImageTask(apiKey, submitBody) {
     && Array.isArray(rayinImageBody.style_image_urls)
     && rayinImageBody.style_image_urls.length > 0;
   const models = getRayinAiResponsesModels();
-  const attempts = models.flatMap((model) => {
+  const attempts = [];
+  for (const model of models) {
+    const editsAttempt = hasReferences
+      ? {
+          url: `${baseUrl}/v1/images/edits`,
+          body: await buildRayinImagesEditForm(rayinImageBody, model),
+          debugBody: buildRayinImagesEditDebugBody(rayinImageBody, model),
+          type: "images-edits",
+          multipart: true,
+        }
+      : null;
     const responsesAttempt = {
       url: `${baseUrl}/v1/responses`,
       body: buildRayinResponsesBody(rayinImageBody, model),
@@ -1410,23 +1423,34 @@ async function submitRayinImageTask(apiKey, submitBody) {
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
     };
-    if (hasStructureStyleReferences) return [responsesAttempt];
-    return hasReferences ? [responsesAttempt, imagesAttempt, compatImagesAttempt] : [imagesAttempt, responsesAttempt, compatImagesAttempt];
-  });
+    if (hasStructureStyleReferences) {
+      attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
+    } else if (hasReferences) {
+      attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
+    } else {
+      attempts.push(imagesAttempt, responsesAttempt, compatImagesAttempt);
+    }
+  }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
-    const { response, payload } = await fetchRayinWithRetry(attempt.url, headers, attempt.body);
+    const { response, payload } = await fetchRayinWithRetry(
+      attempt.url,
+      attempt.multipart ? baseHeaders : jsonHeaders,
+      attempt.body,
+      { multipart: attempt.multipart },
+    );
     const imageUrl = extractResultUrl(payload);
     const taskId = extractTaskId(payload);
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const debugBody = attempt.debugBody || attempt.body || {};
       payload.rayinRequest = {
-        model: attempt.body?.model,
+        model: debugBody?.model,
         type: attempt.type,
-        hasTools: Array.isArray(attempt.body?.tools),
-        contentTypes: attempt.body?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
-        referenceCount: getRayinAttemptReferenceCount(attempt.body),
-        inputRoles: getRayinAttemptInputRoles(attempt.body),
+        hasTools: Array.isArray(debugBody?.tools),
+        contentTypes: debugBody?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
+        referenceCount: getRayinAttemptReferenceCount(debugBody),
+        inputRoles: getRayinAttemptInputRoles(debugBody),
       };
     }
     if (response.ok && (imageUrl || taskId)) {
@@ -1438,7 +1462,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    const canFallbackToNextRayinEndpoint = attempt.type === "responses" && [400, 404, 405, 422].includes(response.status);
+    const canFallbackToNextRayinEndpoint = ["images-edits", "responses"].includes(attempt.type) && [400, 404, 405, 415, 422].includes(response.status);
     if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
   }
 
@@ -1453,7 +1477,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
   return last;
 }
 
-async function fetchRayinWithRetry(url, headers, body) {
+async function fetchRayinWithRetry(url, headers, body, options = {}) {
   let response;
   let payload;
   const maxAttempts = getRayinAiRetryAttempts();
@@ -1461,7 +1485,7 @@ async function fetchRayinWithRetry(url, headers, body) {
     response = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(body),
+      body: options.multipart ? body : JSON.stringify(body),
     });
     payload = await readJson(response);
     const message = formatUpstreamError(payload);
@@ -1611,31 +1635,59 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
   });
   const body = {
     model,
-    tools: [{ type: "image_generation", quality: "auto", size: "auto", output_format: submitBody.output_format || "png" }],
+    tools: [{
+      type: "image_generation",
+      quality: submitBody.quality || "auto",
+      size: submitBody.size || "auto",
+      output_format: submitBody.output_format || "png",
+    }],
     input: [{ type: "message", role: "user", content }],
-    quality: "auto",
-    size: "auto",
+    quality: submitBody.quality || "auto",
+    size: submitBody.size || "auto",
     output_format: submitBody.output_format || "png",
   };
   return body;
 }
 
+async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesModel()) {
+  const form = new FormData();
+  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
+  form.set("model", model);
+  form.set("prompt", buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length));
+  form.set("n", String(submitBody.n || 1));
+  form.set("size", submitBody.size || "auto");
+  form.set("quality", submitBody.quality || "auto");
+  form.set("output_format", submitBody.output_format || "png");
+  form.set("provider", "gpt");
+  form.set("operation", images.length ? "edit" : "generation");
+  for (let index = 0; index < images.length; index += 1) {
+    const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
+    form.append(images.length > 1 ? "image[]" : "image", blob, filename);
+  }
+  return form;
+}
+
+function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesModel()) {
+  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
+  return {
+    model,
+    prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
+    size: submitBody.size || "auto",
+    quality: submitBody.quality || "auto",
+    output_format: submitBody.output_format || "png",
+    image_urls: images,
+    input_images: images.map(toRayinTaskInputImage),
+    inputs: buildRayinRoleInputs(submitBody, images),
+  };
+}
+
 function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), options = {}) {
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
-  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-  const structureAnchor = structureUrls[0] || editUrls[0] || imageUrls[0] || "";
-  const structureOnlyUrls = uniqueArray([
-    ...structureUrls,
-    ...editUrls,
-    structureAnchor,
-  ].filter(isImageReferenceValue));
-  const roleInputUrls = uniqueArray([
-    ...structureOnlyUrls,
-    ...styleUrls,
-    ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
-  ]).slice(0, 16);
+  const imageUrls = getRayinImageUrls(submitBody);
+  const structureUrls = getRayinStructureUrls(submitBody);
+  const styleUrls = getRayinStyleUrls(submitBody);
+  const structureAnchor = getRayinStructureAnchor(submitBody);
+  const structureOnlyUrls = getRayinStructureOnlyUrls(submitBody);
+  const roleInputUrls = getRayinOrderedImageUrls(submitBody).slice(0, 16);
   if (options.minimal) {
     return {
       key_id: getRayinAiKeyId(),
@@ -1643,10 +1695,10 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), op
       operation: roleInputUrls.length ? "edit" : "generation",
       model,
       prompt: submitBody.prompt,
-      size: "auto",
+      size: submitBody.size || "auto",
       aspect_ratio: "auto",
       base_resolution: "auto",
-      quality: "auto",
+      quality: submitBody.quality || "auto",
       output_format: submitBody.output_format || "png",
       moderation: "auto",
       n: 1,
@@ -1663,8 +1715,8 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), op
     aspect_ratio: "auto",
     base_resolution: "auto",
     moderation: "auto",
-    quality: "auto",
-    size: "auto",
+    quality: submitBody.quality || "auto",
+    size: submitBody.size || "auto",
   };
   if (submitBody.output_format) body.output_format = submitBody.output_format;
   if (structureOnlyUrls.length) {
@@ -1724,6 +1776,46 @@ function buildRayinRoleInputs(submitBody, imageUrls) {
     }
     return item;
   });
+}
+
+function getRayinImageUrls(submitBody) {
+  return Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
+}
+
+function getRayinStructureUrls(submitBody) {
+  return Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+}
+
+function getRayinStyleUrls(submitBody) {
+  return Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+}
+
+function getRayinEditUrls(submitBody) {
+  return Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
+}
+
+function getRayinStructureAnchor(submitBody) {
+  return getRayinStructureUrls(submitBody)[0] || getRayinEditUrls(submitBody)[0] || getRayinImageUrls(submitBody)[0] || "";
+}
+
+function getRayinStructureOnlyUrls(submitBody) {
+  const structureAnchor = getRayinStructureAnchor(submitBody);
+  return uniqueArray([
+    ...getRayinStructureUrls(submitBody),
+    ...getRayinEditUrls(submitBody),
+    structureAnchor,
+  ].filter(isImageReferenceValue));
+}
+
+function getRayinOrderedImageUrls(submitBody) {
+  const imageUrls = getRayinImageUrls(submitBody);
+  const styleUrls = getRayinStyleUrls(submitBody);
+  const structureOnlyUrls = getRayinStructureOnlyUrls(submitBody);
+  return uniqueArray([
+    ...structureOnlyUrls,
+    ...styleUrls,
+    ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
+  ]).slice(0, 16);
 }
 
 function getRayinImageRole(submitBody, url, index = 0) {
