@@ -531,6 +531,7 @@ function uniqueValues(values) {
 
 function buildImageRequestContext(body) {
   const provider = normalizeProvider(body.provider);
+  const rawModel = String(body.model || "");
   const model = provider === "rhart" ? normalizeRhartModel(body.model) : normalizeModel(body.model);
   const basePrompt = String(body.prompt || "");
   const references = Array.isArray(body.imageDataUrls)
@@ -557,6 +558,7 @@ function buildImageRequestContext(body) {
   const normalizedSize = shouldSendSize(model) ? normalizeSize(body.size, model) : "";
   return {
     model,
+    rayin_route: provider === "rayinai" ? normalizeRayinRoute(rawModel) : "",
     prompt: referencePrompt,
     basePrompt,
     n: 1,
@@ -591,6 +593,7 @@ function buildApiMartSubmitBody(context) {
 function buildRayinSubmitBody(context) {
   const next = {
     model: context.model,
+    rayin_route: context.rayin_route || "bunana",
     prompt: context.prompt,
     n: context.n || 1,
     output_format: context.output_format || "png",
@@ -1145,8 +1148,58 @@ function normalizeModel(model) {
   const value = String(model || "").trim();
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
+  if (value.toLowerCase().startsWith("rayinai:")) return "gpt-image-2";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
   return "gpt-image-2-official";
+}
+
+function normalizeRayinRoute(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (["rayinai:mumu", "mumu", "木木"].includes(raw)) return "mumu";
+  if (["rayinai:tiancai", "tiancai", "甜菜"].includes(raw)) return "tiancai";
+  if (["rayinai:kaihua", "kaihua", "开花"].includes(raw)) return "kaihua";
+  if (["rayinai:haizhe", "haizhe", "海蜇"].includes(raw)) return "haizhe";
+  return "bunana";
+}
+
+function getRayinRoutePath(route) {
+  const normalized = normalizeRayinRoute(route);
+  const envMap = {
+    bunana: process.env.RAYINAI_BUNANA_PATH,
+    mumu: process.env.RAYINAI_MUMU_PATH,
+    tiancai: process.env.RAYINAI_TIANCAI_PATH,
+    kaihua: process.env.RAYINAI_KAIHUA_PATH,
+    haizhe: process.env.RAYINAI_HAIZHE_PATH,
+  };
+  const configured = sanitizeHeaderValue(envMap[normalized] || "");
+  if (configured) return configured;
+  if (normalized === "bunana") return "";
+  return "";
+}
+
+function getRayinRouteLabel(route) {
+  return {
+    bunana: "不拿拿",
+    mumu: "木木",
+    tiancai: "甜菜",
+    kaihua: "开花",
+    haizhe: "海蜇",
+  }[normalizeRayinRoute(route)] || "不拿拿";
+}
+
+function getRayinRouteEnvName(route) {
+  return {
+    mumu: "RAYINAI_MUMU_PATH",
+    tiancai: "RAYINAI_TIANCAI_PATH",
+    kaihua: "RAYINAI_KAIHUA_PATH",
+    haizhe: "RAYINAI_HAIZHE_PATH",
+  }[normalizeRayinRoute(route)] || "RAYINAI_BUNANA_PATH";
+}
+
+function buildRayinRouteUrl(baseUrl, route, fallbackPath) {
+  const path = getRayinRoutePath(route) || fallbackPath;
+  if (/^https?:\/\//i.test(path)) return path;
+  return new URL(String(path || fallbackPath).replace(/^\/+/, ""), `${baseUrl.replace(/\/+$/, "")}/`).toString();
 }
 
 function normalizeRayinModel(model) {
@@ -1391,6 +1444,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
     model: normalizeRayinModel(submitBody.model),
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
+  const rayinRoute = normalizeRayinRoute(submitBody.rayin_route || submitBody.model);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const hasStructureStyleReferences = Array.isArray(rayinImageBody.structure_image_urls)
     && rayinImageBody.structure_image_urls.length > 0
@@ -1398,6 +1452,17 @@ async function submitRayinImageTask(apiKey, submitBody) {
     && rayinImageBody.style_image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = [];
+  if (rayinRoute !== "bunana" && !getRayinRoutePath(rayinRoute)) {
+    return {
+      ok: false,
+      status: 500,
+      payload: {
+        error: "RayinAI route path is not configured",
+        message: `RayinAI ${getRayinRouteLabel(rayinRoute)} 还没有配置 API 路径。请在 Vercel 环境变量中配置 ${getRayinRouteEnvName(rayinRoute)}。`,
+        rayinRoute,
+      },
+    };
+  }
   for (const model of models) {
     const editsAttempt = hasReferences
       ? {
@@ -1423,7 +1488,22 @@ async function submitRayinImageTask(apiKey, submitBody) {
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
     };
-    if (hasStructureStyleReferences) {
+    if (rayinRoute !== "bunana") {
+      const routePath = getRayinRoutePath(rayinRoute);
+      const routeUrl = buildRayinRouteUrl(baseUrl, rayinRoute, hasReferences ? "/v1/images/edits" : "/v1/images/generations");
+      const routeBody = hasReferences
+        ? await buildRayinImagesEditForm(rayinImageBody, model)
+        : buildRayinImagesBody(rayinImageBody, model, { minimal: true });
+      attempts.push({
+        url: routeUrl,
+        body: routeBody,
+        debugBody: hasReferences ? buildRayinImagesEditDebugBody(rayinImageBody, model) : routeBody,
+        type: `route-${rayinRoute}`,
+        multipart: hasReferences,
+        route: rayinRoute,
+        configuredPath: routePath || "",
+      });
+    } else if (hasStructureStyleReferences) {
       attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
     } else if (hasReferences) {
       attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
@@ -1447,6 +1527,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
       payload.rayinRequest = {
         model: debugBody?.model,
         type: attempt.type,
+        route: attempt.route || rayinRoute,
+        configuredPath: attempt.configuredPath || "",
         hasTools: Array.isArray(debugBody?.tools),
         contentTypes: debugBody?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
         referenceCount: getRayinAttemptReferenceCount(debugBody),
