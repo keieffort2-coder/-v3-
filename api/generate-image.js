@@ -1570,8 +1570,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    const canFallbackToNextRayinEndpoint = ["images-edits", "responses"].includes(attempt.type) && [400, 404, 405, 415, 422].includes(response.status);
-    if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504].includes(response.status) && !retryableRayinMessage) return last;
+    const canFallbackToNextRayinEndpoint = ["images-edits", "responses"].includes(attempt.type) && [400, 404, 405, 415, 422, 524].includes(response.status);
+    if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
   }
 
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
@@ -1597,7 +1597,7 @@ async function fetchRayinWithRetry(url, headers, body, options = {}) {
     });
     payload = await readJson(response);
     const message = formatUpstreamError(payload);
-    if (![429, 502, 503, 504].includes(response.status) || attempt === maxAttempts - 1) return { response, payload };
+    if (![429, 502, 503, 504, 524].includes(response.status) || attempt === maxAttempts - 1) return { response, payload };
     if (!isRetryableRayinMessage(message)) {
       return { response, payload };
     }
@@ -1632,7 +1632,7 @@ function getRayinAttemptInputRoles(body) {
 }
 
 function isRetryableRayinMessage(message) {
-  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用/i.test(String(message || ""));
+  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout|timeout occurred|a timeout occurred|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用/i.test(String(message || ""));
 }
 
 function normalizeRayinImageBody(body) {
