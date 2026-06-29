@@ -89,7 +89,7 @@ const rhartImageModelOptions = [
   ["rhart-image-g-2/image-to-image", "RHarT G-2 低价"],
   ["rhart-image-g-2-official/image-to-image", "RHarT G-2 官方"],
 ];
-const rayinAiImageModelOptions = [
+const rayinAiProviderOptions = [
   ["rayinai:bunana", "RayinAI 不拿拿"],
   ["rayinai:mumu", "RayinAI 木木"],
   ["rayinai:tiancai", "RayinAI 甜菜"],
@@ -2683,7 +2683,6 @@ function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (isRhartImageModel(model)) return normalizeRhartImageModel(model);
-  if (isRayinAiImageModel(model)) return normalizeRayinAiImageModel(model);
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
@@ -2700,7 +2699,7 @@ function isRhartImageModel(value) {
   return model.startsWith("rhart-image-") || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(model);
 }
 
-function normalizeRayinAiImageModel(value) {
+function normalizeRayinAiProvider(value) {
   const model = String(value || "").trim().toLowerCase();
   if (["rayinai:mumu", "mumu", "木木"].includes(model)) return "rayinai:mumu";
   if (["rayinai:tiancai", "tiancai", "甜菜"].includes(model)) return "rayinai:tiancai";
@@ -2709,7 +2708,7 @@ function normalizeRayinAiImageModel(value) {
   return "rayinai:bunana";
 }
 
-function isRayinAiImageModel(value) {
+function isRayinAiProvider(value) {
   const model = String(value || "").trim().toLowerCase();
   return model.startsWith("rayinai:") || ["bunana", "不拿拿", "mumu", "木木", "tiancai", "甜菜", "kaihua", "开花", "haizhe", "海蜇"].includes(model);
 }
@@ -2717,34 +2716,31 @@ function isRayinAiImageModel(value) {
 function getDefaultImageModelForProvider(provider) {
   const normalizedProvider = normalizeImageProvider(provider);
   if (normalizedProvider === "rhart") return "rhart-image-n-g31-flash/image-to-image";
-  if (normalizedProvider === "rayinai") return "rayinai:bunana";
   return "gpt-image-2-official";
 }
 
 function normalizeProviderImageModel(provider, value) {
   const normalizedProvider = normalizeImageProvider(provider);
   if (normalizedProvider === "rhart") return normalizeRhartImageModel(value);
-  if (normalizedProvider === "rayinai") return normalizeRayinAiImageModel(value);
   return normalizeImageModel(value || "gpt-image-2-official");
 }
 
 function getGenerationModelForProvider(provider, value) {
-  const normalizedProvider = normalizeImageProvider(provider);
-  if (normalizedProvider === "rayinai") return normalizeRayinAiImageModel(value);
-  return normalizeProviderImageModel(normalizedProvider, value);
+  return normalizeProviderImageModel(provider, value);
 }
 
 function normalizeImageProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
   if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
   if (provider === "rhart" || provider === "rhart-g31" || isRhartImageModel(provider)) return "rhart";
-  return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
+  if (provider === "rayinai" || provider === "rayincode" || isRayinAiProvider(provider)) return normalizeRayinAiProvider(provider);
+  return "apimart";
 }
 
 function getImageProviderLabel(value) {
   const provider = normalizeImageProvider(value);
   if (provider === "aihubmix") return "AIHubMix";
-  if (provider === "rayinai") return "RayinAI";
+  if (isRayinAiProvider(provider)) return rayinAiProviderOptions.find(([key]) => key === provider)?.[1] || "RayinAI";
   if (provider === "rhart") return "RHarT";
   return "ApiMart";
 }
@@ -2755,7 +2751,7 @@ function ensureImageProviderOptions() {
     ["apimart", "ApiMart"],
     ["aihubmix", "AIHubMix"],
     ["rhart", "RHarT"],
-    ["rayinai", "RayinAI"],
+    ...rayinAiProviderOptions,
   ];
   const current = normalizeImageProvider(imageProviderSelect.value || "apimart");
   options.forEach(([value, label], index) => {
@@ -2771,11 +2767,7 @@ function ensureImageProviderOptions() {
 function setImageModelOptionsForProvider(provider, selectedValue = "") {
   if (!imageModelSelect) return;
   const normalizedProvider = normalizeImageProvider(provider);
-  const options = normalizedProvider === "rhart"
-    ? rhartImageModelOptions
-    : normalizedProvider === "rayinai"
-      ? rayinAiImageModelOptions
-      : defaultImageModelOptions;
+  const options = normalizedProvider === "rhart" ? rhartImageModelOptions : defaultImageModelOptions;
   imageModelSelect.innerHTML = options
     .map(([value, label], index) => `<option value="${value}"${index === 0 ? " selected" : ""}>${label}</option>`)
     .join("");
@@ -2788,7 +2780,7 @@ function setImageModelOptionsForProvider(provider, selectedValue = "") {
 
 function normalizeImageQualityForModel(quality, model) {
   const value = String(quality || "high").trim().toLowerCase();
-  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model) || isRayinAiImageModel(model)) {
+  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model)) {
     if (value === "low" || value === "standard" || value === "1k") return "1k";
     if (value === "medium" || value === "hd" || value === "2k") return "2k";
     if (value === "high" || value === "4k") return "4k";
@@ -2806,7 +2798,7 @@ function shouldSendImageSize(model) {
 
 function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
   const normalized = normalizeImageModel(model);
-  if (normalized !== "gpt-image-2" && !isRhartImageModel(model) && !isRayinAiImageModel(model)) return prompt;
+  if (normalized !== "gpt-image-2" && !isRhartImageModel(model)) return prompt;
   const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
   return [
     prompt,
@@ -3072,7 +3064,7 @@ function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
 
 function getProviderRoleImages(roleImages, provider = "apimart") {
   const normalizedProvider = normalizeImageProvider(provider);
-  if (!["apimart", "rayinai", "aihubmix", "rhart"].includes(normalizedProvider)) return roleImages;
+  if (!["apimart", "aihubmix", "rhart"].includes(normalizedProvider) && !isRayinAiProvider(normalizedProvider)) return roleImages;
   return {
     ...roleImages,
     editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
