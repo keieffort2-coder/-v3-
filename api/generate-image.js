@@ -38,12 +38,36 @@ function getAiHubMixModel(model) {
   return normalizeModel(model) === "gemini-3-pro-image-preview" ? "gemini-3-pro-image-preview" : "gpt-image-2";
 }
 
-function getRayinAiKey() {
-  return sanitizeBearerToken(process.env.RAYINAI_API_KEY);
+function getRayinRouteEnvPrefix(route) {
+  return {
+    bunana: "RAYINAI_BUNANA",
+    mumu: "RAYINAI_MUMU",
+    tiancai: "RAYINAI_TIANCAI",
+    kaihua: "RAYINAI_KAIHUA",
+    haizhe: "RAYINAI_HAIZHE",
+  }[normalizeRayinRoute(route)] || "RAYINAI_BUNANA";
 }
 
-function getRayinAiKeyId() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_KEY_ID || "8634");
+function getRayinAiKey(route = "bunana") {
+  const normalized = normalizeRayinRoute(route);
+  const prefix = getRayinRouteEnvPrefix(normalized);
+  return sanitizeBearerToken(
+    process.env[`${prefix}_API_KEY`]
+    || process.env[`${prefix}_TOKEN`]
+    || (normalized === "bunana" ? process.env.RAYINAI_API_KEY : "")
+    || process.env.RAYINAI_API_KEY,
+  );
+}
+
+function getRayinAiKeyId(route = "bunana") {
+  const normalized = normalizeRayinRoute(route);
+  const prefix = getRayinRouteEnvPrefix(normalized);
+  const raw = sanitizeHeaderValue(
+    process.env[`${prefix}_KEY_ID`]
+    || (normalized === "bunana" ? process.env.RAYINAI_KEY_ID : "")
+    || process.env.RAYINAI_KEY_ID
+    || "8634",
+  );
   const id = Number(raw);
   return Number.isFinite(id) && id > 0 ? id : 8634;
 }
@@ -67,9 +91,16 @@ function getRayinAiRetryAttempts() {
   return Math.min(10, Math.max(1, Math.floor(value)));
 }
 
-function getRayinAiBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RAYINAI_BASE_URL || RAYINAI_DEFAULT_BASE);
-  const withoutName = raw.replace(/^RAYINAI_BASE_URL\s*=\s*/i, "");
+function getRayinAiBaseUrl(route = "bunana") {
+  const normalizedRoute = normalizeRayinRoute(route);
+  const prefix = getRayinRouteEnvPrefix(normalizedRoute);
+  const raw = sanitizeHeaderValue(
+    process.env[`${prefix}_BASE_URL`]
+    || (normalizedRoute === "bunana" ? process.env.RAYINAI_BASE_URL : "")
+    || process.env.RAYINAI_BASE_URL
+    || RAYINAI_DEFAULT_BASE,
+  );
+  const withoutName = raw.replace(/^(?:RAYINAI(?:_[A-Z]+)?_BASE_URL)\s*=\s*/i, "");
   const normalized = withoutName
     .replace(/\/v1\/responses\/?$/i, "")
     .replace(/\/responses\/?$/i, "")
@@ -199,9 +230,11 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const provider = normalizeProvider(req.query?.provider);
+    const rawProvider = String(req.query?.provider || "");
+    const provider = normalizeProvider(rawProvider);
+    const rayinRoute = provider === "rayinai" ? normalizeRayinRoute(rawProvider) : "bunana";
     const apiKey = provider === "rayinai"
-      ? getRayinAiKey()
+      ? getRayinAiKey(rayinRoute)
       : provider === "rhart"
         ? getRhartKey()
         : provider === "aihubmix"
@@ -229,7 +262,7 @@ module.exports = async function handler(req, res) {
 
     try {
       const taskPayload = provider === "rayinai"
-        ? await getRayinTask(apiKey, String(taskId))
+          ? await getRayinTask(apiKey, String(taskId), rayinRoute)
         : provider === "rhart"
           ? await getRhartTask(apiKey, String(taskId))
           : await getTask(apiKey, String(taskId));
@@ -281,9 +314,10 @@ module.exports = async function handler(req, res) {
   } = req.body || {};
   const apiKey = getApiMartKey(apimartChannel);
   const rhartKey = getRhartKey();
-  const rayinAiKey = getRayinAiKey();
   const aiHubMixKey = getAiHubMixKey();
   const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
+  const preferredRayinRoute = preferredProvider === "rayinai" ? normalizeRayinRoute(provider || model) : "bunana";
+  const rayinAiKey = getRayinAiKey(preferredRayinRoute);
   if (preferredProvider === "aihubmix" && !aiHubMixKey) {
     res.status(500).json({
       error: "AIHUBMIX_API_KEY is not configured",
@@ -323,6 +357,7 @@ module.exports = async function handler(req, res) {
       referenceBindings,
       model,
       size,
+      provider,
     });
 
     if (preferredProvider === "aihubmix") {
@@ -432,8 +467,9 @@ module.exports = async function handler(req, res) {
             quality: rayinSubmitBody.quality,
             output_format: rayinSubmitBody.output_format,
             rayinEndpoint,
-            rayinBaseUrl: getRayinAiBaseUrl(),
+            rayinBaseUrl: getRayinAiBaseUrl(rayinSubmitBody.rayin_route),
             rayinApiKeyConfigured: Boolean(rayinAiKey),
+            rayinRoute: rayinSubmitBody.rayin_route,
             referenceCount: rayinSubmitBody.image_urls?.length || 0,
             upstreamStatus: rayinResult.status || "",
             upstreamMessage: findMessage(rayinResult.payload),
@@ -506,7 +542,7 @@ function normalizeProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
   if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
   if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image" || provider === "rhart-image-g-2/image-to-image" || provider === "rhart-image-g-2-official/image-to-image") return "rhart";
-  if (provider === "rayinai" || provider === "rayincode") return "rayinai";
+  if (provider === "rayinai" || provider === "rayincode" || provider.startsWith("rayinai:")) return "rayinai";
   return "apimart";
 }
 
@@ -532,6 +568,7 @@ function uniqueValues(values) {
 function buildImageRequestContext(body) {
   const provider = normalizeProvider(body.provider);
   const rawModel = String(body.model || "");
+  const rawProvider = String(body.provider || "");
   const model = provider === "rhart" ? normalizeRhartModel(body.model) : normalizeModel(body.model);
   const basePrompt = String(body.prompt || "");
   const references = Array.isArray(body.imageDataUrls)
@@ -558,7 +595,7 @@ function buildImageRequestContext(body) {
   const normalizedSize = shouldSendSize(model) ? normalizeSize(body.size, model) : "";
   return {
     model,
-    rayin_route: provider === "rayinai" ? normalizeRayinRoute(rawModel) : "",
+    rayin_route: provider === "rayinai" ? normalizeRayinRoute(rawProvider || rawModel) : "",
     prompt: referencePrompt,
     basePrompt,
     n: 1,
@@ -1396,8 +1433,8 @@ async function getTask(apiKey, taskId) {
   return payload;
 }
 
-async function getRayinTask(apiKey, taskId) {
-  const baseUrl = getRayinAiBaseUrl();
+async function getRayinTask(apiKey, taskId, route = "bunana") {
+  const baseUrl = getRayinAiBaseUrl(route);
   const endpoints = [
     `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
     `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
@@ -1428,7 +1465,8 @@ async function getRayinTask(apiKey, taskId) {
 }
 
 async function submitRayinImageTask(apiKey, submitBody) {
-  const baseUrl = getRayinAiBaseUrl();
+  const rayinRoute = normalizeRayinRoute(submitBody.rayin_route || submitBody.model);
+  const baseUrl = getRayinAiBaseUrl(rayinRoute);
   const baseHeaders = {
     Authorization: `Bearer ${apiKey}`,
     Accept: "*/*",
@@ -1444,7 +1482,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
     model: normalizeRayinModel(submitBody.model),
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
-  const rayinRoute = normalizeRayinRoute(submitBody.rayin_route || submitBody.model);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const hasStructureStyleReferences = Array.isArray(rayinImageBody.structure_image_urls)
     && rayinImageBody.structure_image_urls.length > 0
@@ -1452,17 +1489,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
     && rayinImageBody.style_image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = [];
-  if (rayinRoute !== "bunana" && !getRayinRoutePath(rayinRoute)) {
-    return {
-      ok: false,
-      status: 500,
-      payload: {
-        error: "RayinAI route path is not configured",
-        message: `RayinAI ${getRayinRouteLabel(rayinRoute)} 还没有配置 API 路径。请在 Vercel 环境变量中配置 ${getRayinRouteEnvName(rayinRoute)}。`,
-        rayinRoute,
-      },
-    };
-  }
   for (const model of models) {
     const editsAttempt = hasReferences
       ? {
@@ -1488,7 +1514,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
       body: buildRayinImagesBody(rayinImageBody, model),
       type: "images",
     };
-    if (rayinRoute !== "bunana") {
+    if (rayinRoute !== "bunana" && getRayinRoutePath(rayinRoute)) {
       const routePath = getRayinRoutePath(rayinRoute);
       const routeUrl = buildRayinRouteUrl(baseUrl, rayinRoute, hasReferences ? "/v1/images/edits" : "/v1/images/generations");
       const routeBody = hasReferences
@@ -1617,6 +1643,7 @@ function normalizeRayinImageBody(body) {
   const references = uniqueArray([...structureUrls, ...styleUrls, ...editUrls, ...imageUrls]).slice(0, 16);
   const next = {
     model: normalizeRayinModel(body.model),
+    rayin_route: normalizeRayinRoute(body.rayin_route || body.model),
     prompt: body.prompt,
     n: 1,
     provider: "gpt",
@@ -1772,7 +1799,7 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), op
   const roleInputUrls = getRayinOrderedImageUrls(submitBody).slice(0, 16);
   if (options.minimal) {
     return {
-      key_id: getRayinAiKeyId(),
+      key_id: getRayinAiKeyId(submitBody.rayin_route),
       provider: "gpt",
       operation: roleInputUrls.length ? "edit" : "generation",
       model,
@@ -1788,7 +1815,7 @@ function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), op
     };
   }
   const body = {
-    key_id: getRayinAiKeyId(),
+    key_id: getRayinAiKeyId(submitBody.rayin_route),
     provider: "gpt",
     operation: roleInputUrls.length ? "edit" : "generation",
     model,
