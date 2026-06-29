@@ -89,6 +89,13 @@ const rhartImageModelOptions = [
   ["rhart-image-g-2/image-to-image", "RHarT G-2 低价"],
   ["rhart-image-g-2-official/image-to-image", "RHarT G-2 官方"],
 ];
+const rayinAiImageModelOptions = [
+  ["rayinai:bunana", "RayinAI 不拿拿"],
+  ["rayinai:mumu", "RayinAI 木木"],
+  ["rayinai:tiancai", "RayinAI 甜菜"],
+  ["rayinai:kaihua", "RayinAI 开花"],
+  ["rayinai:haizhe", "RayinAI 海蜇"],
+];
 const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
   let value = index;
   for (let bit = 0; bit < 8; bit += 1) {
@@ -610,9 +617,7 @@ submitImageConfig?.addEventListener("click", () => {
   delete configNode.dataset.imageResolution;
   configNode.dataset.imageQuality = imageOptions.quality;
   configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || "apimart");
-  configNode.dataset.imageModel = configNode.dataset.imageProvider === "rhart"
-    ? normalizeRhartImageModel(imageModelSelect?.value)
-    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
+  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value);
   configNode.dataset.apimartChannel = "b";
   saveCurrentProject();
   runImageGeneration(configNode);
@@ -643,9 +648,7 @@ imageModelSelect?.addEventListener("change", () => {
     return;
   }
   const provider = normalizeImageProvider(configNode.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  configNode.dataset.imageModel = provider === "rhart"
-    ? normalizeRhartImageModel(imageModelSelect.value)
-    : normalizeImageModel(imageModelSelect.value || "gpt-image-2-official");
+  configNode.dataset.imageModel = normalizeProviderImageModel(provider, imageModelSelect.value);
   syncImageOptionsUi();
   saveCurrentProject();
 });
@@ -654,7 +657,7 @@ imageProviderSelect?.addEventListener("change", () => {
   if (!configNode || configNode.dataset.type !== "image") return;
   configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
   setImageModelOptionsForProvider(configNode.dataset.imageProvider, configNode.dataset.imageModel);
-  configNode.dataset.imageModel = imageModelSelect?.value || configNode.dataset.imageModel;
+  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value || configNode.dataset.imageModel);
   syncImageOptionsUi();
   saveCurrentProject();
 });
@@ -2458,8 +2461,8 @@ function openImageConfig(node) {
   if (imageProviderSelect) {
     imageProviderSelect.value = currentProvider;
   }
-  setImageModelOptionsForProvider(currentProvider, node.dataset.imageModel || (currentProvider === "rhart" ? "rhart-image-n-g31-flash/image-to-image" : "gpt-image-2-official"));
-  node.dataset.imageModel = imageModelSelect?.value || node.dataset.imageModel || "gpt-image-2-official";
+  setImageModelOptionsForProvider(currentProvider, node.dataset.imageModel || getDefaultImageModelForProvider(currentProvider));
+  node.dataset.imageModel = normalizeProviderImageModel(currentProvider, imageModelSelect?.value || node.dataset.imageModel);
   syncImageOptionsUi();
   renderConfigInputThumbnails(node);
   syncImageSubmitButton(node);
@@ -2496,9 +2499,7 @@ function syncImageOptionsSummary() {
     output: "输出图",
   }[imageOptions.imageRole] || "普通图片";
   const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = provider === "rhart"
-    ? normalizeRhartImageModel(configNode?.dataset.imageModel || imageModelSelect?.value)
-    : normalizeImageModel(configNode?.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const model = normalizeProviderImageModel(provider, configNode?.dataset.imageModel || imageModelSelect?.value);
   const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
   openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
 }
@@ -2522,11 +2523,9 @@ function syncImageQualityOptionLabels() {
   const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
   if (!qualityGrid) return;
   const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = provider === "rhart"
-    ? normalizeRhartImageModel(configNode?.dataset.imageModel || imageModelSelect?.value)
-    : configNode?.dataset.type === "image"
-      ? normalizeImageModel(configNode.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official")
-      : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
+  const model = configNode?.dataset.type === "image"
+    ? normalizeProviderImageModel(provider, configNode.dataset.imageModel || imageModelSelect?.value)
+    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
   const labels = model === "gpt-image-2" || isRhartImageModel(model)
     ? { low: "1k", medium: "2k", high: "4k" }
     : { low: "low", medium: "medium", high: "high" };
@@ -2684,6 +2683,7 @@ function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
   if (isRhartImageModel(model)) return normalizeRhartImageModel(model);
+  if (isRayinAiImageModel(model)) return normalizeRayinAiImageModel(model);
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
@@ -2698,6 +2698,40 @@ function normalizeRhartImageModel(value) {
 function isRhartImageModel(value) {
   const model = String(value || "").trim().replace(/^\/+/, "");
   return model.startsWith("rhart-image-") || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(model);
+}
+
+function normalizeRayinAiImageModel(value) {
+  const model = String(value || "").trim().toLowerCase();
+  if (["rayinai:mumu", "mumu", "木木"].includes(model)) return "rayinai:mumu";
+  if (["rayinai:tiancai", "tiancai", "甜菜"].includes(model)) return "rayinai:tiancai";
+  if (["rayinai:kaihua", "kaihua", "开花"].includes(model)) return "rayinai:kaihua";
+  if (["rayinai:haizhe", "haizhe", "海蜇"].includes(model)) return "rayinai:haizhe";
+  return "rayinai:bunana";
+}
+
+function isRayinAiImageModel(value) {
+  const model = String(value || "").trim().toLowerCase();
+  return model.startsWith("rayinai:") || ["bunana", "不拿拿", "mumu", "木木", "tiancai", "甜菜", "kaihua", "开花", "haizhe", "海蜇"].includes(model);
+}
+
+function getDefaultImageModelForProvider(provider) {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider === "rhart") return "rhart-image-n-g31-flash/image-to-image";
+  if (normalizedProvider === "rayinai") return "rayinai:bunana";
+  return "gpt-image-2-official";
+}
+
+function normalizeProviderImageModel(provider, value) {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider === "rhart") return normalizeRhartImageModel(value);
+  if (normalizedProvider === "rayinai") return normalizeRayinAiImageModel(value);
+  return normalizeImageModel(value || "gpt-image-2-official");
+}
+
+function getGenerationModelForProvider(provider, value) {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider === "rayinai") return normalizeRayinAiImageModel(value);
+  return normalizeProviderImageModel(normalizedProvider, value);
 }
 
 function normalizeImageProvider(value) {
@@ -2737,13 +2771,15 @@ function ensureImageProviderOptions() {
 function setImageModelOptionsForProvider(provider, selectedValue = "") {
   if (!imageModelSelect) return;
   const normalizedProvider = normalizeImageProvider(provider);
-  const options = normalizedProvider === "rhart" ? rhartImageModelOptions : defaultImageModelOptions;
+  const options = normalizedProvider === "rhart"
+    ? rhartImageModelOptions
+    : normalizedProvider === "rayinai"
+      ? rayinAiImageModelOptions
+      : defaultImageModelOptions;
   imageModelSelect.innerHTML = options
     .map(([value, label], index) => `<option value="${value}"${index === 0 ? " selected" : ""}>${label}</option>`)
     .join("");
-  const selected = normalizedProvider === "rhart"
-    ? normalizeRhartImageModel(selectedValue)
-    : normalizeImageModel(selectedValue || "gpt-image-2-official");
+  const selected = normalizeProviderImageModel(normalizedProvider, selectedValue || getDefaultImageModelForProvider(normalizedProvider));
   imageModelSelect.value = selected;
   if (imageModelSelect.value !== selected) {
     imageModelSelect.value = options[0]?.[0] || "";
@@ -2752,7 +2788,7 @@ function setImageModelOptionsForProvider(provider, selectedValue = "") {
 
 function normalizeImageQualityForModel(quality, model) {
   const value = String(quality || "high").trim().toLowerCase();
-  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model)) {
+  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model) || isRayinAiImageModel(model)) {
     if (value === "low" || value === "standard" || value === "1k") return "1k";
     if (value === "medium" || value === "hd" || value === "2k") return "2k";
     if (value === "high" || value === "4k") return "4k";
@@ -2770,7 +2806,7 @@ function shouldSendImageSize(model) {
 
 function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
   const normalized = normalizeImageModel(model);
-  if (normalized !== "gpt-image-2" && !isRhartImageModel(model)) return prompt;
+  if (normalized !== "gpt-image-2" && !isRhartImageModel(model) && !isRayinAiImageModel(model)) return prompt;
   const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
   return [
     prompt,
@@ -3805,9 +3841,7 @@ async function runImageGeneration(node) {
   const status = ensureNodeStatus(node);
   const referenceMode = node.dataset.referenceMode || "structureStyle";
   const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const selectedModel = selectedProvider === "rhart"
-    ? normalizeRhartImageModel(node.dataset.imageModel || imageModelSelect?.value)
-    : normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const selectedModel = getGenerationModelForProvider(selectedProvider, node.dataset.imageModel || imageModelSelect?.value);
   const roleImages = collectRoleReferenceImages(node);
   const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
   const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
