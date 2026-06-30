@@ -83,6 +83,9 @@ const defaultImageModelOptions = [
   ["gpt-image-2", "GPT图像2"],
   ["gpt-image-2-official", "gpt-image-2-官方"],
   ["gemini-3-pro-image-preview", "Nano Banana 2"],
+];
+const apiMartImageModelOptions = [
+  ...defaultImageModelOptions,
   ["midjourney", "Midjourney（ApiMart）"],
 ];
 const rhartImageModelOptions = [
@@ -2769,7 +2772,11 @@ function ensureImageProviderOptions() {
 function setImageModelOptionsForProvider(provider, selectedValue = "") {
   if (!imageModelSelect) return;
   const normalizedProvider = normalizeImageProvider(provider);
-  const options = normalizedProvider === "rhart" ? rhartImageModelOptions : defaultImageModelOptions;
+  const options = normalizedProvider === "rhart"
+    ? rhartImageModelOptions
+    : normalizedProvider === "apimart"
+      ? apiMartImageModelOptions
+      : defaultImageModelOptions;
   imageModelSelect.innerHTML = options
     .map(([value, label], index) => `<option value="${value}"${index === 0 ? " selected" : ""}>${label}</option>`)
     .join("");
