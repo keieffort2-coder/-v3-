@@ -387,16 +387,21 @@
       </div>
       <textarea id="imagePromptInput" placeholder="输入提示词描述..."></textarea>
       <div class="config-footer">
-        <select id="imageModelSelect">
-          <option value="gpt-image-2">GPT图像2</option>
-          <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
-          <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
-        </select>
         <select id="imageProviderSelect">
           <option value="apimart" selected>ApiMart</option>
           <option value="aihubmix">AIHubMix</option>
           <option value="rhart">RHarT</option>
-          <option value="rayinai">RayinAI</option>
+          <option value="rayinai:bunana">RayinAI 不拿拿</option>
+          <option value="rayinai:mumu">RayinAI 木木</option>
+          <option value="rayinai:tiancai">RayinAI 甜菜</option>
+          <option value="rayinai:kaihua">RayinAI 开花</option>
+          <option value="rayinai:haizhe">RayinAI 海蜇</option>
+        </select>
+        <select id="imageModelSelect">
+          <option value="gpt-image-2">GPT图像2</option>
+          <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
+          <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
+          <option value="midjourney">Midjourney（ApiMart）</option>
         </select>
         <button class="config-pill" type="button" id="openImageOptions">自定义 / 结构+风格 / 普通图 / 尺寸提示词优先，默认结构图 / high</button>
         <button class="config-submit" type="button" id="submitImageConfig">提交</button>
