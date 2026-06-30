@@ -83,6 +83,7 @@ const defaultImageModelOptions = [
   ["gpt-image-2", "GPT图像2"],
   ["gpt-image-2-official", "gpt-image-2-官方"],
   ["gemini-3-pro-image-preview", "Nano Banana 2"],
+  ["midjourney", "Midjourney（ApiMart）"],
 ];
 const rhartImageModelOptions = [
   ["rhart-image-n-g31-flash/image-to-image", "RHarT G31 低价"],
@@ -2682,6 +2683,7 @@ function loadImageOptions() {
 function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
+  if (/^(midjourney|mj)$/i.test(model)) return "midjourney";
   if (isRhartImageModel(model)) return normalizeRhartImageModel(model);
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
