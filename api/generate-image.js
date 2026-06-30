@@ -86,9 +86,15 @@ function getRayinAiResponsesModels() {
 }
 
 function getRayinAiRetryAttempts() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "6"));
-  if (!Number.isFinite(value)) return 6;
-  return Math.min(10, Math.max(1, Math.floor(value)));
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "2"));
+  if (!Number.isFinite(value)) return 2;
+  return Math.min(4, Math.max(1, Math.floor(value)));
+}
+
+function getRayinFetchTimeoutMs() {
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "45000"));
+  if (!Number.isFinite(value)) return 45000;
+  return Math.min(90000, Math.max(8000, Math.floor(value)));
 }
 
 function getRayinAiBaseUrl(route = "bunana") {
@@ -1184,6 +1190,7 @@ function parseErrorPayload(error) {
 function normalizeModel(model) {
   const value = String(model || "").trim();
   if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
+  if (/^(midjourney|mj)$/i.test(value)) return "midjourney";
   if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
   if (value.toLowerCase().startsWith("rayinai:")) return "gpt-image-2";
   if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
@@ -1590,12 +1597,21 @@ async function fetchRayinWithRetry(url, headers, body, options = {}) {
   let payload;
   const maxAttempts = getRayinAiRetryAttempts();
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: options.multipart ? body : JSON.stringify(body),
-    });
-    payload = await readJson(response);
+    try {
+      response = await fetchWithTimeout(url, {
+        method: "POST",
+        headers,
+        body: options.multipart ? body : JSON.stringify(body),
+      }, getRayinFetchTimeoutMs());
+      payload = await readJson(response);
+    } catch (error) {
+      payload = {
+        error: "RayinAI request timeout",
+        message: error instanceof Error ? error.message : String(error),
+        endpoint: url,
+      };
+      response = { status: 524, ok: false };
+    }
     const message = formatUpstreamError(payload);
     if (![429, 502, 503, 504, 524].includes(response.status) || attempt === maxAttempts - 1) return { response, payload };
     if (!isRetryableRayinMessage(message)) {
@@ -1606,8 +1622,21 @@ async function fetchRayinWithRetry(url, headers, body, options = {}) {
   return { response, payload };
 }
 
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function getRayinRetryDelay(attempt) {
-  const delays = [1500, 3000, 6000, 10000, 15000, 20000, 25000, 30000, 30000];
+  const delays = [800, 1600, 3000, 5000];
   return delays[Math.min(attempt, delays.length - 1)];
 }
 
