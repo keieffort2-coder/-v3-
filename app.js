@@ -1,566 +1,3432 @@
-const API_BASE = "https://api.apimart.ai/v1";
+const pages = document.querySelectorAll(".page");
+const appShell = document.querySelector(".app-shell");
+const navItems = document.querySelectorAll(".nav-item[data-page]");
+const pageButtons = document.querySelectorAll("[data-page]");
+const projectGrid = document.querySelector("#projectGrid");
+const projectNameInput = document.querySelector("#projectNameInput");
+const projectCodeInput = document.querySelector("#projectCodeInput");
+const createProjectButton = document.querySelector("#createProject");
+const cloneProjectButton = document.querySelector("#cloneProject");
+const workspaceProjectName = document.querySelector("#workspaceProjectName");
+const canvas = document.querySelector(".workspace-canvas");
+const canvasContent = document.querySelector(".canvas-content");
+const canvasToolbar = document.querySelector(".canvas-toolbar");
+const connectorSvg = document.querySelector(".connectors");
+const nodeTemplate = document.querySelector("#nodeTemplate");
+const canvasContextMenu = document.querySelector("#canvasContextMenu");
+const canvasFilePicker = document.querySelector("#canvasFilePicker");
+const nodeContextMenu = document.querySelector("#nodeContextMenu");
+const imageUploadContextMenu = document.querySelector("#imageUploadContextMenu");
+const portConnectionContextMenu = document.querySelector("#portConnectionContextMenu");
+const imageConfigPanel = document.querySelector("#imageConfigPanel");
+const configNodeName = document.querySelector("#configNodeName");
+const imagePromptInput = document.querySelector("#imagePromptInput");
+const submitImageConfig = document.querySelector("#submitImageConfig");
+const imageModelSelect = document.querySelector("#imageModelSelect");
+const imageProviderSelect = document.querySelector("#imageProviderSelect");
+const openImageOptions = document.querySelector("#openImageOptions");
+const imageOptionsPopover = document.querySelector("#imageOptionsPopover");
+const openReferencePicker = document.querySelector("#openReferencePicker");
+const referencePicker = document.querySelector("#referencePicker");
+const referenceList = document.querySelector("#referenceList");
+const addLocalReference = document.querySelector("#addLocalReference");
+const imageViewer = document.querySelector("#imageViewer");
+const imageViewerImg = document.querySelector("#imageViewerImg");
+const closeImageViewer = document.querySelector("#closeImageViewer");
+const arrangeCanvasNodes = document.querySelector("#arrangeCanvasNodes");
+const createFolderFromSelection = document.querySelector("#createFolderFromSelection");
+const exitFolderCanvas = document.querySelector("#exitFolderCanvas");
+const exportGeneratedImagesButton = document.querySelector("#exportGeneratedImages");
+const folderExitTop = document.querySelector("#folderExitTop");
+const resetCanvasView = document.querySelector("#resetCanvasView");
+const zoomCanvasOut = document.querySelector("#zoomCanvasOut");
+const zoomCanvasIn = document.querySelector("#zoomCanvasIn");
+const canvasZoomLabel = document.querySelector("#canvasZoomLabel");
+let memoryComposer = document.querySelector("#memoryComposer");
+let memoryInput = document.querySelector("#memoryInput");
+let memoryType = document.querySelector("#memoryType");
+let memoryList = document.querySelector("#memoryList");
 
-const RHART_MODEL = "rhart-image-n-g31-flash/image-to-image";
-const RHART_DEFAULT_BASE = "https://www.runninghub.cn";
-const RHART_ENDPOINT_PATHS = {
-  "rhart-image-n-g31-flash/image-to-image": "/openapi/v2/rhart-image-n-g31-flash/image-to-image",
-  "rhart-image-g-2/image-to-image": "/openapi/v2/rhart-image-g-2/image-to-image",
-  "rhart-image-g-2-official/image-to-image": "/openapi/v2/rhart-image-g-2-official/image-to-image",
+const PROJECT_LIST_KEY = "aivideobox.projects.v2";
+const PROJECT_CODE_INDEX_KEY = "aivideobox.projectCodes.v1";
+const SHARED_PROJECTS_API = "/api/shared-projects";
+const GLOBAL_MEMORY_KEY = "aivideobox.globalMemories.v1";
+const IMAGE_OPTIONS_KEY = "aivideobox.imageOptions.v1";
+const WORKSPACE_SIDE_STATE_KEY = "aivideobox.workspaceSidebarsHidden.v1";
+const IMAGE_DB_NAME = "aivideobox.images";
+const IMAGE_STORE_NAME = "images";
+const PROJECT_DB_NAME = "aivideobox.projects.db";
+const PROJECT_STORE_NAME = "projects";
+const PROJECT_BACKUP_STORE_NAME = "projectBackups";
+const typeLabels = { text: "Text", image: "Image", video: "Video", folder: "Folder" };
+const typeNames = { text: "文本", image: "图片", video: "视频", folder: "文件夹" };
+const roleLabels = {
+  general: "普通图",
+  editBase: "编辑底图",
+  structure: "渲染结构图",
+  style: "风格参考图",
+  output: "输出图",
 };
-const RHART_QUERY_PATH = "/openapi/v2/query";
-const RHART_UPLOAD_PATH = "/openapi/v2/media/upload/binary";
-const RAYINAI_DEFAULT_BASE = "https://code.rayinai.com";
-const AIHUBMIX_DEFAULT_BASE = "https://aihubmix.com/v1";
+const videoModeLabels = {
+  "image-to-video": "图生视频",
+  "text-to-video": "文生视频",
+  "video-to-video": "视频参考转换",
+};
+const videoModelLabels = {
+  "doubao-seedance-2.0": "Seedance2",
+  "kling-motion-control": "kling3",
+  "happyhorse-1.0": "happyhorse",
+};
+const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+const videoResolutions = ["480p", "720p", "1080p"];
+const defaultImageModelOptions = [
+  ["gpt-image-2", "GPT图像2"],
+  ["gpt-image-2-official", "gpt-image-2-官方"],
+  ["gemini-3-pro-image-preview", "Nano Banana 2"],
+];
+const apiMartImageModelOptions = [
+  ...defaultImageModelOptions,
+  ["midjourney", "Midjourney（ApiMart）"],
+];
+const rhartImageModelOptions = [
+  ["rhart-image-n-g31-flash/image-to-image", "RHarT G31 低价"],
+  ["rhart-image-g-2/image-to-image", "RHarT G-2 低价"],
+  ["rhart-image-g-2-official/image-to-image", "RHarT G-2 官方"],
+];
+const rayinAiProviderOptions = [
+  ["rayinai:bunana", "RayinAI 不拿拿"],
+  ["rayinai:mumu", "RayinAI 木木"],
+  ["rayinai:tiancai", "RayinAI 甜菜"],
+  ["rayinai:kaihua", "RayinAI 开花"],
+  ["rayinai:haizhe", "RayinAI 海蜇"],
+];
+const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+const nodeDefaults = {
+  text: "输入对话内容、brief 或 prompt。",
+  image: "",
+  video: "",
+  folder: "双击进入文件夹画布。",
+};
 
-function getApiMartKey(channel) {
-  const selected = String(channel || "b").toLowerCase();
-  const key = selected === "a" ? process.env.APIMART_API_KEY || process.env.APIMART_TOKEN : process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
-  return sanitizeHeaderValue(key);
-}
+let currentProject = "";
+let activeFolder = null;
+let selectedNode = null;
+let nodeCounter = 0;
+let viewport = { x: 0, y: 0, scale: 1 };
+let dragState = null;
+let panState = null;
+let pendingCanvasDrag = null;
+let selectionBoxState = null;
+let wireState = null;
+let contextPoint = { x: 120, y: 120 };
+let canvasFileUploadMode = "ask";
+let contextNode = null;
+let contextUploadNode = null;
+let contextPort = null;
+let configNode = null;
+let imageViewerScale = 1;
+let imageViewerSources = [];
+let imageViewerIndex = 0;
+let canvasDragDepth = 0;
+let exportImageSelection = new Set();
+const imageGenerationControllers = new Map();
+const selectedNodes = new Set();
+let conversationMemories = [];
+let pendingDeletedProjectNames = [];
+let imageOptions = {
+  purpose: "自定义",
+  referenceMode: "structureStyle",
+  imageRole: "general",
+  quality: "high",
+};
+let isRestoring = false;
+let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
+const projectDataCache = new Map();
+let pendingDimensionSaveTimer = null;
 
-function getRhartKey() {
-  return sanitizeBearerToken(process.env.RHART_G31_API_KEY || process.env.RHART_API_KEY || process.env.RHART_TOKEN);
-}
+connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
+ensureMemoryUi();
+applyWorkspaceSidebarsState();
 
-function getAiHubMixKey() {
-  return sanitizeBearerToken(process.env.AIHUBMIX_API_KEY || process.env.AIHUBMIX_TOKEN);
-}
+pageButtons.forEach((button) => {
+  button.addEventListener("click", () => showPage(button.dataset.page));
+});
 
-function getAiHubMixBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.AIHUBMIX_BASE_URL || AIHUBMIX_DEFAULT_BASE);
-  const withoutName = raw.replace(/^AIHUBMIX_BASE_URL\s*=\s*/i, "");
-  return (withoutName || AIHUBMIX_DEFAULT_BASE).replace(/\/+$/, "");
-}
+document.addEventListener("click", (event) => {
+  const pageButton = event.target.closest("[data-page]");
+  if (!pageButton) return;
+  event.preventDefault();
+  showPage(pageButton.dataset.page);
+});
 
-function getAiHubMixModel(model) {
-  const explicit = sanitizeHeaderValue(process.env.AIHUBMIX_IMAGE_MODEL);
-  if (explicit) return explicit;
-  return normalizeModel(model) === "gemini-3-pro-image-preview" ? "gemini-3-pro-image-preview" : "gpt-image-2";
-}
+createProjectButton?.addEventListener("click", () => {
+  const name = createFreshProject(projectNameInput.value.trim() || "未命名项目");
+  projectNameInput.value = "";
+  openProject(name);
+});
 
-function getRayinRouteEnvPrefix(route) {
-  return {
-    bunana: "RAYINAI_BUNANA",
-    mumu: "RAYINAI_MUMU",
-    tiancai: "RAYINAI_TIANCAI",
-    kaihua: "RAYINAI_KAIHUA",
-    haizhe: "RAYINAI_HAIZHE",
-  }[normalizeRayinRoute(route)] || "RAYINAI_BUNANA";
-}
-
-function getRayinAiKey(route = "bunana") {
-  const normalized = normalizeRayinRoute(route);
-  const prefix = getRayinRouteEnvPrefix(normalized);
-  return sanitizeBearerToken(
-    process.env[`${prefix}_API_KEY`]
-    || process.env[`${prefix}_TOKEN`]
-    || (normalized === "bunana" ? process.env.RAYINAI_API_KEY : "")
-    || process.env.RAYINAI_API_KEY,
-  );
-}
-
-function getRayinAiKeyId(route = "bunana") {
-  const normalized = normalizeRayinRoute(route);
-  const prefix = getRayinRouteEnvPrefix(normalized);
-  const raw = sanitizeHeaderValue(
-    process.env[`${prefix}_KEY_ID`]
-    || (normalized === "bunana" ? process.env.RAYINAI_KEY_ID : "")
-    || process.env.RAYINAI_KEY_ID
-    || "8634",
-  );
-  const id = Number(raw);
-  return Number.isFinite(id) && id > 0 ? id : 8634;
-}
-
-function getRayinAiResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
-}
-
-function getRayinAiResponsesModels() {
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
-  const models = configured
-    .split(/[,\s;]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
-}
-
-function getRayinAiRetryAttempts() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "2"));
-  if (!Number.isFinite(value)) return 2;
-  return Math.min(4, Math.max(1, Math.floor(value)));
-}
-
-function getRayinFetchTimeoutMs() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "45000"));
-  if (!Number.isFinite(value)) return 45000;
-  return Math.min(90000, Math.max(8000, Math.floor(value)));
-}
-
-function getRayinAiBaseUrl(route = "bunana") {
-  const normalizedRoute = normalizeRayinRoute(route);
-  const prefix = getRayinRouteEnvPrefix(normalizedRoute);
-  const raw = sanitizeHeaderValue(
-    process.env[`${prefix}_BASE_URL`]
-    || (normalizedRoute === "bunana" ? process.env.RAYINAI_BASE_URL : "")
-    || process.env.RAYINAI_BASE_URL
-    || RAYINAI_DEFAULT_BASE,
-  );
-  const withoutName = raw.replace(/^(?:RAYINAI(?:_[A-Z]+)?_BASE_URL)\s*=\s*/i, "");
-  const normalized = withoutName
-    .replace(/\/v1\/responses\/?$/i, "")
-    .replace(/\/responses\/?$/i, "")
-    .replace(/\/v1\/?$/i, "")
-    .replace(/\/+$/, "");
-  if (isLegacyRayinAiBaseUrl(normalized)) return RAYINAI_DEFAULT_BASE;
-  return normalized || RAYINAI_DEFAULT_BASE;
-}
-
-function isLegacyRayinAiBaseUrl(value) {
-  return /^(?:https?:\/\/)?(?:www\.)?240423\.xyz(?:[/:?#]|$)/i.test(String(value || "").trim());
-}
-
-function getRhartBaseUrl() {
-  const raw = sanitizeHeaderValue(process.env.RHART_BASE_URL || process.env.RHART_G31_BASE_URL || process.env.RUNNINGHUB_BASE_URL || RHART_DEFAULT_BASE);
-  const withoutName = raw.replace(/^(?:RHART(?:_G31)?|RUNNINGHUB)_BASE_URL\s*=\s*/i, "");
-  const value = withoutName
-    .replace(/\/openapi\/v2\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
-    .replace(/\/openapi\/v2\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
-    .replace(/\/openapi\/v2\/rhart-image-g-2\/image-to-image\/?$/i, "")
-    .replace(/\/openapi\/v2\/rhart-image-g-2-official\/image-to-image\/?$/i, "")
-    .replace(/\/openapi\/v2\/query\/?$/i, "")
-    .replace(/\/v1\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
-    .replace(/\/rhart-image-n-g31-flash\/image-to-image\/?$/i, "")
-    .replace(/\/rhart-image-g-2\/image-to-image\/?$/i, "")
-    .replace(/\/rhart-image-g-2-official\/image-to-image\/?$/i, "")
-    .replace(/\/rhart-image-n-g31-flash-official\/image-to-image\/?$/i, "")
-    .replace(/\/openapi\/v2\/?$/i, "")
-    .replace(/\/v1\/?$/i, "")
-    .replace(/\/+$/, "");
-  if (/^https?:\/\//i.test(value)) return value;
-  return RHART_DEFAULT_BASE;
-}
-
-function buildRhartEndpoint(model = RHART_MODEL) {
-  const explicit = sanitizeHeaderValue(process.env.RHART_ENDPOINT_URL || process.env.RHART_G31_ENDPOINT_URL);
-  if (/^https?:\/\//i.test(explicit)) return explicit;
-  if (explicit) return explicit;
-  const base = getRhartBaseUrl();
-  const endpointPath = RHART_ENDPOINT_PATHS[normalizeRhartModel(model)] || RHART_ENDPOINT_PATHS[RHART_MODEL];
-  return new URL(endpointPath.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
-}
-
-function buildRhartQueryEndpoint() {
-  const explicit = sanitizeHeaderValue(process.env.RHART_QUERY_ENDPOINT_URL || process.env.RHART_G31_QUERY_ENDPOINT_URL);
-  if (/^https?:\/\//i.test(explicit)) return explicit;
-  const base = getRhartBaseUrl();
-  return new URL(RHART_QUERY_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
-}
-
-function buildRhartUploadEndpoint() {
-  const explicit = sanitizeHeaderValue(process.env.RHART_UPLOAD_ENDPOINT_URL || process.env.RHART_G31_UPLOAD_ENDPOINT_URL);
-  if (/^https?:\/\//i.test(explicit)) return explicit;
-  const base = getRhartBaseUrl();
-  return new URL(RHART_UPLOAD_PATH.replace(/^\/+/, ""), `${base.replace(/\/+$/, "")}/`).toString();
-}
-
-function sanitizeHeaderValue(value) {
-  return String(value || "").trim().replace(/[^\x20-\x7E]/g, "");
-}
-
-function sanitizeBearerToken(value) {
-  return sanitizeHeaderValue(value)
-    .replace(/^Authorization\s*:\s*/i, "")
-    .replace(/^Bearer\s+/i, "")
-    .replace(/\s+/g, "");
-}
-
-async function proxyImage(req, res) {
-  const src = String(req.query?.src || "");
-  if (!src || !isImageReferenceValue(src)) {
-    res.status(400).json({ error: "Missing image src" });
+cloneProjectButton?.addEventListener("click", async () => {
+  const code = normalizeProjectCode(projectCodeInput.value);
+  if (!code) {
+    markProjectCodeInput("请输入项目码");
     return;
   }
-  try {
-    const provider = normalizeProvider(req.query?.provider);
-    const apiKey = provider === "rhart" ? getRhartKey() : "";
-    const { buffer, contentType } = await readImageBytes(src, {
-      apiKey,
-      referer: provider === "rhart" ? getRhartBaseUrl() : "",
-    });
-    if (!/^image\//i.test(contentType)) {
-      res.status(502).json({
-        error: "Upstream did not return an image",
-        contentType,
-      });
-      return;
-    }
-    res.statusCode = 200;
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.end(buffer);
-  } catch (error) {
-    res.status(502).json({
-      error: "Image proxy failed",
-      message: error instanceof Error ? error.message : String(error),
-    });
+  const clonedName = await cloneProjectByCode(code);
+  if (!clonedName) {
+    markProjectCodeInput("未找到项目码");
+    return;
   }
-}
+  projectCodeInput.value = "";
+  openProject(clonedName);
+});
 
-function buildImageProxyUrl(req, imageUrl) {
-  if (!imageUrl || typeof imageUrl !== "string") return "";
-  if (/^data:image\//i.test(imageUrl)) return imageUrl;
-  const query = new URLSearchParams({
-    provider: "rhart",
-    image: "1",
-    src: imageUrl,
+projectGrid?.addEventListener("click", (event) => {
+  const card = event.target.closest(".project-card");
+  if (!card) return;
+
+  const name = card.dataset.project;
+  if (event.target.closest(".project-name")) {
+    startProjectNameEdit(card);
+    return;
+  }
+
+  if (event.target.closest("[data-open-project]")) {
+    openProject(name);
+    return;
+  }
+
+  if (event.target.closest(".delete-project")) {
+    deleteProject(name);
+    return;
+  }
+
+  const projectCodeButton = event.target.closest(".project-code");
+  if (projectCodeButton) {
+    projectCodeButton.disabled = true;
+    const oldText = projectCodeButton.textContent;
+    projectCodeButton.textContent = "正在生成...";
+    publishProjectCode(card)
+      .catch((error) => {
+        console.warn("Project code publish failed", error);
+        projectCodeButton.textContent = oldText || "生成项目码";
+      })
+      .finally(() => {
+        projectCodeButton.disabled = false;
+      });
+  }
+});
+
+document.addEventListener("submit", (event) => {
+  if (!event.target.matches("#memoryComposer")) return;
+  event.preventDefault();
+  const content = memoryInput?.value.trim() || "";
+  if (!currentProject) return;
+  const memory = selectedNode
+    ? createMemoryFromNode(selectedNode, content)
+    : {
+        id: createMemoryId(),
+        type: memoryType?.value || "image",
+        title: createMemoryTitle(content),
+        content,
+        createdAt: new Date().toISOString(),
+      };
+  if (!memory.content && !memory.nodeSnapshot) return;
+  conversationMemories.unshift(memory);
+  memoryInput.value = "";
+  renderConversationMemories();
+  saveGlobalMemories();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#memoryList")) return;
+  const deleteButton = event.target.closest(".memory-delete");
+  if (deleteButton) {
+    event.stopPropagation();
+    conversationMemories = conversationMemories.filter((memory) => memory.id !== deleteButton.dataset.memoryId);
+    renderConversationMemories();
+    saveGlobalMemories();
+    return;
+  }
+
+  const item = event.target.closest(".chat-item");
+  if (!item) return;
+  memoryList.querySelectorAll(".chat-item").forEach((button) => button.classList.toggle("active", button === item));
+  const memory = getMemoryById(item.dataset.memoryId) || {
+    type: item.dataset.type || "text",
+    title: item.dataset.title || "对话记忆",
+    content: item.dataset.content || "",
+  };
+  createNodeFromMemory(memory);
+});
+
+document.addEventListener("dragstart", (event) => {
+  const item = event.target.closest("#memoryList .chat-item");
+  if (!item || !event.dataTransfer) return;
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData("application/x-aivideobox-memory", item.dataset.memoryId || "");
+});
+
+canvas?.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  const port = event.target.closest(".node-port");
+  const portNode = port?.closest(".node");
+  if (portNode) {
+    contextPort = port;
+    contextNode = portNode;
+    if (!selectedNodes.has(portNode)) selectNode(portNode);
+    renderPortConnectionMenu(port);
+    showMenu(portConnectionContextMenu, event.clientX, event.clientY);
+    contextPort = port;
+    contextNode = portNode;
+    return;
+  }
+
+  const uploadWindow = event.target.closest(".image-upload-window");
+  const uploadNode = uploadWindow?.closest(".node");
+  if (uploadNode?.dataset.type === "image") {
+    contextUploadNode = uploadNode;
+    contextNode = uploadNode;
+    if (!selectedNodes.has(uploadNode)) selectNode(uploadNode);
+    showMenu(imageUploadContextMenu, event.clientX, event.clientY);
+    contextUploadNode = uploadNode;
+    contextNode = uploadNode;
+    return;
+  }
+
+  const node = event.target.closest(".node");
+  const canvasRect = canvasContent.getBoundingClientRect();
+  contextPoint = {
+    x: (event.clientX - canvasRect.left) / viewport.scale,
+    y: (event.clientY - canvasRect.top) / viewport.scale,
+  };
+
+  if (node) {
+    contextNode = node;
+    if (!selectedNodes.has(node)) selectNode(node);
+    syncNodeContextMenu(node);
+    showMenu(nodeContextMenu, event.clientX, event.clientY);
+    return;
+  }
+
+  contextNode = null;
+  showMenu(canvasContextMenu, event.clientX, event.clientY);
+});
+
+canvasContextMenu?.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("[data-canvas-action]");
+  if (actionButton?.dataset.canvasAction === "open-files" || actionButton?.dataset.canvasAction === "open-files-split") {
+    hideMenus();
+    canvasFileUploadMode = actionButton.dataset.canvasAction === "open-files-split" ? "split" : "ask";
+    if (canvasFilePicker) {
+      canvasFilePicker.value = "";
+      canvasFilePicker.click();
+    }
+    return;
+  }
+
+  const button = event.target.closest("[data-create-type]");
+  if (!button) return;
+
+  const type = button.dataset.createType;
+  const node = createNode({
+    id: createNodeId(),
+    type,
+    title: `${typeNames[type]}节点`,
+    content: nodeDefaults[type],
+    x: contextPoint.x,
+    y: contextPoint.y,
   });
-  return `${getRequestPath(req)}?${query.toString()}`;
+  selectNode(node);
+  hideMenus();
+  saveCurrentProject();
+});
+
+nodeContextMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-menu-action]");
+  if (!button || !contextNode) return;
+
+  const action = button.dataset.menuAction;
+  if (action.startsWith("type-")) {
+    const nextType = action.replace("type-", "");
+    getActionNodes(contextNode).forEach((node) => setNodeType(node, nextType));
+    saveCurrentProject();
+  } else if (action === "delete") {
+    if (selectedNodes.size > 1 && selectedNodes.has(contextNode)) {
+      deleteSelectedNodes();
+    } else {
+      deleteNode(contextNode);
+    }
+  } else if (action === "duplicate") {
+    getActionNodes(contextNode).forEach(duplicateNode);
+  } else if (action === "ungroup-folder") {
+    ungroupFolderNode(contextNode);
+  } else if (action === "run") {
+    getActionNodes(contextNode).forEach(runNode);
+  }
+  hideMenus();
+});
+
+function syncNodeContextMenu(node) {
+  const ungroupButton = nodeContextMenu?.querySelector('[data-menu-action="ungroup-folder"]');
+  if (ungroupButton) ungroupButton.hidden = node?.dataset.type !== "folder" || Boolean(activeFolder);
 }
 
-function getRequestPath(req) {
-  const raw = String(req.url || "/api/generate-image");
-  return raw.split("?")[0] || "/api/generate-image";
+imageUploadContextMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-upload-action]");
+  if (!button || !contextUploadNode) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (button.dataset.uploadAction === "replace") {
+    contextUploadNode.querySelector(".node-file-input")?.click();
+  }
+  if (button.dataset.uploadAction === "delete") {
+    clearUploadedImages(contextUploadNode);
+  }
+  hideMenus();
+});
+
+portConnectionContextMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-connection-index]");
+  if (!button || !contextPort) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const connections = getConnectionsForPort(contextPort);
+  const connection = connections[Number(button.dataset.connectionIndex)];
+  if (connection?.path) {
+    connection.path.remove();
+    updateConnections();
+    saveCurrentProject();
+    refreshConnectionsSoon();
+  }
+  hideMenus();
+});
+
+document.addEventListener("click", (event) => {
+  const roleButton = event.target.closest(".image-role-button");
+  if (roleButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleImageRoleMenu(roleButton.closest(".node"));
+    return;
+  }
+
+  const roleOption = event.target.closest(".image-role-option");
+  if (roleOption) {
+    event.preventDefault();
+    event.stopPropagation();
+    const node = roleOption.closest(".node");
+    setImageRole(node, roleOption.dataset.role);
+    closeImageRoleMenus();
+    return;
+  }
+
+  const historyButton = event.target.closest(".output-history-button");
+  if (historyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleOutputHistory(historyButton.closest(".node"));
+    return;
+  }
+
+  const favoriteButton = event.target.closest("[data-generation-favorite]");
+  if (favoriteButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleGenerationFavorite(favoriteButton.closest(".node"), favoriteButton.dataset.generationFavorite);
+    return;
+  }
+
+  const previewImage = event.target.closest(".upload-preview img, .config-input-thumb img");
+  if (previewImage) {
+    event.preventDefault();
+    event.stopPropagation();
+    openImageViewer(previewImage.src, getViewerSourcesForImage(previewImage));
+    return;
+  }
+
+  if (!event.target.closest(".output-history-popover")) {
+    closeOutputHistoryPopovers();
+  }
+
+  const customButton = event.target.closest(".node-custom-button");
+  if (!customButton) return;
+  const node = customButton.closest(".node");
+  if (node?.dataset.type === "image" || node?.dataset.type === "video") {
+    openImageConfig(node);
+  }
+});
+
+closeImageViewer?.addEventListener("click", closeImageViewerPanel);
+
+exportGeneratedImagesButton?.addEventListener("click", () => {
+  openGeneratedImageExportPanel();
+});
+
+imageViewer?.addEventListener("click", (event) => {
+  if (event.target === imageViewer) closeImageViewerPanel();
+});
+
+imageViewer?.addEventListener("click", (event) => {
+  const zoomButton = event.target.closest("[data-image-zoom]");
+  const stepButton = event.target.closest("[data-image-step]");
+  if (zoomButton) {
+    event.preventDefault();
+    if (zoomButton.dataset.imageZoom === "in") setImageViewerScale(imageViewerScale + 0.25);
+    if (zoomButton.dataset.imageZoom === "out") setImageViewerScale(imageViewerScale - 0.25);
+    if (zoomButton.dataset.imageZoom === "reset") setImageViewerScale(1);
+  }
+  if (stepButton) {
+    event.preventDefault();
+    stepImageViewer(Number(stepButton.dataset.imageStep));
+  }
+});
+
+imageViewer?.addEventListener(
+  "wheel",
+  (event) => {
+    if (!imageViewer.classList.contains("show")) return;
+    event.preventDefault();
+    setImageViewerScale(imageViewerScale + (event.deltaY < 0 ? 0.15 : -0.15));
+  },
+  { passive: false },
+);
+
+document.addEventListener("keydown", (event) => {
+  if (!imageViewer?.classList.contains("show")) return;
+  if (event.key === "Escape") {
+    closeImageViewerPanel();
+  }
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    stepImageViewer(-1);
+  }
+  if (event.key === "ArrowRight") {
+    event.preventDefault();
+    stepImageViewer(1);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".context-menu")) hideMenus();
+  if (!event.target.closest(".image-role-picker")) closeImageRoleMenus();
+  closeFloatingPanelsOnOutsideClick(event);
+
+  const title = event.target.closest(".node-title strong");
+  if (title) {
+    event.stopPropagation();
+    startTitleEdit(title);
+    return;
+  }
+
+  const node = event.target.closest(".node");
+  if (node && !event.target.closest(".node-port")) {
+    selectNode(node);
+  }
+});
+
+document.addEventListener("dblclick", (event) => {
+  const folderNode = event.target.closest('.node[data-type="folder"]');
+  if (!folderNode) return;
+  event.preventDefault();
+  event.stopPropagation();
+  enterFolder(folderNode);
+});
+
+function closeFloatingPanelsOnOutsideClick(event) {
+  const clickedConfig =
+    event.target.closest("#imageConfigPanel") ||
+    event.target.closest("#imageOptionsPopover") ||
+    event.target.closest("#referencePicker") ||
+    event.target.closest(".node-custom-button");
+
+  if (!clickedConfig && imageConfigPanel.classList.contains("show")) {
+    closeImageConfig();
+    return;
+  }
+
+  if (
+    imageOptionsPopover.classList.contains("show") &&
+    !event.target.closest("#imageOptionsPopover") &&
+    !event.target.closest("#openImageOptions")
+  ) {
+    imageOptionsPopover.classList.remove("show");
+    imageOptionsPopover.setAttribute("aria-hidden", "true");
+  }
+
+  if (
+    referencePicker.classList.contains("show") &&
+    !event.target.closest("#referencePicker") &&
+    !event.target.closest("#openReferencePicker")
+  ) {
+    referencePicker.classList.remove("show");
+    referencePicker.setAttribute("aria-hidden", "true");
+  }
 }
 
-module.exports = async function handler(req, res) {
-  if (req.method === "GET") {
-    if (req.query?.image === "1") {
-      await proxyImage(req, res);
-      return;
-    }
-
-    const taskId = req.query?.taskId;
-    if (!taskId) {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const rawProvider = String(req.query?.provider || "");
-    const provider = normalizeProvider(rawProvider);
-    const rayinRoute = provider === "rayinai" ? normalizeRayinRoute(rawProvider) : "bunana";
-    const apiKey = provider === "rayinai"
-      ? getRayinAiKey(rayinRoute)
-      : provider === "rhart"
-        ? getRhartKey()
-        : provider === "aihubmix"
-          ? getAiHubMixKey()
-        : getApiMartKey(req.query?.apimartChannel);
-    if (!apiKey) {
-      res.status(500).json({
-        error: provider === "rayinai"
-          ? "RAYINAI_API_KEY is not configured"
-          : provider === "rhart"
-            ? "RHART_G31_API_KEY / RHART_API_KEY is not configured"
-            : provider === "aihubmix"
-              ? "AIHUBMIX_API_KEY is not configured"
-            : "APIMART_API_KEY_2 is not configured",
-        message: provider === "rayinai"
-          ? "Please configure RAYINAI_API_KEY in Vercel Environment Variables."
-          : provider === "rhart"
-            ? "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables."
-            : provider === "aihubmix"
-              ? "Please configure AIHUBMIX_API_KEY in Vercel Environment Variables."
-          : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
-      });
-      return;
-    }
-
-    try {
-      const taskPayload = provider === "rayinai"
-          ? await getRayinTask(apiKey, String(taskId), rayinRoute)
-        : provider === "rhart"
-          ? await getRhartTask(apiKey, String(taskId))
-          : await getTask(apiKey, String(taskId));
-      const status = getTaskStatus(taskPayload);
-      const rawImageUrl = provider === "rhart" ? extractRhartResultUrl(taskPayload) : extractResultUrl(taskPayload);
-      const imageUrl = provider === "rhart"
-        ? buildImageProxyUrl(req, rawImageUrl)
-        : await persistResultImage(rawImageUrl, taskId);
-      res.status(200).json({
-        taskId,
-        status,
-        imageUrl,
-        rawImageUrl: provider === "rhart" ? rawImageUrl : undefined,
-        provider,
-        rayinEndpoint: taskPayload?.rayinEndpoint,
-        rhartEndpoint: taskPayload?.rhartEndpoint,
-        message: formatUpstreamError(taskPayload),
-        payload: imageUrl ? undefined : taskPayload,
-      });
-    } catch (error) {
-      const upstream = parseErrorPayload(error);
-      res.status(500).json({
-        error: "Task polling failed",
-        message: upstream ? formatUpstreamError(upstream) : error instanceof Error ? error.message : String(error),
-        upstream,
-      });
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-video-setting]")) {
+    if (configNode?.dataset.type === "video") {
+      persistVideoSettingsFromPanel(configNode);
+      saveCurrentProject();
     }
     return;
   }
 
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
+  if (event.target.matches("[data-video-asset]")) {
+    handleVideoAssetUpload(event.target);
     return;
   }
 
-  const {
-    prompt,
-    quality,
-    imageDataUrl,
-    imageDataUrls,
-    structureImageUrls,
-    styleImageUrls,
-    editBaseImageUrls,
-    referenceBindings,
-    apimartChannel,
-    model,
-    size,
-    provider,
-  } = req.body || {};
-  const apiKey = getApiMartKey(apimartChannel);
-  const rhartKey = getRhartKey();
-  const aiHubMixKey = getAiHubMixKey();
-  const preferredProvider = normalizeProvider(provider || process.env.IMAGE_PROVIDER || "apimart");
-  const preferredRayinRoute = preferredProvider === "rayinai" ? normalizeRayinRoute(provider || model) : "bunana";
-  const rayinAiKey = getRayinAiKey(preferredRayinRoute);
-  if (preferredProvider === "aihubmix" && !aiHubMixKey) {
-    res.status(500).json({
-      error: "AIHUBMIX_API_KEY is not configured",
-      message: "Please configure AIHUBMIX_API_KEY in Vercel Environment Variables.",
-    });
-    return;
+  if (event.target.matches(".node-type-select")) {
+    const node = event.target.closest(".node");
+    if (node?.dataset.type === "image" && event.target.dataset.roleSelect === "true") {
+      setImageRole(node, event.target.value);
+    } else if (node?.dataset.type === "video" && event.target.dataset.videoModeSelect === "true") {
+      setVideoMode(node, event.target.value);
+    } else {
+      setNodeType(node, event.target.value);
+    }
+    saveCurrentProject();
   }
-  if (preferredProvider === "rhart" && !rhartKey) {
-    res.status(500).json({
-      error: "RHART_G31_API_KEY / RHART_API_KEY is not configured",
-      message: "Please configure RHART_G31_API_KEY or RHART_API_KEY in Vercel Environment Variables.",
-    });
-    return;
-  }
-  if (!apiKey && preferredProvider !== "rayinai" && preferredProvider !== "rhart" && preferredProvider !== "aihubmix") {
-    res.status(500).json({
-      error: "APIMART_API_KEY_2 is not configured",
-      message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
-    });
-    return;
-  }
+});
 
-  if (!prompt || !String(prompt).trim()) {
-    res.status(400).json({ error: "Missing prompt" });
+submitImageConfig?.addEventListener("click", () => {
+  if (!configNode) return;
+  if (configNode.dataset.type === "video") {
+    const description = configNode.querySelector(".node-description");
+    description.textContent = imagePromptInput.value;
+    persistVideoSettingsFromPanel(configNode);
+    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect?.value);
+    saveCurrentProject();
+    runVideoGeneration(configNode);
     return;
   }
+  if (imageGenerationControllers.has(configNode.id)) {
+    cancelImageGeneration(configNode);
+    return;
+  }
+  const description = configNode.querySelector(".node-description");
+  description.textContent = imagePromptInput.value;
+  configNode.dataset.imagePurpose = imageOptions.purpose;
+  configNode.dataset.referenceMode = imageOptions.referenceMode;
+  configNode.dataset.imageRole = imageOptions.imageRole;
+  delete configNode.dataset.imageRatio;
+  delete configNode.dataset.imageResolution;
+  configNode.dataset.imageQuality = imageOptions.quality;
+  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || "apimart");
+  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value);
+  configNode.dataset.apimartChannel = "b";
+  saveCurrentProject();
+  runImageGeneration(configNode);
+});
+
+openImageOptions?.addEventListener("click", () => {
+  imageOptionsPopover.classList.toggle("show");
+  imageOptionsPopover.setAttribute("aria-hidden", imageOptionsPopover.classList.contains("show") ? "false" : "true");
+});
+
+imageOptionsPopover?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-value]");
+  if (!button) return;
+  const group = button.closest("[data-option-group]").dataset.optionGroup;
+  imageOptions[group] = button.dataset.value;
+  button.closest(".option-grid").querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+  persistImageConfigOptions();
+  syncImageOptionsSummary();
+  saveImageOptions();
+});
+
+
+imageModelSelect?.addEventListener("change", () => {
+  if (!configNode) return;
+  if (configNode.dataset.type === "video") {
+    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect.value);
+    saveCurrentProject();
+    return;
+  }
+  const provider = normalizeImageProvider(configNode.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  configNode.dataset.imageModel = normalizeProviderImageModel(provider, imageModelSelect.value);
+  syncImageOptionsUi();
+  saveCurrentProject();
+});
+
+imageProviderSelect?.addEventListener("change", () => {
+  if (!configNode || configNode.dataset.type !== "image") return;
+  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
+  setImageModelOptionsForProvider(configNode.dataset.imageProvider, configNode.dataset.imageModel);
+  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value || configNode.dataset.imageModel);
+  syncImageOptionsUi();
+  saveCurrentProject();
+});
+
+openReferencePicker?.addEventListener("click", () => {
+  if (!configNode) return;
+  renderReferencePicker();
+  referencePicker.classList.add("show");
+  referencePicker.setAttribute("aria-hidden", "false");
+});
+
+referenceList?.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-reference-node]");
+  if (!item) return;
+  imagePromptInput.value += `\n引用画布节点：${item.dataset.referenceNode}`;
+  const sourceNode = [...canvasContent.querySelectorAll(".node")].find((node) => {
+    return node.querySelector(".node-title strong")?.textContent === item.dataset.referenceNode;
+  });
+  const sourceImages = getNodeImageSources(sourceNode);
+  const sourceInlineImages = getNodeImageSources(sourceNode, { preferData: true }).filter((value) => /^data:image\//i.test(value));
+  if (configNode && sourceImages.length) {
+    configNode.dataset.referenceImageUrls = JSON.stringify(sourceImages);
+    configNode.dataset.referenceImageDataUrl = sourceImages[0];
+    if (sourceInlineImages.length) {
+      configNode.dataset.referenceImageDataUrls = JSON.stringify(sourceInlineImages);
+      configNode.dataset.referenceImageDataInlineUrl = sourceInlineImages[0];
+    }
+    configNode.dataset.referenceFileName = item.dataset.referenceNode;
+  }
+  referencePicker.classList.remove("show");
+  referencePicker.setAttribute("aria-hidden", "true");
+  saveCurrentProject();
+});
+
+addLocalReference?.addEventListener("change", async () => {
+  const file = addLocalReference.files?.[0];
+  if (!file) return;
+  imagePromptInput.value += `\n参考本地文件：${file.name}`;
+  if (configNode && file.type.startsWith("image/")) {
+    configNode.dataset.referenceFileName = file.name;
+    const url = await uploadImageFile(file);
+    const inlineDataUrl = await fileToDataUrl(file);
+    const current = parseJsonArray(configNode.dataset.referenceImageUrls);
+    const next = uniqueValues([...current, url]);
+    configNode.dataset.referenceImageUrls = JSON.stringify(next);
+    configNode.dataset.referenceImageDataUrl = next[0] || "";
+    const currentInline = parseJsonArray(configNode.dataset.referenceImageDataUrls);
+    const nextInline = uniqueValues([...currentInline, inlineDataUrl]);
+    configNode.dataset.referenceImageDataUrls = JSON.stringify(nextInline);
+    configNode.dataset.referenceImageDataInlineUrl = nextInline[0] || "";
+  } else if (configNode && file.type.startsWith("video/")) {
+    configNode.dataset.referenceFileName = file.name;
+    const url = await uploadMediaFile(file);
+    const current = parseJsonArray(configNode.dataset.referenceVideoUrls);
+    const next = uniqueValues([...current, url]);
+    configNode.dataset.referenceVideoUrls = JSON.stringify(next);
+    configNode.dataset.referenceVideoUrl = next[0] || "";
+  }
+  referencePicker.classList.remove("show");
+  referencePicker.setAttribute("aria-hidden", "true");
+  saveCurrentProject();
+});
+
+async function handleVideoAssetUpload(input) {
+  if (!configNode || configNode.dataset.type !== "video") return;
+  const file = input.files?.[0];
+  if (!file) return;
+  const slot = input.dataset.videoAsset;
+  const label = input.closest(".video-asset-picker")?.querySelector("small");
+  if (label) label.textContent = "上传中...";
 
   try {
-    const requestContext = buildImageRequestContext({
-      prompt,
-      quality,
-      imageDataUrl,
-      imageDataUrls,
-      structureImageUrls,
-      styleImageUrls,
-      editBaseImageUrls,
-      referenceBindings,
-      model,
-      size,
-      provider,
-    });
-
-    if (preferredProvider === "aihubmix") {
-      const aiHubMixSubmitBody = buildAiHubMixSubmitBody(requestContext);
-      const aiHubMixResult = await submitAiHubMixImageTask(aiHubMixKey, aiHubMixSubmitBody);
-      if (aiHubMixResult.ok) {
-        const imageUrl = await persistResultImage(extractResultUrl(aiHubMixResult.payload), `aihubmix-${Date.now()}`);
-        res.status(200).json({
-          status: "completed",
-          imageUrl,
-          model: aiHubMixSubmitBody.model,
-          provider: "aihubmix",
-          payload: imageUrl ? undefined : aiHubMixResult.payload,
-        });
-        return;
-      }
-
-      res.status(aiHubMixResult.status || 502).json({
-        error: "AIHubMix submit failed",
-        message: formatUpstreamError(aiHubMixResult.payload),
-        upstream: aiHubMixResult.payload,
-        request: {
-          model: aiHubMixSubmitBody.model,
-          size: aiHubMixSubmitBody.size,
-          quality: aiHubMixSubmitBody.quality,
-          output_format: aiHubMixSubmitBody.output_format,
-          referenceCount: aiHubMixSubmitBody.image_urls?.length || 0,
-        },
-      });
-      return;
+    const url = file.type.startsWith("image/") ? await uploadImageFile(file) : await uploadMediaFile(file);
+    if (slot === "firstFrame") {
+      configNode.dataset.videoFirstFrameUrl = url;
+      configNode.dataset.referenceImageUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceImageUrls)]));
+    } else if (slot === "lastFrame") {
+      configNode.dataset.videoLastFrameUrl = url;
+      configNode.dataset.referenceImageUrls = JSON.stringify(uniqueValues([...parseJsonArray(configNode.dataset.referenceImageUrls), url]));
+    } else if (slot === "referenceVideo") {
+      configNode.dataset.referenceVideoUrl = url;
+      configNode.dataset.referenceVideoUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceVideoUrls)]));
+    } else if (slot === "referenceAudio") {
+      configNode.dataset.videoReferenceAudioUrl = url;
+      configNode.dataset.videoReferenceAudioUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.videoReferenceAudioUrls)]));
     }
-
-    if (preferredProvider === "rhart") {
-      const rhartSubmitBody = buildRhartSubmitBody(requestContext);
-      const rhartResult = await submitRhartImageTask(rhartKey, rhartSubmitBody);
-      if (rhartResult.ok) {
-        const rawImageUrl = extractRhartResultUrl(rhartResult.payload);
-        const imageUrl = buildImageProxyUrl(req, rawImageUrl);
-        const taskId = extractTaskId(rhartResult.payload);
-        if (!imageUrl && !taskId) {
-          res.status(502).json({
-            error: "RHarT submit returned no taskId or image",
-            message: "RHarT 上游已响应，但响应里没有可识别的 taskId 或图片地址。",
-            upstream: rhartResult.payload,
-          });
-          return;
-        }
-        res.status(imageUrl ? 200 : 202).json({
-          taskId,
-          status: imageUrl ? "completed" : "submitted",
-          imageUrl,
-          rawImageUrl,
-          model: rhartSubmitBody.model,
-          provider: "rhart",
-          payload: imageUrl ? undefined : rhartResult.payload,
-        });
-        return;
-      }
-
-      res.status(rhartResult.status || 502).json({
-        error: "RHarT submit failed",
-        message: formatUpstreamError(rhartResult.payload),
-        upstream: rhartResult.payload,
-        request: {
-          model: rhartSubmitBody.model,
-          size: rhartSubmitBody.size,
-          quality: rhartSubmitBody.quality,
-          aspectRatio: rhartSubmitBody.aspectRatio,
-          resolution: rhartSubmitBody.resolution,
-          referenceCount: rhartSubmitBody.referenceCount || 0,
-          publicReferenceCount: rhartSubmitBody.publicReferenceCount || 0,
-          rhartEndpoint: rhartResult.payload?.rhartEndpoint || buildRhartEndpoint(rhartSubmitBody.model),
-          rhartKeyHint: getKeyHint(rhartKey),
-        },
-      });
-      return;
-    }
-
-    if (shouldTryRayinAi(preferredProvider, requestContext.model, rayinAiKey)) {
-      const rayinSubmitBody = buildRayinSubmitBody(requestContext);
-      const rayinResult = await submitRayinImageTask(rayinAiKey, rayinSubmitBody);
-      if (rayinResult.ok) {
-        const imageUrl = await persistResultImage(extractResultUrl(rayinResult.payload), `rayinai-${Date.now()}`);
-        const taskId = extractTaskId(rayinResult.payload);
-        res.status(imageUrl ? 200 : 202).json({
-          taskId,
-          status: imageUrl ? "completed" : "submitted",
-          imageUrl,
-          model: rayinResult.payload?.rayinRequest?.model || rayinSubmitBody.model,
-          provider: "rayinai",
-          rayinEndpoint: rayinResult.payload?.rayinEndpoint,
-          payload: imageUrl ? undefined : rayinResult.payload,
-        });
-        return;
-      }
-
-      if (!apiKey || preferredProvider === "rayinai") {
-        const rayinEndpoint = rayinResult.payload?.rayinEndpoint || rayinResult.payload?.endpoint || "";
-        res.status(rayinResult.status || 502).json({
-          error: "RayinAI submit failed",
-          message: formatUpstreamError(rayinResult.payload),
-          upstream: rayinResult.payload,
-          request: {
-            rayinResponsesModel: rayinResult.payload?.rayinRequest?.model || getRayinAiResponsesModel(),
-            rayinRequestType: rayinResult.payload?.rayinRequest?.type || "",
-            size: rayinSubmitBody.size,
-            quality: rayinSubmitBody.quality,
-            output_format: rayinSubmitBody.output_format,
-            rayinEndpoint,
-            rayinBaseUrl: getRayinAiBaseUrl(rayinSubmitBody.rayin_route),
-            rayinApiKeyConfigured: Boolean(rayinAiKey),
-            rayinRoute: rayinSubmitBody.rayin_route,
-            referenceCount: rayinSubmitBody.image_urls?.length || 0,
-            upstreamStatus: rayinResult.status || "",
-            upstreamMessage: findMessage(rayinResult.payload),
-          },
-        });
-        return;
-      }
-    }
-
-    if (!apiKey) {
-      res.status(500).json({
-        error: "APIMART_API_KEY_2 is not configured",
-        message: "RayinAI did not return a usable image, and APIMART_API_KEY_2 is not configured for fallback.",
-      });
-      return;
-    }
-
-    const apiMartSubmitBody = buildApiMartSubmitBody(requestContext);
-    const submit = await fetch(`${API_BASE}/images/generations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(apiMartSubmitBody),
-    });
-
-    const submitPayload = await readJson(submit);
-    if (!submit.ok) {
-      res.status(submit.status).json({
-        error: "APIMart submit failed",
-        message: formatUpstreamError(submitPayload),
-        upstream: submitPayload,
-        request: {
-          model: apiMartSubmitBody.model,
-          size: apiMartSubmitBody.size,
-          quality: apiMartSubmitBody.quality,
-          output_format: apiMartSubmitBody.output_format,
-          referenceCount: apiMartSubmitBody.image_urls?.length || 0,
-        },
-      });
-      return;
-    }
-
-    const taskId = extractTaskId(submitPayload);
-    if (!taskId) {
-      res.status(502).json({
-        error: "APIMart response did not include task_id",
-        payload: submitPayload,
-      });
-      return;
-    }
-
-    res.status(202).json({
-      taskId,
-      status: "submitted",
-      model: apiMartSubmitBody.model,
-      provider: "apimart",
-      apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
-    });
+    if (label) label.textContent = file.name;
+    renderConfigInputThumbnails(configNode);
+    saveCurrentProject();
   } catch (error) {
-    res.status(500).json({
-      error: "Image generation failed",
-      message: error instanceof Error ? error.message : String(error),
+    if (label) label.textContent = `上传失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    input.value = "";
+  }
+}
+
+document.addEventListener("input", (event) => {
+  if (!event.target.matches(".text-input, .mini-textarea, .text-brief-field")) return;
+  const node = event.target.closest(".node");
+  const description = node?.querySelector(".node-description");
+  if (description) description.textContent = getNodeContent(node);
+  saveCurrentProject();
+});
+
+document.addEventListener("change", (event) => {
+  if (!event.target.matches(".node-file-input")) return;
+  const node = event.target.closest(".node");
+  const files = [...(event.target.files || [])];
+  if (!node || !files.length) return;
+
+  if (node.dataset.type === "image") {
+    uploadFilesToImageNode(node, files);
+    return;
+  }
+
+  if (node.dataset.type === "video") {
+    uploadFilesToVideoNode(node, files);
+    return;
+  }
+});
+
+canvasFilePicker?.addEventListener("change", () => {
+  const imageFiles = [...(canvasFilePicker.files || [])].filter((file) => file.type.startsWith("image/"));
+  const uploadMode = canvasFileUploadMode;
+  canvasFileUploadMode = "ask";
+  canvasFilePicker.value = "";
+  if (!imageFiles.length) return;
+
+  const imageRole = askCanvasUploadImageRole();
+  if (!imageRole) return;
+
+  if (imageFiles.length === 1) {
+    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
+  if (uploadMode === "split") {
+    createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
+  const mergeIntoOne = window.confirm("检测到多张图片。\n\n确定：上传到一个图片节点\n取消：每张图片分成单独节点");
+  if (mergeIntoOne) {
+    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+    return;
+  }
+
+  createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
+});
+
+function createImageNodesFromFilesAtPoint(files, point, imageRole = "general") {
+  const spacingX = 310;
+  const spacingY = 290;
+  files.forEach((file, index) => {
+    const nodePoint = {
+      x: point.x + (index % 3) * spacingX,
+      y: point.y + Math.floor(index / 3) * spacingY,
+    };
+    createImageInputNodeFromFilesAtPoint([file], nodePoint, imageRole);
+  });
+}
+
+canvas?.addEventListener("dragenter", (event) => {
+  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
+  event.preventDefault();
+  canvasDragDepth += 1;
+  canvas.classList.add("drag-over");
+});
+
+canvas?.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  canvas.classList.add("drag-over");
+});
+
+canvas?.addEventListener("dragleave", (event) => {
+  if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
+  canvasDragDepth = Math.max(0, canvasDragDepth - 1);
+  if (!canvasDragDepth) canvas.classList.remove("drag-over");
+});
+
+canvas?.addEventListener("drop", (event) => {
+  const memoryId = event.dataTransfer?.getData("application/x-aivideobox-memory");
+  if (memoryId) {
+    const memory = getMemoryById(memoryId);
+    if (memory) {
+      event.preventDefault();
+      canvasDragDepth = 0;
+      canvas.classList.remove("drag-over");
+      const point = clientPointToWorldPoint(event.clientX, event.clientY);
+      createNodeFromMemory(memory, point);
+    }
+    return;
+  }
+  const imageFiles = getImageFilesFromDataTransfer(event.dataTransfer);
+  const videoFiles = getVideoFilesFromDataTransfer(event.dataTransfer);
+  if (!imageFiles.length && !videoFiles.length) return;
+  event.preventDefault();
+  canvasDragDepth = 0;
+  canvas.classList.remove("drag-over");
+  if (videoFiles.length) {
+    createVideoInputNodeFromDrop(videoFiles, event.clientX, event.clientY);
+    return;
+  }
+  createImageInputNodeFromDrop(imageFiles, event.clientX, event.clientY);
+});
+
+document.addEventListener(
+  "mousedown",
+  (event) => {
+    if (event.button !== 0) return;
+    const port = event.target.closest(".node-port");
+    if (!port) return;
+    const node = port.closest(".node");
+    if (!node) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    startWire(node, port, event);
+  },
+  true,
+);
+
+canvas?.addEventListener("mousedown", (event) => {
+  if (event.target.closest(".node-port, button, select, textarea")) return;
+  if (event.button === 1) {
+    event.preventDefault();
+    panState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewport.x,
+      originY: viewport.y,
+    };
+    canvas.classList.add("panning");
+    return;
+  }
+  if (event.button !== 0) return;
+
+  const node = event.target.closest(".node");
+  if (!node) {
+    pendingCanvasDrag = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewport.x,
+      originY: viewport.y,
+      startedAt: Date.now(),
+      mode: "",
+    };
+    return;
+  }
+
+  const rect = node.getBoundingClientRect();
+  if (!selectedNodes.has(node)) selectNode(node);
+  dragState = {
+    node,
+    nodes: selectedNodes.size ? [...selectedNodes] : [node],
+    offsetX: (event.clientX - rect.left) / viewport.scale,
+    offsetY: (event.clientY - rect.top) / viewport.scale,
+    startX: event.clientX,
+    startY: event.clientY,
+    origins: new Map((selectedNodes.size ? [...selectedNodes] : [node]).map((item) => [
+      item,
+      {
+        x: Number(item.dataset.x) || 0,
+        y: Number(item.dataset.y) || 0,
+      },
+    ])),
+  };
+});
+
+canvas?.addEventListener("auxclick", (event) => {
+  if (event.button === 1) event.preventDefault();
+});
+
+document.addEventListener("mousemove", (event) => {
+  if (wireState) {
+    updateTempWire(event);
+    highlightNearestPort(event);
+    return;
+  }
+
+  if (panState) {
+    viewport.x = panState.originX + event.clientX - panState.startX;
+    viewport.y = panState.originY + event.clientY - panState.startY;
+    applyViewport();
+    return;
+  }
+
+  if (pendingCanvasDrag) {
+    const dx = event.clientX - pendingCanvasDrag.startX;
+    const dy = event.clientY - pendingCanvasDrag.startY;
+    const distance = Math.hypot(dx, dy);
+    if (!pendingCanvasDrag.mode && distance > 4) {
+      pendingCanvasDrag.mode = "select";
+      startSelectionBoxFromPoint(pendingCanvasDrag.startX, pendingCanvasDrag.startY);
+    }
+    if (pendingCanvasDrag.mode === "pan") {
+      viewport.x = pendingCanvasDrag.originX + dx;
+      viewport.y = pendingCanvasDrag.originY + dy;
+      applyViewport();
+      return;
+    }
+    if (pendingCanvasDrag.mode === "select") {
+      updateSelectionBox(event);
+      return;
+    }
+  }
+
+  if (selectionBoxState) {
+    updateSelectionBox(event);
+    return;
+  }
+
+  if (!dragState) return;
+  const dx = (event.clientX - dragState.startX) / viewport.scale;
+  const dy = (event.clientY - dragState.startY) / viewport.scale;
+  dragState.nodes.forEach((node) => {
+    const origin = dragState.origins.get(node);
+    moveNode(node, origin.x + dx, origin.y + dy);
+  });
+  updateConnections();
+});
+
+document.addEventListener("mouseup", (event) => {
+  if (wireState) {
+    finishWire(event);
+    return;
+  }
+
+  const finishedSelection = pendingCanvasDrag?.mode === "select" && selectionBoxState;
+  if (finishedSelection) finishSelectionBox(event);
+  if (pendingCanvasDrag && !pendingCanvasDrag.mode) selectNode(null);
+  pendingCanvasDrag = null;
+  if (!finishedSelection && selectionBoxState) finishSelectionBox(event);
+  if (dragState) saveCurrentProject();
+  dragState = null;
+  panState = null;
+  canvas?.classList.remove("panning");
+});
+
+canvas?.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    zoomCanvas(event.deltaY > 0 ? 0.9 : 1.1, event.clientX, event.clientY);
+  },
+  { passive: false },
+);
+
+canvasToolbar?.addEventListener("mousedown", (event) => {
+  event.stopPropagation();
+});
+
+arrangeCanvasNodes?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  arrangeNodes();
+});
+
+createFolderFromSelection?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  createFolderFromSelectedNodes();
+});
+
+exitFolderCanvas?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  exitFolder();
+});
+
+folderExitTop?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  exitFolder();
+});
+
+resetCanvasView?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  resetViewport();
+});
+
+zoomCanvasOut?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  zoomCanvas(0.9);
+});
+
+zoomCanvasIn?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  zoomCanvas(1.1);
+});
+
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveCurrentProject();
+      saveProjectList();
+    }
+
+  if (event.key === "Escape") {
+    hideMenus();
+    closeImageConfig();
+    selectNode(null);
+  }
+
+    if ((event.key === "Backspace" || event.key === "Delete") && selectedNodes.size) {
+      if (isTextEditingTarget(event.target)) return;
+      event.preventDefault();
+      deleteSelectedNodes();
+    }
+  },
+  true,
+);
+
+window.addEventListener("beforeunload", () => {
+  saveCurrentProject();
+  saveProjectList();
+});
+
+function showPage(name) {
+  if (!name) return;
+  pages.forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
+  navItems.forEach((item) => item.classList.toggle("active", item.dataset.page === name));
+  applyWorkspaceSidebarsState();
+}
+
+function upsertProject(name) {
+  if (!projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`)) {
+    addProjectCard(name);
+  }
+  updateProjectGridState();
+  saveProjectList();
+}
+
+function createFreshProject(baseName) {
+  const name = uniqueProjectName(baseName);
+  rememberProjectData(name, { nodes: [], connections: [] });
+  storeProjectRecord(name, { nodes: [], connections: [] });
+  writeProjectStub(name);
+  addProjectCard(name);
+  updateProjectGridState();
+  saveProjectList();
+  setTimeout(saveProjectList, 800);
+  return name;
+}
+
+function uniqueProjectName(baseName) {
+  const existing = new Set([...projectGrid.querySelectorAll(".project-card")].map((card) => card.dataset.project));
+  if (!existing.has(baseName)) return baseName;
+  let index = 2;
+  while (existing.has(`${baseName} ${index}`)) index += 1;
+  return `${baseName} ${index}`;
+}
+
+function startProjectNameEdit(card) {
+  const titleEl = card.querySelector(".project-name");
+  if (!titleEl || card.querySelector(".project-name-input")) return;
+
+  const oldName = card.dataset.project || titleEl.textContent.trim();
+  const input = document.createElement("input");
+  input.className = "project-name-input";
+  input.value = oldName;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const rawName = input.value.trim();
+    let nextName = rawName || oldName;
+    if (nextName !== oldName) {
+      nextName = uniqueProjectNameExcept(nextName, oldName);
+      renameProject(oldName, nextName, card);
+    }
+
+    const strong = document.createElement("strong");
+    strong.className = "project-name";
+    strong.title = "点击重命名";
+    strong.textContent = nextName;
+    input.replaceWith(strong);
+  };
+
+  input.addEventListener("blur", commit, { once: true });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = oldName;
+      input.blur();
+    }
+  });
+}
+
+function uniqueProjectNameExcept(baseName, ignoredName) {
+  const existing = new Set(
+    [...projectGrid.querySelectorAll(".project-card")]
+      .map((card) => card.dataset.project)
+      .filter((name) => name !== ignoredName),
+  );
+  if (!existing.has(baseName)) return baseName;
+  let index = 2;
+  while (existing.has(`${baseName} ${index}`)) index += 1;
+  return `${baseName} ${index}`;
+}
+
+function renameProject(oldName, nextName, card) {
+  if (!oldName || !nextName || oldName === nextName) return;
+  const oldKey = projectKey(oldName);
+  const nextKey = projectKey(nextName);
+  const cached = readCachedProjectData(oldName, null);
+  const cachedBackup = projectDataCache.get(`${oldName}::backup`);
+  if (cached) {
+    rememberProjectData(nextName, cached);
+    storeProjectRecord(nextName, cached);
+    projectDataCache.delete(oldName);
+    deleteProjectRecord(oldName);
+    writeProjectStub(nextName);
+  } else {
+    const savedProject = localStorage.getItem(oldKey);
+    if (savedProject !== null) localStorage.setItem(nextKey, savedProject);
+  }
+  if (cachedBackup) {
+    projectDataCache.set(`${nextName}::backup`, cachedBackup);
+    projectDataCache.delete(`${oldName}::backup`);
+    storeProjectRecord(nextName, cachedBackup, PROJECT_BACKUP_STORE_NAME);
+  }
+  localStorage.removeItem(oldKey);
+  localStorage.removeItem(`${oldKey}.backup`);
+  card.dataset.project = nextName;
+  const openButton = card.querySelector("[data-open-project]");
+  if (openButton) openButton.dataset.openProject = nextName;
+  if (currentProject === oldName) {
+    currentProject = nextName;
+    workspaceProjectName.textContent = nextName;
+  }
+  if (card.dataset.code) {
+    const index = readProjectCodeIndex();
+    index[card.dataset.code] = nextName;
+    writeProjectCodeIndex(index);
+  }
+  saveProjectList();
+}
+
+function addProjectCard(name, date = new Date().toLocaleDateString("zh-CN"), code = "") {
+  const projectCode = normalizeProjectCode(code);
+  const thumbnail = getProjectThumbnailFromLocal(name);
+  const stats = getProjectStorageStats(name);
+  const card = document.createElement("article");
+  card.className = "project-card";
+  card.dataset.project = name;
+  if (projectCode) card.dataset.code = projectCode;
+  card.innerHTML = `
+    <div class="project-row">
+      <div class="folder-icon"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z" /></svg></div>
+      <div>
+        <strong class="project-name" title="点击重命名">${escapeHtml(name)}</strong>
+        <span>${escapeHtml(date)}</span>
+        <small>${escapeHtml(`节点 ${stats.nodes} / 备份 ${stats.backupNodes}`)}</small>
+      </div>
+    </div>
+    <div class="project-thumb ${thumbnail ? "has-image" : ""}" data-project-thumb>
+      ${thumbnail ? `<img src="${escapeHtml(thumbnail)}" alt="">` : `<span>暂无预览图</span>`}
+    </div>
+    <button class="open-canvas" data-open-project="${escapeHtml(name)}" type="button">开始项目</button>
+    <button class="project-code" type="button">${escapeHtml(projectCode ? `项目码 ${projectCode}` : "生成项目码")}</button>
+    <button class="delete-project" type="button">删除</button>
+  `;
+  projectGrid.prepend(card);
+  updateProjectGridState();
+}
+
+function getProjectStorageStats(name) {
+  const data = readCachedProjectData(name, null);
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  return {
+    nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
+    backupNodes: Array.isArray(backup?.nodes) ? backup.nodes.length : 0,
+  };
+}
+
+function getProjectThumbnailFromLocal(name) {
+  return getProjectThumbnail(readCachedProjectData(name, null));
+}
+
+function getProjectThumbnail(data) {
+  if (!data || !Array.isArray(data.nodes)) return "";
+  const candidates = [];
+  data.nodes.forEach((node) => collectNodeThumbnailCandidates(node, candidates));
+  return candidates.find(isRemoteImageUrl) || candidates.find((value) => typeof value === "string" && value.startsWith("data:image/")) || "";
+}
+
+function collectNodeThumbnailCandidates(node, candidates) {
+  if (!node) return;
+  candidates.push(
+    node.generatedImageUrl,
+    ...arrayOrEmpty(node.generatedImageUrls),
+    ...arrayOrEmpty(node.imageUrls),
+    node.imageDataUrl,
+    ...arrayOrEmpty(node.referenceImageUrls),
+    node.referenceImageDataUrl,
+  );
+  arrayOrEmpty(node.folderNodes).forEach((child) => collectNodeThumbnailCandidates(child, candidates));
+}
+
+function arrayOrEmpty(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function updateProjectCardThumbnail(name, data) {
+  const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
+  const thumb = card?.querySelector("[data-project-thumb]");
+  if (!thumb) return;
+  const image = getProjectThumbnail(data);
+  thumb.classList.toggle("has-image", Boolean(image));
+  thumb.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="">` : "<span>暂无预览图</span>";
+}
+
+function saveProjectList() {
+  const projects = [...projectGrid.querySelectorAll(".project-card")].map((card) => ({
+    name: card.dataset.project,
+    date: card.querySelector(".project-row span")?.textContent || "",
+    code: card.dataset.code || normalizeProjectCode(card.querySelector(".project-code")?.textContent) || "",
+  }));
+  try {
+    localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects));
+  } catch (error) {
+    console.error("Project list save failed", error);
+  }
+}
+
+function loadProjectList() {
+  const saved = readJson(PROJECT_LIST_KEY, []);
+  const projects = repairProjectListFromStorage(Array.isArray(saved) ? saved : []);
+  projectGrid.innerHTML = "";
+  projects.reverse().forEach((project) => addProjectCard(project.name, project.date, project.code));
+  migrateProjectsToIndexedDB(projects);
+  try {
+    localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects.slice().reverse()));
+  } catch (error) {
+    console.warn("Project list repair save failed", error);
+  }
+  rebuildProjectCodeIndex();
+  updateProjectGridState();
+}
+
+function repairProjectListFromStorage(projects) {
+  const byName = new Map(projects.map((project) => [String(project?.name || ""), project]));
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("aivideobox.project.v2:")) continue;
+    const name = key.slice("aivideobox.project.v2:".length).replace(/\.backup$/, "");
+    if (!name || byName.has(name)) continue;
+    const data = readJson(key, null);
+    if (!data || !Array.isArray(data.nodes)) continue;
+    byName.set(name, {
+      name,
+      date: new Date().toLocaleDateString("zh-CN"),
+      code: "",
     });
   }
-};
+  return [...byName.values()].filter((project) => project?.name);
+}
 
-function normalizeProvider(value) {
+async function migrateProjectsToIndexedDB(projects = []) {
+  for (const project of projects) {
+    const name = project?.name;
+    if (!name) continue;
+    const key = projectKey(name);
+    const localData = readJson(key, null);
+    if (localData && Array.isArray(localData.nodes) && !localData.storedInIndexedDB) {
+      rememberProjectData(name, localData);
+      await storeProjectRecord(name, localData);
+      writeProjectStub(name);
+    }
+    const localBackup = readJson(`${key}.backup`, null);
+    if (localBackup && Array.isArray(localBackup.nodes)) {
+      projectDataCache.set(`${name}::backup`, localBackup);
+      await storeProjectRecord(name, localBackup, PROJECT_BACKUP_STORE_NAME);
+      try {
+        localStorage.removeItem(`${key}.backup`);
+      } catch {}
+    }
+  }
+}
+
+
+async function loadSharedProjectList() { return; }
+
+function refreshProjectThumbnails(projects) { return; }
+
+async function loadSharedProjectThumbnail(name) { return; }
+
+async function saveSharedProjectList(projects) { return; }
+
+function mergeProjectLists(localProjects = [], sharedProjects = [], deletedNames = []) {
+  const deleted = new Set(deletedNames.map((name) => String(name || "")));
+  const byName = new Map();
+  [...sharedProjects, ...localProjects].forEach((project) => {
+    const name = String(project?.name || "").trim();
+    if (!name || deleted.has(name)) return;
+    byName.set(name, {
+      name,
+      date: project.date || new Date().toLocaleDateString("zh-CN"),
+      code: project.code || "",
+    });
+  });
+  return [...byName.values()];
+}
+
+function deleteProject(name) {
+  const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
+  const code = card?.dataset.code;
+  card?.remove();
+  projectDataCache.delete(name);
+  deleteProjectRecord(name);
+  localStorage.removeItem(projectKey(name));
+  localStorage.removeItem(`${projectKey(name)}.backup`);
+  if (code) removeProjectCode(code);
+  if (currentProject === name) {
+    currentProject = "";
+    clearCanvas();
+  }
+  updateProjectGridState();
+  saveProjectList();
+}
+
+async function publishProjectCode(card) {
+  if (!card) return "";
+  const name = card.dataset.project;
+  if (currentProject === name) saveCurrentProject();
+  const code = card.dataset.code || createUniqueProjectCode();
+  card.dataset.code = code;
+  const button = card.querySelector(".project-code");
+  if (button) button.textContent = `项目码 ${code}`;
+  const index = readProjectCodeIndex();
+  index[code] = name;
+  writeProjectCodeIndex(index);
+  saveProjectList();
+
+  const data = readCachedProjectData(name, null);
+  if (hasProjectNodes(data)) {
+    const shareableData = await ensureSharedProjectImages(name, data);
+    await saveSharedProject(code, name, shareableData || data);
+  }
+  return code;
+}
+
+async function cloneProjectByCode(code) {
+  const normalized = normalizeProjectCode(code);
+  if (!normalized) return "";
+  const localName = findProjectNameByCode(normalized);
+  let sourceName = localName;
+  let sourceProjectData = localName ? readCachedProjectData(localName, null) || rememberProjectData(localName, await loadProjectRecord(localName)) : null;
+  let sourceData = sourceProjectData ? JSON.stringify(sourceProjectData) : "";
+
+  if (!sourceData) {
+    const shared = await loadSharedProjectByCode(normalized);
+    if (!shared?.data || !hasProjectNodes(shared.data)) return "";
+    sourceName = shared.name || `项目 ${normalized}`;
+    sourceData = JSON.stringify(shared.data);
+  }
+
+  const name = uniqueProjectName(`${sourceName} 副本`);
+  if (sourceProjectData) {
+    rememberProjectData(name, sourceProjectData);
+    storeProjectRecord(name, sourceProjectData);
+    writeProjectStub(name);
+  } else {
+    localStorage.setItem(projectKey(name), sourceData);
+  }
+  addProjectCard(name, new Date().toLocaleDateString("zh-CN"));
+  updateProjectGridState();
+  saveProjectList();
+  return name;
+}
+
+function findProjectNameByCode(code) {
+  const normalized = normalizeProjectCode(code);
+  if (!normalized) return "";
+  const card = [...projectGrid.querySelectorAll(".project-card")].find((item) => item.dataset.code === normalized);
+  if (card) return card.dataset.project || "";
+  return readProjectCodeIndex()[normalized] || "";
+}
+
+function createUniqueProjectCode() {
+  const used = new Set([
+    ...Object.keys(readProjectCodeIndex()),
+    ...[...projectGrid.querySelectorAll(".project-card")].map((card) => card.dataset.code).filter(Boolean),
+  ]);
+  let code = "";
+  do {
+    code = Math.random().toString(36).slice(2, 8).toUpperCase();
+  } while (used.has(code));
+  return code;
+}
+
+function normalizeProjectCode(value = "") {
+  return String(value).replace(/^项目码\s*/i, "").replace(/\s+/g, "").toUpperCase();
+}
+
+function markProjectCodeInput(message) {
+  if (!projectCodeInput) return;
+  projectCodeInput.value = "";
+  projectCodeInput.placeholder = message;
+  projectCodeInput.classList.add("invalid");
+  setTimeout(() => {
+    projectCodeInput.classList.remove("invalid");
+    projectCodeInput.placeholder = "输入项目码";
+  }, 1400);
+}
+
+function readProjectCodeIndex() {
+  const index = readJson(PROJECT_CODE_INDEX_KEY, {});
+  return index && typeof index === "object" && !Array.isArray(index) ? index : {};
+}
+
+function writeProjectCodeIndex(index) {
+  try {
+    localStorage.setItem(PROJECT_CODE_INDEX_KEY, JSON.stringify(index));
+  } catch (error) {
+    console.error("Project code index save failed", error);
+  }
+}
+
+function removeProjectCode(code) {
+  const index = readProjectCodeIndex();
+  delete index[normalizeProjectCode(code)];
+  writeProjectCodeIndex(index);
+}
+
+function rebuildProjectCodeIndex() {
+  const index = readProjectCodeIndex();
+  [...projectGrid.querySelectorAll(".project-card")].forEach((card) => {
+    if (card.dataset.code) index[card.dataset.code] = card.dataset.project;
+  });
+  writeProjectCodeIndex(index);
+}
+
+function updateProjectGridState() {
+  projectGrid?.classList.toggle("empty", !projectGrid.querySelector(".project-card"));
+}
+
+async function openProject(name) {
+  if (currentProject) saveCurrentProject();
+  activeFolder = null;
+  ensureMemoryUi();
+  loadGlobalMemories();
+  currentProject = name;
+  workspaceProjectName.textContent = name;
+  document.querySelectorAll(".project-card").forEach((card) => {
+    card.classList.toggle("active", card.dataset.project === name);
+  });
+  clearCanvas();
+  const stored = await loadProjectRecord(name);
+  if (stored) rememberProjectData(name, stored);
+  restoreProject(name);
+  syncFolderUi();
+  showPage("workspace");
+  refreshConnectionsSoon();
+}
+
+function ensureMemoryUi() {
+  const panel = document.querySelector(".conversation-panel");
+  if (!panel) return;
+  panel.style.display = "flex";
+
+  if (!memoryComposer) {
+    memoryComposer = document.createElement("form");
+    memoryComposer.className = "memory-composer";
+    memoryComposer.id = "memoryComposer";
+    memoryComposer.innerHTML = `
+      <textarea id="memoryInput" placeholder="记录一条对话、需求或提示词..."></textarea>
+      <div class="memory-actions">
+        <select id="memoryType">
+          <option value="image">图片</option>
+          <option value="text">文本</option>
+          <option value="video">视频</option>
+        </select>
+        <button class="yellow-button" type="submit">保存记忆</button>
+      </div>
+    `;
+    const chatList = panel.querySelector(".chat-list");
+    panel.insertBefore(memoryComposer, chatList || null);
+  }
+
+  if (!memoryList) {
+    memoryList = panel.querySelector(".chat-list") || document.createElement("div");
+    memoryList.classList.add("chat-list");
+    memoryList.id = "memoryList";
+    if (!memoryList.parentElement) panel.appendChild(memoryList);
+  }
+
+  memoryInput = document.querySelector("#memoryInput");
+  memoryType = document.querySelector("#memoryType");
+  ensureWorkspaceSidebarsToggle();
+}
+
+function ensureWorkspaceSidebarsToggle() {
+  if (!appShell || appShell.querySelector("#toggleWorkspaceSidebars")) return;
+  const button = document.createElement("button");
+  button.id = "toggleWorkspaceSidebars";
+  button.type = "button";
+  button.className = "workspace-side-toggle";
+  appShell.appendChild(button);
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceSidebarsHidden = !workspaceSidebarsHidden;
+    localStorage.setItem(WORKSPACE_SIDE_STATE_KEY, String(workspaceSidebarsHidden));
+    applyWorkspaceSidebarsState();
+    refreshConnectionsSoon();
+  });
+  applyWorkspaceSidebarsState();
+}
+
+function applyWorkspaceSidebarsState() {
+  const layout = document.querySelector(".workspace-layout");
+  const workspaceActive = document.querySelector("#page-workspace")?.classList.contains("active");
+  appShell?.classList.toggle("workspace-sidebars-hidden", workspaceSidebarsHidden && workspaceActive);
+  layout?.classList.toggle("sidebars-hidden", workspaceSidebarsHidden);
+  const toggle = document.querySelector("#toggleWorkspaceSidebars");
+  if (toggle) {
+    toggle.classList.toggle("is-hidden-state", workspaceSidebarsHidden);
+    toggle.hidden = !workspaceActive;
+    toggle.textContent = workspaceSidebarsHidden ? "显示左侧" : "隐藏左侧";
+    toggle.title = workspaceSidebarsHidden ? "显示目录和保存记忆" : "隐藏目录和保存记忆";
+  }
+}
+
+function createNodeFromMemory(memory, point = null) {
+  const offset = Math.min(420, conversationMemories.length * 18);
+  const center = point || getCanvasViewportCenterPoint();
+  if (memory.nodeSnapshot) {
+    const snapshot = {
+      ...memory.nodeSnapshot,
+      id: createNodeId(),
+      title: memory.title || memory.nodeSnapshot.title || "记忆节点",
+      x: center.x - 129,
+      y: center.y - 110,
+    };
+    const node = createNode(snapshot);
+    hydrateRestoredNodeData(node, snapshot);
+    selectNode(node);
+    saveCurrentProject();
+    refreshConnectionsSoon();
+    return node;
+  }
+  const node = createNode({
+    id: createNodeId(),
+    type: memory.type || "text",
+    title: memory.title || `${typeNames[memory.type] || "文本"}记忆`,
+    content: memory.content || "",
+    x: center.x - 129 + offset,
+    y: center.y - 110 + offset,
+  });
+  selectNode(node);
+  saveCurrentProject();
+  return node;
+}
+
+function createMemoryFromNode(node, note = "") {
+  const snapshot = stripMediaFromNodeSnapshot(serializeNodes([node])[0]);
+  const title = note.trim() || snapshot.title || node.querySelector(".node-title strong")?.textContent || "节点记忆";
+  return {
+    id: createMemoryId(),
+    type: snapshot.type || node.dataset.type || "text",
+    title: createMemoryTitle(title),
+    content: note.trim() || snapshot.content || snapshot.title || "",
+    nodeSnapshot: snapshot,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function stripMediaFromNodeSnapshot(snapshot) {
+  const clean = { ...snapshot };
+  delete clean.fileName;
+  delete clean.imageUrls;
+  delete clean.imageDataKey;
+  delete clean.imageDataUrl;
+  delete clean.referenceImageUrls;
+  delete clean.referenceImageDataKey;
+  delete clean.referenceImageDataUrl;
+  delete clean.referenceFileName;
+  delete clean.generatedImageUrl;
+  delete clean.generatedImageUrls;
+  delete clean.folderNodes;
+  delete clean.folderConnections;
+  return clean;
+}
+
+function hydrateRestoredNodeData(node, saved) {
+  node.dataset.imagePurpose = saved.imagePurpose || "自定义";
+  node.dataset.referenceMode = saved.referenceMode || "structureStyle";
+  node.dataset.imageRole = saved.imageRole || "general";
+  node.dataset.imageQuality = saved.imageQuality || "high";
+  node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+  node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+    ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+    : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+  node.dataset.apimartChannel = "b";
+  if (saved.fileName) node.dataset.fileName = saved.fileName;
+  if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
+  if (Array.isArray(saved.imageDataKeys)) {
+    node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
+    restoreImageDataKeys(node, saved.imageDataKeys);
+  }
+  if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
+  if (Array.isArray(saved.imageDataUrls)) {
+    const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
+    if (safeInlineUrls.length) {
+      node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
+      node.dataset.imageDataInlineUrl = safeInlineUrls[0];
+      const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
+      if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
+    }
+  }
+  if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
+  if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
+  if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
+  if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
+  if (saved.generatedImageDataKey) {
+    loadProjectImage(saved.generatedImageDataKey).then((value) => {
+      if (!value) return;
+      node.dataset.generatedImageUrl = value;
+      renderNodeImagePreview(node);
+    });
+  }
+  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
+  if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
+  if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
+  if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
+  if (saved.tone) node.dataset.tone = saved.tone;
+  setNodeType(node, saved.type, saved.content);
+  renderNodeImagePreview(node);
+  if (saved.imageDataKey) {
+    loadProjectImage(saved.imageDataKey).then((value) => {
+      if (!value) return;
+      node.dataset.imageDataUrl = value;
+      renderNodeImagePreview(node);
+    });
+  }
+  if (saved.referenceImageDataKey) {
+    loadProjectImage(saved.referenceImageDataKey).then((value) => {
+      if (value) node.dataset.referenceImageDataUrl = value;
+    });
+  }
+}
+
+function getCanvasViewportCenterPoint() {
+  const rect = canvas?.getBoundingClientRect();
+  if (!rect) return { x: 180, y: 160 };
+  return {
+    x: (rect.width / 2 - viewport.x) / viewport.scale,
+    y: (rect.height / 2 - viewport.y) / viewport.scale,
+  };
+}
+
+function renderConversationMemories() {
+  if (!memoryList) return;
+  const memories = conversationMemories.length ? conversationMemories : getDefaultMemories();
+  memoryList.innerHTML = memories
+    .map((memory, index) => {
+      const isSaved = conversationMemories.some((item) => item.id === memory.id);
+      const typeLabel = typeNames[memory.type] || "文本";
+      const memoryKind = memory.nodeSnapshot ? "节点配置" : typeLabel;
+      return `
+        <button class="chat-item ${index === 0 ? "active" : ""}" type="button" draggable="true" data-memory-id="${escapeHtml(memory.id || "")}" data-type="${escapeHtml(memory.type)}" data-title="${escapeHtml(memory.title)}" data-content="${escapeHtml(memory.content)}">
+          <strong>${escapeHtml(memory.title)}</strong>
+          <small>${escapeHtml(memoryKind)} / ${escapeHtml(memory.content || memory.nodeSnapshot?.content || "")}</small>
+          ${isSaved ? `<span class="memory-delete" role="button" tabindex="0" data-memory-id="${escapeHtml(memory.id)}">×</span>` : ""}
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function getMemoryById(id) {
+  return conversationMemories.find((memory) => memory.id === id) || getDefaultMemories().find((memory) => memory.id === id) || null;
+}
+
+function loadGlobalMemories() {
+  const saved = readJson(GLOBAL_MEMORY_KEY, []);
+  conversationMemories = Array.isArray(saved) ? saved : [];
+}
+
+function saveGlobalMemories() {
+  try {
+    localStorage.setItem(GLOBAL_MEMORY_KEY, JSON.stringify(conversationMemories));
+  } catch (error) {
+    console.error("Global memory save failed", error);
+  }
+}
+
+function migrateProjectMemoriesToGlobal(memories) {
+  if (!Array.isArray(memories) || !memories.length) return;
+  const existing = readJson(GLOBAL_MEMORY_KEY, []);
+  const merged = uniqueMemories([...(Array.isArray(existing) ? existing : []), ...memories]);
+  conversationMemories = merged;
+  saveGlobalMemories();
+}
+
+function uniqueMemories(memories) {
+  const seen = new Set();
+  return memories.filter((memory) => {
+    const key = memory.id || `${memory.type}:${memory.title}:${memory.content}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getDefaultMemories() {
+  return [
+    {
+      id: "default-scene-image",
+      type: "image",
+      title: "场景重建图片",
+      content: "完全参考输入图的破碎地面、墙体结构和红色光源，生成一张更清晰的场景参考图。",
+    },
+    {
+      id: "default-brief",
+      type: "text",
+      title: "官方 brief 拆解",
+      content: "拆解任务目标、不可出现内容、交付比例、镜头节奏和素材依赖。",
+    },
+  ];
+}
+
+function createMemoryTitle(content) {
+  const clean = content.replace(/\s+/g, " ").trim();
+  return clean.length > 18 ? `${clean.slice(0, 18)}...` : clean || "对话记忆";
+}
+
+function createMemoryId() {
+  return `memory-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createNode({
+  id,
+  type,
+  title,
+  content,
+  x,
+  y,
+  fileName,
+  imageDataKeys,
+  imageDataUrl,
+  imageUrls,
+  referenceImageDataUrl,
+  referenceImageUrls,
+  referenceFileName,
+  generatedImageUrl,
+  generatedImageUrls,
+  imageGenerationRecords,
+  videoDataUrl,
+  videoUrls,
+  referenceVideoUrl,
+  referenceVideoUrls,
+  generatedVideoUrl,
+  generatedVideoUrls,
+  videoMode,
+  videoDuration,
+  videoModel,
+  videoAspectRatio,
+  videoResolution,
+  videoSeed,
+  videoGenerateAudio,
+  videoReturnLastFrame,
+  videoWebSearch,
+  videoFirstFrameUrl,
+  videoLastFrameUrl,
+  videoReferenceAudioUrl,
+  videoReferenceAudioUrls,
+  imagePurpose,
+  referenceMode,
+  imageRole,
+  imageQuality,
+  imageModel,
+  imageProvider,
+  apimartChannel,
+  folderNodes,
+  folderConnections,
+}) {
+  const node = nodeTemplate.content.cloneNode(true).querySelector(".node");
+  node.id = id || createNodeId();
+  node.dataset.type = type;
+  node.dataset.kind = "output";
+  node.dataset.tone = `slot-${["a", "b", "c", "d"][nodeCounter % 4]}`;
+  if (fileName) node.dataset.fileName = fileName;
+  if (Array.isArray(imageUrls)) node.dataset.imageUrls = JSON.stringify(imageUrls);
+  if (Array.isArray(imageDataKeys)) {
+    node.dataset.imageDataKeys = JSON.stringify(imageDataKeys);
+    restoreImageDataKeys(node, imageDataKeys);
+  }
+  if (imageDataUrl) node.dataset.imageDataUrl = imageDataUrl;
+  if (Array.isArray(referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(referenceImageUrls);
+  if (referenceImageDataUrl) node.dataset.referenceImageDataUrl = referenceImageDataUrl;
+  if (referenceFileName) node.dataset.referenceFileName = referenceFileName;
+  if (generatedImageUrl) node.dataset.generatedImageUrl = generatedImageUrl;
+  if (Array.isArray(generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(generatedImageUrls);
+  if (Array.isArray(imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(imageGenerationRecords);
+  if (Array.isArray(videoUrls)) node.dataset.videoUrls = JSON.stringify(videoUrls);
+  if (videoDataUrl) node.dataset.videoDataUrl = videoDataUrl;
+  if (Array.isArray(referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(referenceVideoUrls);
+  if (referenceVideoUrl) node.dataset.referenceVideoUrl = referenceVideoUrl;
+  if (generatedVideoUrl) node.dataset.generatedVideoUrl = generatedVideoUrl;
+  if (Array.isArray(generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(generatedVideoUrls);
+  if (videoMode) node.dataset.videoMode = videoMode;
+  if (videoDuration) node.dataset.videoDuration = videoDuration;
+  if (videoModel) node.dataset.videoModel = videoModel;
+  if (videoAspectRatio) node.dataset.videoAspectRatio = videoAspectRatio;
+  if (videoResolution) node.dataset.videoResolution = videoResolution;
+  if (videoSeed) node.dataset.videoSeed = videoSeed;
+  if (videoGenerateAudio !== undefined) node.dataset.videoGenerateAudio = String(videoGenerateAudio);
+  if (videoReturnLastFrame !== undefined) node.dataset.videoReturnLastFrame = String(videoReturnLastFrame);
+  if (videoWebSearch !== undefined) node.dataset.videoWebSearch = String(videoWebSearch);
+  if (videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = videoFirstFrameUrl;
+  if (videoLastFrameUrl) node.dataset.videoLastFrameUrl = videoLastFrameUrl;
+  if (videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = videoReferenceAudioUrl;
+  if (Array.isArray(videoReferenceAudioUrls)) node.dataset.videoReferenceAudioUrls = JSON.stringify(videoReferenceAudioUrls);
+  if (imagePurpose) node.dataset.imagePurpose = imagePurpose;
+  if (referenceMode) node.dataset.referenceMode = referenceMode;
+  if (imageRole) node.dataset.imageRole = imageRole;
+  if (imageQuality) node.dataset.imageQuality = imageQuality;
+  if (imageModel) node.dataset.imageModel = imageModel;
+  node.dataset.imageProvider = normalizeImageProvider(imageProvider || node.dataset.imageProvider || "apimart");
+  if (apimartChannel) node.dataset.apimartChannel = apimartChannel;
+  if (Array.isArray(folderNodes)) node.dataset.folderNodes = JSON.stringify(folderNodes);
+  if (Array.isArray(folderConnections)) node.dataset.folderConnections = JSON.stringify(folderConnections);
+  node.querySelector(".node-title strong").textContent = title || `${typeNames[type]}节点`;
+  node.querySelector(".node-description").textContent = content !== undefined ? content : nodeDefaults[type];
+  node.querySelector(".node-type-select").value = type;
+  canvasContent.appendChild(node);
+  hydrateNode(node);
+  moveNode(node, x ?? 120, y ?? 120);
+  setNodeType(node, type, content);
+  nodeCounter += 1;
+  return node;
+}
+
+function startTitleEdit(titleEl) {
+  const node = titleEl.closest(".node");
+  selectNode(node);
+  const original = titleEl.textContent;
+  const input = document.createElement("input");
+  input.className = "node-title-input";
+  input.value = original;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const next = input.value.trim() || original;
+    const strong = document.createElement("strong");
+    strong.textContent = next;
+    input.replaceWith(strong);
+    saveCurrentProject();
+  };
+
+  input.addEventListener("blur", commit, { once: true });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = original;
+      input.blur();
+    }
+  });
+}
+
+function hydrateNode(node) {
+  node.querySelector(".node-kind")?.remove();
+  if (!node.querySelector(".node-port.in")) {
+    const port = document.createElement("button");
+    port.type = "button";
+    port.className = "node-port in";
+    port.title = "输入端口";
+    node.appendChild(port);
+  }
+  if (!node.querySelector(".node-port.out")) {
+    const port = document.createElement("button");
+    port.type = "button";
+    port.className = "node-port out";
+    port.title = "输出端口";
+    node.appendChild(port);
+  }
+}
+
+function setNodeType(node, type, content) {
+  node.dataset.type = type;
+  node.classList.toggle("folder-node", type === "folder");
+  if (type === "folder") {
+    renderFolderNode(node);
+    return;
+  }
+  node.querySelector(".node-type-label").textContent = typeLabels[type];
+  configureNodeTypeSelect(node, type);
+  ensureCustomButton(node, type);
+  const description = node.querySelector(".node-description");
+  if (content !== undefined) description.textContent = content;
+  const value = description.textContent || nodeDefaults[type] || "";
+  const body = node.querySelector(".node-body");
+
+  if (type === "text") {
+    const fields = parseTextNodeFields(value);
+    body.innerHTML = `
+      <div class="text-brief-grid">
+        <label>需求<textarea class="text-brief-field" data-text-field="requirement" placeholder="保存核心需求">${escapeHtml(fields.requirement)}</textarea></label>
+        <label>修改意见<textarea class="text-brief-field" data-text-field="revision" placeholder="保存要修改的地方">${escapeHtml(fields.revision)}</textarea></label>
+        <label>场景描述<textarea class="text-brief-field" data-text-field="scene" placeholder="保存空间、镜头、氛围、材质等描述">${escapeHtml(fields.scene)}</textarea></label>
+        <label>禁用项<textarea class="text-brief-field" data-text-field="negative" placeholder="保存不要出现的内容">${escapeHtml(fields.negative)}</textarea></label>
+      </div>
+    `;
+    description.textContent = formatTextNodeFields(fields);
+  } else if (type === "image") {
+    if (description.textContent === "ApiMart / gpt-image-2-official 图片生成节点。") {
+      description.textContent = "";
+    }
+    node.dataset.imagePurpose ||= imageOptions.purpose || "自定义";
+    node.dataset.referenceMode ||= imageOptions.referenceMode || "structureStyle";
+    node.dataset.imageRole ||= imageOptions.imageRole || "general";
+    node.dataset.imageQuality ||= imageOptions.quality || "high";
+    body.innerHTML = `
+      <div class="image-node-shell">
+        <label class="image-upload-window">
+          <input class="node-file-input" type="file" accept="image/*" multiple>
+          <span>上传</span>
+          <small class="upload-name">${escapeHtml(node.dataset.fileName || "")}</small>
+          <div class="upload-preview"></div>
+        </label>
+      </div>
+    `;
+  } else if (type === "video") {
+    if (description.textContent === "Seedance 视频生成项目节点。") {
+      description.textContent = "";
+    }
+    node.dataset.videoMode ||= "image-to-video";
+    node.dataset.videoMode = normalizeVideoModeValue(node.dataset.videoMode);
+    node.dataset.videoDuration ||= "5";
+    node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel);
+    body.innerHTML = `
+      <div class="image-node-shell video-node-shell">
+        <label class="image-upload-window video-upload-window">
+          <input class="node-file-input" type="file" accept="video/*">
+          <span>上传</span>
+          <small class="upload-name">${escapeHtml(node.dataset.fileName || "")}</small>
+          <div class="upload-preview video-preview"></div>
+        </label>
+      </div>
+    `;
+  } else {
+    body.innerHTML = "";
+  }
+  renderNodeImagePreview(node);
+}
+
+function configureNodeTypeSelect(node, type) {
+  const select = node.querySelector(".node-type-select");
+  if (!select) return;
+  if (type === "image") {
+    select.dataset.roleSelect = "true";
+    select.dataset.videoModeSelect = "false";
+    select.dataset.nodeType = "image-role";
+    select.hidden = true;
+    ensureImageRolePicker(node);
+    select.value = node.dataset.imageRole || "general";
+    updateImageRoleSelectLabel(node);
+    return;
+  }
+
+  if (type === "video") {
+    select.dataset.roleSelect = "false";
+    select.dataset.videoModeSelect = "true";
+    select.dataset.nodeType = "video-mode";
+    select.hidden = false;
+    node.querySelector(".image-role-picker")?.remove();
+    select.innerHTML = Object.entries(videoModeLabels)
+      .map(([value, label]) => `<option value="${value}">${label}</option>`)
+      .join("");
+    select.value = normalizeVideoModeValue(node.dataset.videoMode);
+    return;
+  }
+
+  select.dataset.roleSelect = "false";
+  select.dataset.videoModeSelect = "false";
+  select.dataset.nodeType = "node-type";
+  select.hidden = false;
+  node.querySelector(".image-role-picker")?.remove();
+  select.innerHTML = `
+    <option value="text">文本</option>
+    <option value="image">图片</option>
+    <option value="video">视频</option>
+    <option value="folder">文件夹</option>
+  `;
+  select.value = type;
+}
+
+function normalizeVideoModeValue(value) {
+  return videoModeLabels[value] ? value : "image-to-video";
+}
+
+function normalizeVideoModelValue(value) {
+  const model = String(value || "").trim();
+  if (model === "kling3" || model === "kling-motion-control") return "kling-motion-control";
+  if (model === "happyhorse" || model === "happyhorse-1.0") return "happyhorse-1.0";
+  return "doubao-seedance-2.0";
+}
+
+function setVideoMode(node, mode) {
+  if (!node || !videoModeLabels[mode]) return;
+  node.dataset.videoMode = mode;
+  const select = node.querySelector(".node-type-select");
+  if (select && select.dataset.videoModeSelect === "true") select.value = mode;
+  saveCurrentProject();
+}
+
+function renderFolderNode(node) {
+  const count = parseJsonArray(node.dataset.folderNodes).length;
+  const title = node.querySelector(".node-title strong")?.textContent || "文件夹";
+  node.innerHTML = `
+    <div class="folder-canvas-entry">
+      <span class="folder-large-icon" aria-hidden="true"></span>
+      <div class="node-title folder-title"><strong title="点击重命名">${escapeHtml(title)}</strong></div>
+      <small>${count} 个节点</small>
+    </div>
+  `;
+}
+
+function updateImageRoleSelectLabel(node) {
+  const select = node.querySelector(".node-type-select");
+  const button = node.querySelector(".image-role-button");
+  const value = node.dataset.imageRole || "general";
+  if (!roleLabels[value]) {
+    node.dataset.imageRole = "general";
+  }
+  if (select && select.dataset.roleSelect === "true") select.value = node.dataset.imageRole || "general";
+  if (button) button.textContent = roleLabels[node.dataset.imageRole || "general"];
+}
+
+function ensureImageRolePicker(node) {
+  const head = node.querySelector(".node-head");
+  if (!head || node.querySelector(".image-role-picker")) return;
+  const picker = document.createElement("div");
+  picker.className = "image-role-picker";
+  picker.innerHTML = `
+    <button class="image-role-button" type="button">${roleLabels[node.dataset.imageRole || "general"]}</button>
+    <div class="image-role-menu">
+      ${Object.entries(roleLabels)
+        .map(([value, label]) => `<button class="image-role-option" type="button" data-role="${value}">${label}</button>`)
+        .join("")}
+    </div>
+  `;
+  const customButton = node.querySelector(".node-custom-button");
+  head.insertBefore(picker, customButton || null);
+}
+
+function toggleImageRoleMenu(node) {
+  if (!node) return;
+  const picker = node.querySelector(".image-role-picker");
+  if (!picker) return;
+  const shouldOpen = !picker.classList.contains("open");
+  closeImageRoleMenus();
+  picker.classList.toggle("open", shouldOpen);
+}
+
+function closeImageRoleMenus() {
+  document.querySelectorAll(".image-role-picker.open").forEach((picker) => picker.classList.remove("open"));
+}
+
+function setImageRole(node, role) {
+  if (!node || !roleLabels[role]) return;
+  node.dataset.imageRole = role;
+    if (configNode === node) {
+      imageOptions.imageRole = role;
+      syncImageOptionsUi();
+      saveImageOptions();
+    }
+  updateImageRoleSelectLabel(node);
+  saveCurrentProject();
+}
+
+function renderNodeImagePreview(node) {
+  if (node.dataset.type === "video") {
+    renderNodeVideoPreview(node);
+    return;
+  }
+  if (node.dataset.type !== "image") return;
+  const preview = node.querySelector(".upload-preview");
+  if (!preview) return;
+  const uploaded = parseJsonArray(node.dataset.imageUrls);
+  const generated = getGeneratedImageHistory(node);
+  const records = getImageGenerationRecords(node);
+  if (node.dataset.generatedImageUrl) {
+    const historyCount = Math.max(0, generated.length - 1);
+    preview.classList.add("output-preview");
+    preview.innerHTML = `
+      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">
+      ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
+      <div class="output-history-popover" aria-hidden="true">
+        ${renderImageGenerationRecords(records.length ? records : generated.map((src) => ({ id: src, imageUrl: src })))}
+      </div>
+    `;
+    bindPreviewDimensionCapture(node, preview);
+    refreshConnectionsAfterImages(preview);
+    return;
+  }
+  preview.classList.remove("output-preview");
+  const sources = [...uploaded, node.dataset.imageDataUrl].filter(Boolean);
+  const uniqueSources = uniqueValues(sources);
+  if (uniqueSources.length) {
+    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`).join("");
+    bindPreviewDimensionCapture(node, preview);
+    refreshConnectionsAfterImages(preview);
+  }
+}
+
+function bindPreviewDimensionCapture(node, preview) {
+  preview.querySelectorAll("img").forEach((image) => {
+    const capture = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return;
+      if (node.dataset.generatedImageUrl && image.src === node.dataset.generatedImageUrl) {
+        const sameSize = node.dataset.generatedImageNaturalWidth === String(image.naturalWidth)
+          && node.dataset.generatedImageNaturalHeight === String(image.naturalHeight);
+        if (sameSize) return;
+        node.dataset.generatedImageNaturalWidth = String(image.naturalWidth);
+        node.dataset.generatedImageNaturalHeight = String(image.naturalHeight);
+      } else {
+        const sameSize = node.dataset.imageNaturalWidth === String(image.naturalWidth)
+          && node.dataset.imageNaturalHeight === String(image.naturalHeight);
+        if (sameSize) return;
+        node.dataset.imageNaturalWidth = String(image.naturalWidth);
+        node.dataset.imageNaturalHeight = String(image.naturalHeight);
+      }
+      scheduleDimensionSave();
+    };
+    if (image.complete) {
+      capture();
+    } else {
+      image.addEventListener("load", capture, { once: true });
+    }
+  });
+}
+
+function scheduleDimensionSave() {
+  clearTimeout(pendingDimensionSaveTimer);
+  pendingDimensionSaveTimer = setTimeout(() => {
+    pendingDimensionSaveTimer = null;
+    saveCurrentProject({ silent: true });
+  }, 900);
+}
+
+function renderNodeVideoPreview(node) {
+  const preview = node.querySelector(".upload-preview");
+  if (!preview) return;
+  const uploaded = parseJsonArray(node.dataset.videoUrls);
+  const generated = getGeneratedVideoHistory(node);
+  if (node.dataset.generatedVideoUrl) {
+    const historyCount = Math.max(0, generated.length - 1);
+    preview.classList.add("output-preview");
+    preview.innerHTML = `
+      <video src="${node.dataset.generatedVideoUrl}" controls muted playsinline onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'视频链接失效'}))"></video>
+      ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
+      <div class="output-history-popover" aria-hidden="true">
+        ${generated.slice(1).map((src) => `<video src="${src}" controls muted playsinline></video>`).join("")}
+      </div>
+    `;
+    refreshConnectionsAfterImages(preview);
+    return;
+  }
+  preview.classList.remove("output-preview");
+  const sources = uniqueValues([...uploaded, node.dataset.videoDataUrl].filter(Boolean));
+  if (sources.length) {
+    preview.innerHTML = sources
+      .map((src) => `<video src="${src}" controls muted playsinline onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'视频链接失效'}))"></video>`)
+      .join("");
+    refreshConnectionsAfterImages(preview);
+  }
+}
+
+function clearUploadedImages(node) {
+  if (!node || node.dataset.type !== "image") return;
+  delete node.dataset.imageUrls;
+  delete node.dataset.imageDataUrl;
+  delete node.dataset.fileName;
+  const nameEl = node.querySelector(".upload-name");
+  if (nameEl) nameEl.textContent = "";
+  const fileInput = node.querySelector(".node-file-input");
+  if (fileInput) fileInput.value = "";
+  const preview = node.querySelector(".upload-preview");
+  if (preview) {
+    preview.classList.remove("output-preview");
+    preview.innerHTML = "";
+  }
+  ensureNodeStatus(node).textContent = "已删除上传图片。";
+  saveCurrentProject();
+  refreshConnectionsSoon();
+}
+
+function addGeneratedImageHistory(node, imageUrl) {
+  return uniqueValues([
+    imageUrl,
+    node.dataset.generatedImageUrl,
+    ...parseJsonArray(node.dataset.generatedImageUrls),
+  ].filter(Boolean)).slice(0, 6);
+}
+
+function addImageGenerationRecord(node, imageUrl, debug = {}) {
+  const records = getImageGenerationRecords(node).filter((record) => record.imageUrl !== imageUrl);
+  const record = {
+    id: `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    imageUrl,
+    createdAt: new Date().toISOString(),
+    favorite: false,
+    provider: debug.payload?.provider || "",
+    model: debug.payload?.model || "",
+    size: debug.payload?.size || "",
+    quality: debug.payload?.quality || "",
+    userPrompt: String(debug.userPrompt || "").slice(0, 1000),
+    finalPrompt: String(debug.finalPrompt || "").slice(0, 2000),
+    referenceBindings: String(debug.referenceBindings || "").slice(0, 1000),
+    referenceSummary: formatReferencePlan(debug.referencePlan || { images: [] }),
+  };
+  const nextRecords = [record, ...records].slice(0, 10);
+  node.dataset.imageGenerationRecords = JSON.stringify(nextRecords);
+  return nextRecords;
+}
+
+function getImageGenerationRecords(node) {
+  const records = parseJsonArray(node?.dataset.imageGenerationRecords);
+  return Array.isArray(records) ? records.filter((record) => record && record.imageUrl) : [];
+}
+
+function compactImageGenerationRecords(records, limit = 10) {
+  return arrayOrEmpty(records)
+    .filter((record) => record?.imageUrl && !isDataImageUrl(record.imageUrl))
+    .slice(0, limit)
+    .map((record) => ({
+    id: record.id || `gen-${Math.random().toString(36).slice(2, 8)}`,
+    imageUrl: record.imageUrl || "",
+    createdAt: record.createdAt || "",
+    favorite: Boolean(record.favorite),
+    provider: record.provider || "",
+    model: record.model || "",
+    size: record.size || "",
+    quality: record.quality || "",
+    userPrompt: String(record.userPrompt || "").slice(0, 1000),
+    finalPrompt: String(record.finalPrompt || "").slice(0, 2000),
+    referenceBindings: String(record.referenceBindings || "").slice(0, 1000),
+    referenceSummary: String(record.referenceSummary || "").slice(0, 240),
+  })).filter((record) => record.imageUrl);
+}
+
+function renderImageGenerationRecords(records) {
+  return records
+    .map((record) => {
+      const rawId = String(record.id || record.imageUrl || "");
+      const id = escapeHtml(rawId);
+      const imageUrl = escapeHtml(record.imageUrl || "");
+      const prompt = escapeHtml(record.userPrompt || record.finalPrompt || "");
+      const meta = escapeHtml([record.provider, record.model, record.referenceSummary].filter(Boolean).join(" / "));
+      return `
+        <div class="generation-record ${record.favorite ? "favorite" : ""}">
+          <img data-src="${imageUrl}" alt="" loading="lazy">
+          <button class="generation-favorite-button" type="button" data-generation-favorite="${id}">${record.favorite ? "已优选" : "优选"}</button>
+          <small>${meta || "生成记录"}</small>
+          ${prompt ? `<p>${prompt}</p>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function toggleGenerationFavorite(node, recordId) {
+  if (!node) return;
+  const records = getImageGenerationRecords(node);
+  const nextRecords = records.map((record) => {
+    const id = String(record.id || record.imageUrl || "");
+    return id === recordId ? { ...record, favorite: !record.favorite } : record;
+  });
+  node.dataset.imageGenerationRecords = JSON.stringify(nextRecords);
+  renderNodeImagePreview(node);
+  saveCurrentProject();
+}
+
+function getGeneratedImageHistory(node) {
+  return uniqueValues([
+    node.dataset.generatedImageUrl,
+    ...parseJsonArray(node.dataset.generatedImageUrls),
+  ].filter(Boolean));
+}
+
+function addGeneratedVideoHistory(node, videoUrl) {
+  return uniqueValues([
+    videoUrl,
+    node.dataset.generatedVideoUrl,
+    ...parseJsonArray(node.dataset.generatedVideoUrls),
+  ].filter(Boolean)).slice(0, 12);
+}
+
+function getGeneratedVideoHistory(node) {
+  return uniqueValues([
+    node.dataset.generatedVideoUrl,
+    ...parseJsonArray(node.dataset.generatedVideoUrls),
+  ].filter(Boolean));
+}
+
+function toggleOutputHistory(node) {
+  const popover = node?.querySelector(".output-history-popover");
+  if (!popover) return;
+  const wasOpen = popover.classList.contains("show");
+  closeOutputHistoryPopovers();
+  if (wasOpen) return;
+  const isOpen = popover.classList.toggle("show");
+  popover.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  if (isOpen) hydrateOutputHistoryImages(popover);
+}
+
+function closeOutputHistoryPopovers() {
+  document.querySelectorAll(".output-history-popover.show").forEach((popover) => {
+    popover.classList.remove("show");
+    popover.setAttribute("aria-hidden", "true");
+  });
+}
+
+function hydrateOutputHistoryImages(popover) {
+  popover.querySelectorAll("img[data-src]").forEach((image) => {
+    const src = image.dataset.src;
+    if (!src) return;
+    image.src = src;
+    image.removeAttribute("data-src");
+  });
+  refreshConnectionsAfterImages(popover);
+}
+
+function refreshConnectionsAfterImages(scope) {
+  refreshConnectionsSoon();
+  scope.querySelectorAll("img").forEach((image) => {
+    if (image.complete) return;
+    image.addEventListener("load", refreshConnectionsSoon, { once: true });
+    image.addEventListener("error", refreshConnectionsSoon, { once: true });
+  });
+}
+
+function refreshConnectionsSoon() {
+  requestAnimationFrame(updateConnections);
+  setTimeout(updateConnections, 60);
+  setTimeout(updateConnections, 180);
+}
+
+function ensureCustomButton(node, type) {
+  const head = node.querySelector(".node-head");
+  let button = node.querySelector(".node-custom-button");
+  if (type !== "image" && type !== "video") {
+    button?.remove();
+    return;
+  }
+
+  if (!button) {
+    button = document.createElement("button");
+    button.className = "node-custom-button";
+    button.type = "button";
+    head.appendChild(button);
+  }
+  button.textContent = type === "video" ? "设置" : "设置";
+}
+
+function openImageConfig(node) {
+  configNode = node;
+  const isVideo = node.dataset.type === "video";
+  configNodeName.textContent = node.querySelector(".node-title strong")?.textContent || (isVideo ? "视频节点" : "图片节点");
+  imagePromptInput.value = node.querySelector(".node-description")?.textContent || "";
+  imagePromptInput.placeholder = isVideo
+    ? "输入视频提示词：镜头运动、主体动作、节奏、时长、风格..."
+    : "输入提示词描述...";
+  if (imageModelSelect) {
+    imageModelSelect.innerHTML = isVideo
+      ? `
+          <option value="doubao-seedance-2.0" selected>Seedance2</option>
+          <option value="kling-motion-control">kling3</option>
+          <option value="happyhorse-1.0">happyhorse</option>
+        `
+      : `
+          <option value="gpt-image-2">GPT图像2</option>
+          <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
+          <option value="gemini-3-pro-image-preview">Nano Banana 2</option>
+        `;
+  }
+  imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
+  openImageOptions?.classList.toggle("video-config-hidden", isVideo);
+  imageProviderSelect?.classList.toggle("video-config-hidden", isVideo);
+  removeVideoSettingsPanel();
+  if (isVideo) {
+    ensureVideoDefaults(node);
+    if (imageModelSelect) imageModelSelect.value = normalizeVideoModelValue(node.dataset.videoModel);
+    openImageOptions?.classList.remove("video-config-hidden");
+    renderVideoSettingsPanel(node);
+    syncVideoOptionsSummary(node);
+    renderConfigInputThumbnails(node);
+    syncImageSubmitButton(node);
+    imageConfigPanel.classList.add("show");
+    imageConfigPanel.setAttribute("aria-hidden", "false");
+    return;
+  }
+  imageOptions = {
+    purpose: node.dataset.imagePurpose || imageOptions.purpose || "自定义",
+    referenceMode: node.dataset.referenceMode || imageOptions.referenceMode || "structureStyle",
+    imageRole: node.dataset.imageRole || imageOptions.imageRole || "general",
+    quality: node.dataset.imageQuality || imageOptions.quality || "high",
+  };
+  ensureImageProviderOptions();
+  const currentProvider = normalizeImageProvider(node.dataset.imageProvider || "apimart");
+  if (imageProviderSelect) {
+    imageProviderSelect.value = currentProvider;
+  }
+  setImageModelOptionsForProvider(currentProvider, node.dataset.imageModel || getDefaultImageModelForProvider(currentProvider));
+  node.dataset.imageModel = normalizeProviderImageModel(currentProvider, imageModelSelect?.value || node.dataset.imageModel);
+  syncImageOptionsUi();
+  renderConfigInputThumbnails(node);
+  syncImageSubmitButton(node);
+  imageConfigPanel.classList.add("show");
+  imageConfigPanel.setAttribute("aria-hidden", "false");
+}
+
+function closeImageConfig() {
+  syncImageSubmitButton(null);
+  configNode = null;
+  imageConfigPanel.classList.remove("show");
+  imageConfigPanel.setAttribute("aria-hidden", "true");
+  imageOptionsPopover.classList.remove("show");
+  imageOptionsPopover.classList.remove("video-config-hidden");
+  imageOptionsPopover.setAttribute("aria-hidden", "true");
+  openImageOptions?.classList.remove("video-config-hidden");
+  removeVideoSettingsPanel();
+  referencePicker.classList.remove("show");
+  referencePicker.setAttribute("aria-hidden", "true");
+}
+
+function syncImageOptionsSummary() {
+  const modeLabel = {
+    structureStyle: "结构+风格",
+    strict: "严格重绘",
+    style: "风格参考",
+    creative: "创意扩展",
+  }[imageOptions.referenceMode] || "严格重绘";
+  const roleLabel = {
+    general: "普通图片",
+    editBase: "编辑底图",
+    structure: "结构图",
+    style: "风格图",
+    output: "输出图",
+  }[imageOptions.imageRole] || "普通图片";
+  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const model = normalizeProviderImageModel(provider, configNode?.dataset.imageModel || imageModelSelect?.value);
+  const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
+  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
+}
+
+function syncImageOptionsUi() {
+  syncImageQualityOptionLabels();
+  Object.entries(imageOptions).forEach(([group, value]) => {
+    const grid = imageOptionsPopover.querySelector(`[data-option-group="${group}"]`);
+    grid?.querySelectorAll("button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.value === value);
+    });
+  });
+  if (configNode) {
+    configNode.dataset.imageRole = imageOptions.imageRole || configNode.dataset.imageRole || "general";
+    updateImageRoleSelectLabel(configNode);
+  }
+  syncImageOptionsSummary();
+}
+
+function syncImageQualityOptionLabels() {
+  const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
+  if (!qualityGrid) return;
+  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const model = configNode?.dataset.type === "image"
+    ? normalizeProviderImageModel(provider, configNode.dataset.imageModel || imageModelSelect?.value)
+    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
+  const labels = model === "gpt-image-2" || isRhartImageModel(model)
+    ? { low: "1k", medium: "2k", high: "4k" }
+    : { low: "low", medium: "medium", high: "high" };
+  qualityGrid.querySelectorAll("[data-value]").forEach((button) => {
+    button.textContent = labels[button.dataset.value] || button.dataset.value;
+  });
+}
+
+function ensureVideoDefaults(node) {
+  if (!node) return;
+  node.dataset.videoMode = normalizeVideoModeValue(node.dataset.videoMode);
+  node.dataset.videoDuration ||= "5";
+  node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel);
+  node.dataset.videoAspectRatio ||= "16:9";
+  node.dataset.videoResolution ||= "1080p";
+  node.dataset.videoGenerateAudio ||= "false";
+  node.dataset.videoReturnLastFrame ||= "false";
+  node.dataset.videoWebSearch ||= "false";
+}
+
+function renderVideoSettingsPanel(node) {
+  removeVideoSettingsPanel();
+  ensureVideoDefaults(node);
+  const panel = document.createElement("div");
+  panel.className = "video-settings-panel";
+  panel.innerHTML = `
+    <div class="video-settings-grid">
+      <label>
+        <span>生成模式</span>
+        <select data-video-setting="videoMode">
+          ${Object.entries(videoModeLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>时长</span>
+        <input data-video-setting="videoDuration" type="number" min="1" max="30" step="1" value="${escapeHtml(node.dataset.videoDuration || "5")}">
+      </label>
+      <label>
+        <span>宽高比</span>
+        <select data-video-setting="videoAspectRatio">
+          ${videoAspectRatios.map((value) => `<option value="${value}">${value}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>分辨率</span>
+        <select data-video-setting="videoResolution">
+          ${videoResolutions.map((value) => `<option value="${value}">${value}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>随机种子</span>
+        <input data-video-setting="videoSeed" type="number" min="0" step="1" placeholder="自动" value="${escapeHtml(node.dataset.videoSeed || "")}">
+      </label>
+    </div>
+    <div class="video-toggle-row">
+      <label><input data-video-setting="videoGenerateAudio" type="checkbox"> 生成音频</label>
+      <label><input data-video-setting="videoReturnLastFrame" type="checkbox"> 返回尾帧</label>
+      <label><input data-video-setting="videoWebSearch" type="checkbox"> 联网搜索</label>
+    </div>
+    <div class="video-upload-grid">
+      ${renderVideoAssetPicker("firstFrame", "首帧图", "image/*", node.dataset.videoFirstFrameUrl)}
+      ${renderVideoAssetPicker("lastFrame", "尾帧图", "image/*", node.dataset.videoLastFrameUrl)}
+      ${renderVideoAssetPicker("referenceVideo", "参考视频", "video/*", node.dataset.referenceVideoUrl)}
+      ${renderVideoAssetPicker("referenceAudio", "参考音频", "audio/*", node.dataset.videoReferenceAudioUrl)}
+    </div>
+  `;
+  imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
+  panel.querySelector('[data-video-setting="videoMode"]').value = normalizeVideoModeValue(node.dataset.videoMode);
+  panel.querySelector('[data-video-setting="videoAspectRatio"]').value = node.dataset.videoAspectRatio || "16:9";
+  panel.querySelector('[data-video-setting="videoResolution"]').value = node.dataset.videoResolution || "1080p";
+  panel.querySelector('[data-video-setting="videoGenerateAudio"]').checked = node.dataset.videoGenerateAudio === "true";
+  panel.querySelector('[data-video-setting="videoReturnLastFrame"]').checked = node.dataset.videoReturnLastFrame === "true";
+  panel.querySelector('[data-video-setting="videoWebSearch"]').checked = node.dataset.videoWebSearch === "true";
+}
+
+function renderVideoAssetPicker(slot, label, accept, url = "") {
+  return `
+    <label class="video-asset-picker">
+      <span>${label}</span>
+      <input data-video-asset="${slot}" type="file" accept="${accept}">
+      <small>${url ? "已上传" : "点击上传"}</small>
+    </label>
+  `;
+}
+
+function removeVideoSettingsPanel() {
+  imageConfigPanel?.querySelector(".video-settings-panel")?.remove();
+}
+
+function persistVideoSettingsFromPanel(node) {
+  if (!node) return;
+  const panel = imageConfigPanel.querySelector(".video-settings-panel");
+  if (!panel) return;
+  panel.querySelectorAll("[data-video-setting]").forEach((input) => {
+    const key = input.dataset.videoSetting;
+    if (!key) return;
+    if (input.type === "checkbox") {
+      node.dataset[key] = String(input.checked);
+    } else {
+      node.dataset[key] = input.value.trim();
+    }
+  });
+  ensureVideoDefaults(node);
+  setVideoMode(node, normalizeVideoModeValue(node.dataset.videoMode));
+  syncVideoOptionsSummary(node);
+}
+
+function syncVideoOptionsSummary(node) {
+  if (!openImageOptions || !node) return;
+  const modeLabel = videoModeLabels[normalizeVideoModeValue(node.dataset.videoMode)] || "图生视频";
+  const flags = [
+    node.dataset.videoGenerateAudio === "true" ? "音频" : "",
+    node.dataset.videoReturnLastFrame === "true" ? "尾帧" : "",
+    node.dataset.videoWebSearch === "true" ? "联网" : "",
+  ].filter(Boolean);
+  openImageOptions.textContent = [
+    modeLabel,
+    videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || node.dataset.videoModel || "Seedance2",
+    `${node.dataset.videoDuration || "5"} 秒`,
+    node.dataset.videoAspectRatio || "16:9",
+    node.dataset.videoResolution || "1080p",
+    flags.length ? flags.join("+") : "参数面板",
+  ].join(" / ");
+}
+
+function persistImageConfigOptions() {
+  if (!configNode) return;
+  configNode.dataset.imagePurpose = imageOptions.purpose;
+  configNode.dataset.referenceMode = imageOptions.referenceMode;
+  configNode.dataset.imageRole = imageOptions.imageRole;
+  delete configNode.dataset.imageRatio;
+  delete configNode.dataset.imageResolution;
+  configNode.dataset.imageQuality = imageOptions.quality;
+  saveCurrentProject();
+}
+
+function saveImageOptions() {
+  try {
+    localStorage.setItem(IMAGE_OPTIONS_KEY, JSON.stringify(imageOptions));
+  } catch (error) {
+    console.error("Image options save failed", error);
+  }
+}
+
+function loadImageOptions() {
+  const saved = readJson(IMAGE_OPTIONS_KEY, null);
+  if (!saved || typeof saved !== "object") return;
+  imageOptions = {
+    ...imageOptions,
+    ...saved,
+  };
+}
+
+function normalizeImageModel(value) {
+  const model = String(value || "").trim();
+  if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
+  if (/^(midjourney|mj)$/i.test(model)) return "midjourney";
+  if (isRhartImageModel(model)) return normalizeRhartImageModel(model);
+  if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
+  return "gpt-image-2-official";
+}
+
+function normalizeRhartImageModel(value) {
+  const model = String(value || "").trim().replace(/^\/+/, "");
+  if (model === "rhart-image-g-2/image-to-image" || model === "rhart-g2" || model === "g-2" || model === "g2") return "rhart-image-g-2/image-to-image";
+  if (model === "rhart-image-g-2-official/image-to-image" || model === "rhart-g2-official" || model === "g-2-official" || model === "g2-official") return "rhart-image-g-2-official/image-to-image";
+  return "rhart-image-n-g31-flash/image-to-image";
+}
+
+function isRhartImageModel(value) {
+  const model = String(value || "").trim().replace(/^\/+/, "");
+  return model.startsWith("rhart-image-") || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(model);
+}
+
+function normalizeRayinAiProvider(value) {
+  const model = String(value || "").trim().toLowerCase();
+  if (["rayinai:mumu", "mumu", "木木"].includes(model)) return "rayinai:mumu";
+  if (["rayinai:tiancai", "tiancai", "甜菜"].includes(model)) return "rayinai:tiancai";
+  if (["rayinai:kaihua", "kaihua", "开花"].includes(model)) return "rayinai:kaihua";
+  if (["rayinai:haizhe", "haizhe", "海蜇"].includes(model)) return "rayinai:haizhe";
+  return "rayinai:bunana";
+}
+
+function isRayinAiProvider(value) {
+  const model = String(value || "").trim().toLowerCase();
+  return model.startsWith("rayinai:") || ["bunana", "不拿拿", "mumu", "木木", "tiancai", "甜菜", "kaihua", "开花", "haizhe", "海蜇"].includes(model);
+}
+
+function getDefaultImageModelForProvider(provider) {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider === "rhart") return "rhart-image-n-g31-flash/image-to-image";
+  return "gpt-image-2-official";
+}
+
+function normalizeProviderImageModel(provider, value) {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (normalizedProvider === "rhart") return normalizeRhartImageModel(value);
+  return normalizeImageModel(value || "gpt-image-2-official");
+}
+
+function getGenerationModelForProvider(provider, value) {
+  return normalizeProviderImageModel(provider, value);
+}
+
+function normalizeImageProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
   if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
-  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image" || provider === "rhart-image-g-2/image-to-image" || provider === "rhart-image-g-2-official/image-to-image") return "rhart";
-  if (provider === "rayinai" || provider === "rayincode" || provider.startsWith("rayinai:")) return "rayinai";
+  if (provider === "rhart" || provider === "rhart-g31" || isRhartImageModel(provider)) return "rhart";
+  if (provider === "rayinai" || provider === "rayincode" || isRayinAiProvider(provider)) return normalizeRayinAiProvider(provider);
   return "apimart";
 }
 
-function normalizeRhartModel(value) {
-  const model = String(value || "").trim().replace(/^\/+/, "");
-  if (model === "rhart-image-g-2/image-to-image" || model === "rhart-g2" || model === "g-2" || model === "g2") {
-    return "rhart-image-g-2/image-to-image";
+function getImageProviderLabel(value) {
+  const provider = normalizeImageProvider(value);
+  if (provider === "aihubmix") return "AIHubMix";
+  if (isRayinAiProvider(provider)) return rayinAiProviderOptions.find(([key]) => key === provider)?.[1] || "RayinAI";
+  if (provider === "rhart") return "RHarT";
+  return "ApiMart";
+}
+
+function ensureImageProviderOptions() {
+  if (!imageProviderSelect) return;
+  const options = [
+    ["apimart", "ApiMart"],
+    ["aihubmix", "AIHubMix"],
+    ["rhart", "RHarT"],
+    ...rayinAiProviderOptions,
+  ];
+  const current = normalizeImageProvider(imageProviderSelect.value || "apimart");
+  options.forEach(([value, label], index) => {
+    if (imageProviderSelect.querySelector(`option[value="${value}"]`)) return;
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    imageProviderSelect.insertBefore(option, imageProviderSelect.options[index] || null);
+  });
+  imageProviderSelect.value = current;
+}
+
+function setImageModelOptionsForProvider(provider, selectedValue = "") {
+  if (!imageModelSelect) return;
+  const normalizedProvider = normalizeImageProvider(provider);
+  const options = normalizedProvider === "rhart"
+    ? rhartImageModelOptions
+    : normalizedProvider === "apimart"
+      ? apiMartImageModelOptions
+      : defaultImageModelOptions;
+  imageModelSelect.innerHTML = options
+    .map(([value, label], index) => `<option value="${value}"${index === 0 ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const selected = normalizeProviderImageModel(normalizedProvider, selectedValue || getDefaultImageModelForProvider(normalizedProvider));
+  imageModelSelect.value = selected;
+  if (imageModelSelect.value !== selected) {
+    imageModelSelect.value = options[0]?.[0] || "";
   }
-  if (model === "rhart-image-g-2-official/image-to-image" || model === "rhart-g2-official" || model === "g-2-official" || model === "g2-official") {
-    return "rhart-image-g-2-official/image-to-image";
+}
+
+function normalizeImageQualityForModel(quality, model) {
+  const value = String(quality || "high").trim().toLowerCase();
+  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model)) {
+    if (value === "low" || value === "standard" || value === "1k") return "1k";
+    if (value === "medium" || value === "hd" || value === "2k") return "2k";
+    if (value === "high" || value === "4k") return "4k";
+    return value;
   }
-  return RHART_MODEL;
+  if (value === "medium") return "standard";
+  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
+  return "high";
+}
+
+function shouldSendImageSize(model) {
+  const normalized = normalizeImageModel(model);
+  return normalized !== "gemini-3-pro-image-preview";
+}
+
+function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
+  const normalized = normalizeImageModel(model);
+  if (normalized !== "gpt-image-2" && !isRhartImageModel(model)) return prompt;
+  const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
+  return [
+    prompt,
+    "GPT Image 2 binding rules:",
+    requestedSize
+      ? `- Output canvas must use the exact requested size ${requestedSize} unless the API rejects it. Match the structure reference's pixel aspect ratio and visible framing.`
+      : "- Keep the output canvas aspect ratio aligned with the structure reference whenever a structure reference is attached.",
+    hasStructure
+      ? "- The structure reference is the geometry authority: preserve its crop, framing, camera angle, perspective grid, major silhouettes, object placement, and scene proportions."
+      : "- If no structure reference is attached, follow the user's requested framing and avoid arbitrary crop changes.",
+    "- The style reference is the palette authority only: transfer its color temperature, contrast curve, saturation level, atmospheric haze, shadow tint, highlight color, material finish, and render texture.",
+    "- Do not let the style reference override the structure reference's composition, camera, crop, geometry, or scene layout.",
+  ].join("\n");
+}
+
+function renderReferencePicker() {
+  const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node !== configNode);
+  if (!nodes.length) {
+    referenceList.innerHTML = '<div class="reference-empty">当前画布暂无其他节点</div>';
+    return;
+  }
+
+  referenceList.innerHTML = nodes
+    .map((node) => {
+      const title = node.querySelector(".node-title strong")?.textContent || "节点";
+      const type = typeNames[node.dataset.type] || "绱犳潗";
+      return `
+        <button type="button" class="reference-item" data-reference-node="${escapeHtml(title)}">
+          <div class="reference-thumb ${node.dataset.tone || "slot-a"}"></div>
+          <span>${escapeHtml(title)}</span>
+          <small>${type}</small>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderConfigInputThumbnails(node) {
+  const old = imageConfigPanel.querySelector(".config-input-strip");
+  old?.remove();
+
+  const ownVideoAssets = node?.dataset.type === "video"
+    ? [
+        node.dataset.videoFirstFrameUrl ? { title: "首帧图", src: node.dataset.videoFirstFrameUrl, kind: "image" } : null,
+        node.dataset.videoLastFrameUrl ? { title: "尾帧图", src: node.dataset.videoLastFrameUrl, kind: "image" } : null,
+        node.dataset.referenceVideoUrl ? { title: "参考视频", src: node.dataset.referenceVideoUrl, kind: "video" } : null,
+        node.dataset.videoReferenceAudioUrl ? { title: "参考音频", src: node.dataset.videoReferenceAudioUrl, kind: "audio" } : null,
+      ].filter(Boolean)
+    : [];
+
+  const sourcePreviewItems = getConnectedInputNodes(node)
+    .flatMap((sourceNode) => {
+      const title = sourceNode.querySelector(".node-title strong")?.textContent || "输入节点";
+      const role = sourceNode.dataset.type === "image" ? sourceNode.dataset.imageRole || inferImageRole(sourceNode) : "";
+      return [
+        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image", role })),
+        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video", role: "" })),
+      ];
+    })
+    .filter((item) => item.src);
+  const imageRolePriority = { structure: 0, editBase: 1, style: 2, general: 3, output: 4 };
+  const orderedPreviewItems = sourcePreviewItems
+    .map((item, index) => ({ ...item, index }))
+    .sort((a, b) => (imageRolePriority[a.role] ?? 5) - (imageRolePriority[b.role] ?? 5) || a.index - b.index);
+  const inputs = [
+    ...ownVideoAssets,
+    ...orderedPreviewItems,
+  ];
+
+  if (!inputs.length) return;
+
+  const strip = document.createElement("div");
+  strip.className = "config-input-strip";
+  strip.innerHTML = `
+    <div class="config-input-strip-title">输入参考</div>
+    <div class="config-input-thumbs">
+      ${inputs
+        .map(
+          (item) => `
+            <button class="config-input-thumb" type="button" title="${escapeHtml(item.title)}">
+              ${
+                item.kind === "video"
+                  ? `<video src="${item.src}" muted playsinline></video>`
+                  : item.kind === "audio"
+                    ? `<div class="config-audio-thumb">Audio</div>`
+                  : `<img src="${item.src}" alt="">`
+              }
+              <span>${escapeHtml(item.title)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  imageConfigPanel.insertBefore(strip, imagePromptInput);
+}
+
+function getIncomingNodes(node) {
+  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")]
+    .filter((path) => path.dataset.to === node.id)
+    .map((path) => document.getElementById(path.dataset.from))
+    .filter(Boolean);
+}
+
+function getConnectedInputNodes(node) {
+  const incoming = getIncomingNodes(node);
+  const undirected = [...connectorSvg.querySelectorAll("path:not(.temp-wire)")]
+    .filter((path) => path.dataset.from === node.id || path.dataset.to === node.id)
+    .map((path) => document.getElementById(path.dataset.from === node.id ? path.dataset.to : path.dataset.from))
+    .filter(Boolean);
+  return uniqueValues([...incoming, ...undirected]).filter((item) => item !== node);
+}
+
+function getIncomingReferenceImages(node) {
+  return getConnectedInputNodes(node).map(getNodeImageSource).filter(Boolean);
+}
+
+function getReferenceSourceNodes(node) {
+  const root = node;
+  const visited = new Set([root?.id].filter(Boolean));
+  const ordered = [];
+  const walk = (current, depth = 0) => {
+    if (!current || depth > 4) return;
+    getIncomingNodes(current).forEach((sourceNode) => {
+      if (!sourceNode?.id || visited.has(sourceNode.id)) return;
+      visited.add(sourceNode.id);
+      ordered.push(sourceNode);
+      walk(sourceNode, depth + 1);
+    });
+  };
+  walk(root);
+  return ordered;
+}
+
+function buildPromptWithIncomingText(node, ownPrompt) {
+  const textInputs = getReferenceSourceNodes(node)
+    .filter((sourceNode) => sourceNode.dataset.type === "text")
+    .map(getNodeContent)
+    .filter(Boolean);
+  return [...textInputs, ownPrompt].filter(Boolean).join("\n\n");
+}
+
+function collectRoleReferenceImages(node) {
+  const ownRole = node.dataset.imageRole || "output";
+  const ownImages = ownRole === "output" || ownRole === "editBase"
+    ? getNodeImageSources(node)
+    : getNodeUploadedImageSources(node);
+  const ownApiMartImages = ownRole === "output" || ownRole === "editBase"
+    ? getNodeImageSources(node, { preferData: true })
+    : getNodeUploadedImageSources(node, { preferData: true });
+  const incomingNodes = getReferenceSourceNodes(node);
+  const editBaseImages = [];
+  const structureImages = [];
+  const styleImages = [];
+  const generalImages = [];
+  const apimartEditBaseImages = [];
+  const apimartStructureImages = [];
+  const apimartStyleImages = [];
+  const apimartGeneralImages = [];
+  const imageDimensions = {};
+  const roleTitles = {
+    editBase: [],
+    structure: [],
+    style: [],
+    general: [],
+  };
+
+  const rememberDimensions = (url, sourceNode, aliases = []) => {
+    if (!url || !sourceNode) return;
+    const domDimensions = getPreviewImageDimensions(sourceNode, url) || aliases.map((alias) => getPreviewImageDimensions(sourceNode, alias)).find(Boolean);
+    const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || domDimensions?.width || 0);
+    const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || domDimensions?.height || 0);
+    if (width > 0 && height > 0) {
+      [url, ...aliases].filter(Boolean).forEach((key) => {
+        imageDimensions[key] = { width, height };
+      });
+    }
+  };
+
+  if (ownRole === "editBase" && ownImages.length) {
+    editBaseImages.push(...ownImages);
+    apimartEditBaseImages.push(...ownApiMartImages);
+    roleTitles.editBase.push(getNodeTitle(node));
+    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
+  } else if (ownRole !== "output" && ownImages.length) {
+    structureImages.push(...ownImages);
+    apimartStructureImages.push(...ownApiMartImages);
+    roleTitles.structure.push(getNodeTitle(node));
+    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
+  }
+
+  incomingNodes.forEach((sourceNode) => {
+    const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
+    const useGenerated = role === "output" || role === "editBase";
+    const images = (useGenerated ? getNodeImageSources(sourceNode) : getNodeUploadedImageSources(sourceNode)).filter(isRemoteImageUrl);
+    const apiMartImages = (useGenerated ? getNodeImageSources(sourceNode, { preferData: true }) : getNodeUploadedImageSources(sourceNode, { preferData: true })).filter(isImageReferenceValue);
+    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
+    if (role === "editBase") {
+      editBaseImages.push(...images);
+      apimartEditBaseImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
+    } else if (role === "structure") {
+      structureImages.push(...images);
+      apimartStructureImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.structure.push(getNodeTitle(sourceNode));
+    } else if (role === "style") {
+      styleImages.push(...images);
+      apimartStyleImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.style.push(getNodeTitle(sourceNode));
+    } else if (role === "output") {
+      editBaseImages.push(...images);
+      apimartEditBaseImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
+    } else if (role !== "output") {
+      generalImages.push(...images);
+      apimartGeneralImages.push(...apiMartImages);
+      if (images.length || apiMartImages.length) roleTitles.general.push(getNodeTitle(sourceNode));
+    }
+  });
+
+  return {
+    editBase: uniqueValues(editBaseImages.filter(isRemoteImageUrl)),
+    structure: uniqueValues(structureImages.filter(isRemoteImageUrl)),
+    style: uniqueValues(styleImages.filter(isRemoteImageUrl)),
+    general: uniqueValues(generalImages.filter(isRemoteImageUrl)),
+    apimartEditBase: uniqueValues(apimartEditBaseImages.filter(isImageReferenceValue)),
+    apimartStructure: uniqueValues(apimartStructureImages.filter(isImageReferenceValue)),
+    apimartStyle: uniqueValues(apimartStyleImages.filter(isImageReferenceValue)),
+    apimartGeneral: uniqueValues(apimartGeneralImages.filter(isImageReferenceValue)),
+    dimensions: imageDimensions,
+    titles: {
+      editBase: uniqueValues(roleTitles.editBase),
+      structure: uniqueValues(roleTitles.structure),
+      style: uniqueValues(roleTitles.style),
+      general: uniqueValues(roleTitles.general),
+    },
+  };
+}
+
+function getNodeTitle(node) {
+  return node?.querySelector(".node-title strong")?.textContent || "未命名节点";
+}
+
+function inferImageRole(node) {
+  const title = node?.querySelector(".node-title strong")?.textContent || "";
+  if (/原图|渲染|结构|结构图/i.test(title)) return "structure";
+  if (/参考|风格|样式|画风/i.test(title)) return "style";
+  if (/编辑|底图|上一版|上一张|输出|生成|结果/i.test(title)) return "editBase";
+  return "general";
+}
+
+function getPreviewImageDimensions(node, url = "") {
+  if (!node) return null;
+  const images = [...node.querySelectorAll(".upload-preview img")];
+  const image = images.find((item) => !url || item.src === url || item.currentSrc === url) || images[0];
+  if (!image?.naturalWidth || !image?.naturalHeight) return null;
+  return { width: image.naturalWidth, height: image.naturalHeight };
+}
+
+function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
+  return buildReferencePlan(mode, roleImages, provider).images;
+}
+
+function getProviderRoleImages(roleImages, provider = "apimart") {
+  const normalizedProvider = normalizeImageProvider(provider);
+  if (!["apimart", "aihubmix", "rhart"].includes(normalizedProvider) && !isRayinAiProvider(normalizedProvider)) return roleImages;
+  return {
+    ...roleImages,
+    editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
+    structure: roleImages.apimartStructure?.length ? roleImages.apimartStructure : roleImages.structure,
+    style: roleImages.apimartStyle?.length ? roleImages.apimartStyle : roleImages.style,
+    general: roleImages.apimartGeneral?.length ? roleImages.apimartGeneral : roleImages.general,
+  };
+}
+
+function buildReferencePlan(mode, roleImages, provider = "apimart") {
+  const providerImages = getProviderRoleImages(roleImages, provider);
+  const editBase = providerImages.editBase?.[0] || "";
+  const explicitStructure = providerImages.structure[0] || "";
+  const fallbackStructure = providerImages.general[0] || "";
+  const structure = mode === "structureStyle"
+    ? explicitStructure || fallbackStructure || editBase || ""
+    : editBase || explicitStructure || fallbackStructure || "";
+  const structureDimensions = roleImages.dimensions?.[structure] || null;
+  const remainingGeneral = structure ? providerImages.general.filter((url) => url !== structure) : providerImages.general;
+
+  if (mode === "structureStyle") {
+    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral)
+      .filter((url) => url !== structure)
+      .slice(0, 1);
+    const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
+    const images = uniqueValues(structure
+      ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
+      : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
+    return {
+      images,
+      editBaseImages: [],
+      structureImages: structure ? [structure] : [],
+      styleImages: styles,
+      editBaseCount: 0,
+      structureCount: structure ? 1 : 0,
+      hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
+      styleCount: styles.length,
+      generalCount: generalFallback.length,
+      structureDimensions,
+    };
+  }
+  if (mode === "strict") {
+    const images = uniqueValues([structure, ...providerImages.structure, ...providerImages.general, ...providerImages.style].filter(Boolean)).slice(0, 1);
+    return {
+      images,
+      editBaseImages: editBase && images.length ? [editBase] : [],
+      structureImages: !editBase && images.length ? images : [],
+      styleImages: [],
+      editBaseCount: editBase && images.length ? 1 : 0,
+      structureCount: !editBase && images.length ? 1 : 0,
+      styleCount: 0,
+      generalCount: 0,
+      structureDimensions: roleImages.dimensions?.[images[0]] || null,
+    };
+  }
+
+  const styles = uniqueValues([...providerImages.style, ...providerImages.general, ...providerImages.structure]).slice(0, 4);
+  return {
+    images: styles,
+    editBaseImages: [],
+    structureImages: [],
+    styleImages: styles,
+    structureCount: 0,
+    styleCount: styles.length,
+    generalCount: 0,
+    structureDimensions: null,
+  };
+}
+
+function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "structureStyle") {
+  return plan;
+}
+
+async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
+  const normalizedProvider = normalizeImageProvider(provider);
+  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
+  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
+  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
+    return buildSubmissionReferencePlan(plan, provider, mode);
+  }
+
+  const styleSwatches = await Promise.all(
+    plan.styleImages.map((url) => makeStyleReferenceSwatch(url).catch(() => url)),
+  );
+  const nextStyleImages = uniqueValues(styleSwatches.filter(isImageReferenceValue));
+  const nextImages = uniqueValues([
+    ...(plan.editBaseImages || []),
+    ...(plan.structureImages || []),
+    ...nextStyleImages,
+  ]).slice(0, 4);
+
+  return buildSubmissionReferencePlan({
+    ...plan,
+    images: nextImages,
+    styleImages: nextStyleImages,
+    styleCount: nextStyleImages.length,
+    styleSwatchMode: true,
+  }, provider, mode);
+}
+
+function makeStyleReferenceSwatch(src) {
+  return new Promise((resolve, reject) => {
+    if (!src || !isImageReferenceValue(src)) {
+      reject(new Error("Invalid style reference"));
+      return;
+    }
+
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      try {
+        const sampleSize = 24;
+        const outputSize = 512;
+        const sourceCanvas = document.createElement("canvas");
+        const sourceContext = sourceCanvas.getContext("2d");
+        sourceCanvas.width = sampleSize;
+        sourceCanvas.height = sampleSize;
+        sourceContext.drawImage(image, 0, 0, sampleSize, sampleSize);
+        const pixels = sourceContext.getImageData(0, 0, sampleSize, sampleSize).data;
+        const palette = [];
+        let redDominantCount = 0;
+        const step = 4 * 12;
+        for (let index = 0; index < pixels.length; index += step) {
+          const color = [pixels[index], pixels[index + 1], pixels[index + 2]];
+          if (isRedEmissiveColor(color)) redDominantCount += 1;
+          palette.push(color);
+        }
+        const redRatio = palette.length ? redDominantCount / palette.length : 0;
+        const stylePalette = redRatio > 0 && redRatio < 0.35
+          ? palette.filter((color) => !isRedEmissiveColor(color))
+          : palette;
+
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.width = outputSize;
+        canvas.height = outputSize;
+        const gradient = context.createLinearGradient(0, 0, outputSize, outputSize);
+        const stops = stylePalette.length ? stylePalette : palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
+        stops.slice(0, 18).forEach((color, index) => {
+          gradient.addColorStop(index / Math.max(1, Math.min(stops.length, 18) - 1), `rgb(${color[0]}, ${color[1]}, ${color[2]})`);
+        });
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, outputSize, outputSize);
+        context.globalAlpha = 0.28;
+        for (let y = 0; y < 4; y += 1) {
+          for (let x = 0; x < 4; x += 1) {
+            const color = stops[(x + y * 4) % stops.length];
+            context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+            context.fillRect(x * 128, y * 128, 128, 128);
+          }
+        }
+        context.globalAlpha = 1;
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = () => reject(new Error("Style reference load failed"));
+    image.src = src;
+  });
+}
+
+function isRedEmissiveColor(color) {
+  const [red, green, blue] = color.map((value) => Number(value || 0));
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const saturation = max ? (max - min) / max : 0;
+  return red > 80 && saturation > 0.32 && red > green * 1.28 && red > blue * 1.12;
+}
+
+function formatReferencePlan(plan) {
+  const parts = [];
+  if (plan.editBaseCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
+  if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
+  if (plan.styleCount) parts.push(plan.styleSwatchMode ? `${plan.styleCount} 张风格色板` : `${plan.styleCount} 张风格图`);
+  if (plan.structureLocked && plan.lockedStyleCount) parts.push(`已启用结构锁，${plan.lockedStyleCount} 张风格图不作为构图输入`);
+  if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
+  if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
+  return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
+}
+
+function formatReferenceSourceTitles(roleImages) {
+  const structure = roleImages?.titles?.structure?.[0] || roleImages?.titles?.editBase?.[0] || "";
+  const style = roleImages?.titles?.style?.[0] || "";
+  const parts = [];
+  if (structure) parts.push(`结构源：${structure}`);
+  if (style) parts.push(`风格源：${style}`);
+  return parts.join("，");
+}
+
+function buildReferenceBindingPrompt(plan) {
+  const imageCount = Array.isArray(plan?.images) ? plan.images.length : 0;
+  if (!imageCount) return "";
+
+  const structureCount = Number(plan.structureCount || 0);
+  const styleCount = Number(plan.styleCount || 0);
+  const editBaseCount = Number(plan.editBaseCount || 0);
+  const hasStructure = structureCount > 0 || editBaseCount > 0;
+  const structureSize = plan.structureDimensions?.width && plan.structureDimensions?.height
+    ? `${Math.round(plan.structureDimensions.width)}x${Math.round(plan.structureDimensions.height)}`
+    : "";
+
+  const lines = [
+    "Reference binding tags:",
+  ];
+
+  if (hasStructure) {
+    lines.push(
+      `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
+      "@渲染结构图 controls composition, camera, perspective, scale, object placement, scene layout, canvas ratio, and local inherent colors on the original objects.",
+    );
+  }
+
+  if (styleCount > 0) {
+    const start = hasStructure ? 2 : 1;
+    const end = start + styleCount - 1;
+    const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
+    lines.push(
+      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
+      "@风格参考图 controls only palette, color temperature, material color, lighting mood, atmosphere, texture, and render finish.",
+      plan.styleSwatchMode ? "@风格参考图 is a non-spatial color/material swatch." : "",
+    );
+  }
+
+  if (hasStructure && styleCount > 0) {
+    lines.push(
+      "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
+      "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
+      "Red light rule: red must remain localized to visible lamps, warning glows, signs, or original red materials only. Do not spread red into the overall color temperature, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function getNodeImageSource(node) {
+  return getNodeImageSources(node)[0] || "";
+}
+
+function getNodeImageSources(node, options = {}) {
+  if (!node) return [];
+  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
+  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
+  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
+  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
+  const primaryImageData = node.dataset.imageDataInlineUrl || "";
+  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
+  const persistent = [
+    node.dataset.generatedImageUrl,
+    ...parseJsonArray(node.dataset.generatedImageUrls),
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ];
+  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
+  return uniqueValues([
+    node.dataset.generatedImageUrl,
+    ...parseJsonArray(node.dataset.generatedImageUrls),
+    ...uploadedDataUrls,
+    primaryImageData,
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceDataUrls,
+    primaryReferenceData,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ].filter(Boolean));
+}
+
+function getNodeUploadedImageSources(node, options = {}) {
+  if (!node) return [];
+  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
+  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
+  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
+  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
+  const primaryImageData = node.dataset.imageDataInlineUrl || "";
+  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
+  const persistent = [
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ];
+  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
+  return uniqueValues([
+    ...uploadedDataUrls,
+    primaryImageData,
+    ...uploadedUrls,
+    node.dataset.imageDataUrl,
+    ...referenceDataUrls,
+    primaryReferenceData,
+    ...referenceUrls,
+    node.dataset.referenceImageDataUrl,
+  ].filter(Boolean));
+}
+
+function getNodeVideoSource(node) {
+  return getNodeVideoSources(node)[0] || "";
+}
+
+function getNodeVideoSources(node) {
+  if (!node) return [];
+  return uniqueValues([
+    node.dataset.generatedVideoUrl,
+    ...parseJsonArray(node.dataset.generatedVideoUrls),
+    ...parseJsonArray(node.dataset.videoUrls),
+    node.dataset.videoDataUrl,
+    ...parseJsonArray(node.dataset.referenceVideoUrls),
+    node.dataset.referenceVideoUrl,
+  ].filter(Boolean));
+}
+
+function getNodeMediaSources(node) {
+  return {
+    images: getNodeImageSources(node),
+    videos: getNodeVideoSources(node),
+  };
+}
+
+function isRemoteImageUrl(value) {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
+}
+
+function isDataImageUrl(value) {
+  return typeof value === "string" && /^data:image\//i.test(value);
 }
 
 function isImageReferenceValue(value) {
@@ -568,175 +3434,1182 @@ function isImageReferenceValue(value) {
 }
 
 function uniqueValues(values) {
-  return [...new Set(values.filter(Boolean))];
+  return [...new Set(values)];
 }
 
-function buildImageRequestContext(body) {
-  const provider = normalizeProvider(body.provider);
-  const rawModel = String(body.model || "");
-  const rawProvider = String(body.provider || "");
-  const model = provider === "rhart" ? normalizeRhartModel(body.model) : normalizeModel(body.model);
-  const basePrompt = String(body.prompt || "");
-  const references = Array.isArray(body.imageDataUrls)
-    ? body.imageDataUrls
-    : [body.imageDataUrl];
-  const imageUrls = references.filter(isImageReferenceValue);
-  const structureUrls = Array.isArray(body.structureImageUrls) ? body.structureImageUrls.filter(isImageReferenceValue) : [];
-  const styleUrls = Array.isArray(body.styleImageUrls) ? body.styleImageUrls.filter(isImageReferenceValue) : [];
-  const editBaseUrls = Array.isArray(body.editBaseImageUrls) ? body.editBaseImageUrls.filter(isImageReferenceValue) : [];
-  const orderedReferenceUrls = uniqueValues([
-    ...structureUrls,
-    ...styleUrls,
-    ...imageUrls,
-    ...editBaseUrls,
-  ]).slice(0, 16);
-  const referencePrompt = orderedReferenceUrls.length
-    ? [
-        String(body.referenceBindings || "").trim(),
-        "Reference order: structure images control geometry, composition, local red lights, markings, and inherent object/material colors; style images control the global palette, color grade, ambient light, shadows, fog, atmosphere, texture, and finish.",
-        basePrompt,
-      ].filter(Boolean).join("\n")
-    : basePrompt;
-  const normalizedQuality = normalizeQuality(body.quality, model);
-  const normalizedSize = shouldSendSize(model) ? normalizeSize(body.size, model) : "";
-  return {
-    model,
-    rayin_route: provider === "rayinai" ? normalizeRayinRoute(rawProvider || rawModel) : "",
-    prompt: referencePrompt,
-    basePrompt,
-    n: 1,
-    output_format: "png",
-    quality: normalizedQuality,
-    size: normalizedSize,
-    image_urls: orderedReferenceUrls,
-    structure_image_urls: structureUrls.slice(0, 4),
-    composition_image_urls: structureUrls.slice(0, 4),
-    layout_image_urls: structureUrls.slice(0, 4),
-    style_image_urls: styleUrls.slice(0, 4),
-    edit_image_urls: editBaseUrls.slice(0, 4),
-    base_image_urls: editBaseUrls.slice(0, 4),
+function parseJsonArray(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function compactImageUrlsForLocalStorage(values, limit = 6) {
+  return uniqueValues(arrayOrEmpty(values).filter((url) => !isDataImageUrl(url))).slice(0, limit);
+}
+
+function parseTextNodeFields(value = "") {
+  const text = String(value || "");
+  const fields = {
+    requirement: "",
+    revision: "",
+    scene: "",
+    negative: "",
   };
+  const labels = [
+    ["requirement", "需求"],
+    ["revision", "修改意见"],
+    ["scene", "场景描述"],
+    ["negative", "禁用项"],
+  ];
+
+  labels.forEach(([key, label], index) => {
+    const nextLabel = labels[index + 1]?.[1];
+    const pattern = nextLabel
+      ? new RegExp(`${label}[：:]\\s*([\\s\\S]*?)(?=\\n${nextLabel}[：:])`)
+      : new RegExp(`${label}[：:]\\s*([\\s\\S]*)`);
+    const match = text.match(pattern);
+    if (match) fields[key] = match[1].trim();
+  });
+
+  if (!Object.values(fields).some(Boolean)) fields.requirement = text.trim();
+  return fields;
 }
 
-function buildApiMartSubmitBody(context) {
-  const next = {
-    model: context.model,
-    prompt: context.prompt,
-    n: context.n || 1,
-  };
-  if (context.output_format) next.output_format = context.output_format;
-  if (context.quality) next.quality = context.quality;
-  if (context.size) next.size = context.size;
-  if (Array.isArray(context.image_urls) && context.image_urls.length) {
-    next.image_urls = context.image_urls.filter(isImageReferenceValue).slice(0, 4);
-  }
-  return next;
-}
-
-function buildRayinSubmitBody(context) {
-  const next = {
-    model: context.model,
-    rayin_route: context.rayin_route || "bunana",
-    prompt: context.prompt,
-    n: context.n || 1,
-    output_format: context.output_format || "png",
-    quality: context.quality || "auto",
-    size: context.size || "auto",
-  };
-  if (Array.isArray(context.image_urls) && context.image_urls.length) next.image_urls = context.image_urls.slice(0, 16);
-  if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
-    next.structure_image_urls = context.structure_image_urls.slice(0, 4);
-  }
-  if (Array.isArray(context.composition_image_urls) && context.composition_image_urls.length) {
-    next.composition_image_urls = context.composition_image_urls.slice(0, 4);
-  }
-  if (Array.isArray(context.layout_image_urls) && context.layout_image_urls.length) {
-    next.layout_image_urls = context.layout_image_urls.slice(0, 4);
-  }
-  if (Array.isArray(context.style_image_urls) && context.style_image_urls.length) {
-    next.style_image_urls = context.style_image_urls.slice(0, 4);
-  }
-  if (Array.isArray(context.edit_image_urls) && context.edit_image_urls.length) {
-    next.edit_image_urls = context.edit_image_urls.slice(0, 4);
-  }
-  if (Array.isArray(context.base_image_urls) && context.base_image_urls.length) {
-    next.base_image_urls = context.base_image_urls.slice(0, 4);
-  }
-  return next;
-}
-
-function buildRhartSubmitBody(context) {
-  const imageUrls = Array.isArray(context.image_urls) ? context.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
-  const publicImageUrls = imageUrls.filter((url) => /^https?:\/\//i.test(url));
-  const next = {
-    model: RHART_MODEL,
-    imageUrls: publicImageUrls,
-    sourceImageUrls: imageUrls,
-    prompt: buildRhartPrompt(context),
-    aspectRatio: sizeToAspectRatio(context.size),
-    resolution: qualityToRhartResolution(context.quality),
-  };
-  if (Array.isArray(context.structure_image_urls) && context.structure_image_urls.length) {
-    next.structureImageUrls = context.structure_image_urls.filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
-  }
-  if (Array.isArray(context.style_image_urls) && context.style_image_urls.length) {
-    next.styleImageUrls = context.style_image_urls.filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
-  }
-  next.referenceCount = imageUrls.length;
-  next.publicReferenceCount = publicImageUrls.length;
-  return next;
-}
-
-function buildRhartPrompt(context) {
-  const structureCount = Array.isArray(context.structure_image_urls) ? context.structure_image_urls.length : 0;
-  const styleCount = Array.isArray(context.style_image_urls) ? context.style_image_urls.length : 0;
-  if (!structureCount && !styleCount) return context.prompt;
+function formatTextNodeFields(fields) {
   return [
-    "参考图说明：imageUrls 按顺序传入。前面的结构图用于锁定构图、镜头、空间关系、物体位置、场景内容和画布比例；后面的风格图只用于色块笔触、美术样式、色彩氛围、光影和质感。",
-    structureCount ? `前 ${structureCount} 张是渲染结构图，必须优先保持其结构、内容和物体位置。` : "",
-    styleCount ? `随后 ${styleCount} 张是风格参考图，只提取风格，不照搬其构图或对象。` : "",
-    context.basePrompt || context.prompt,
-  ].filter(Boolean).join("\n");
+    ["需求", fields.requirement],
+    ["修改意见", fields.revision],
+    ["场景描述", fields.scene],
+    ["禁用项", fields.negative],
+  ]
+    .filter(([, value]) => String(value || "").trim())
+    .map(([label, value]) => `${label}：${String(value).trim()}`)
+    .join("\n");
 }
 
-function qualityToRhartResolution(quality) {
-  const value = String(quality || "").trim().toLowerCase();
-  if (value === "4k" || value === "high" || value === "ultra") return "4k";
-  if (value === "2k" || value === "medium" || value === "hd") return "2k";
-  return "1k";
+function renderUploadControl(type, fileName = "") {
+  const accept = type === "image" ? "image/*" : "video/*";
+  const label = type === "image" ? "上传图片" : "上传视频";
+  return `
+    <label class="upload-control">
+      <span>${label}</span>
+      <input class="node-file-input" type="file" accept="${accept}">
+      <div class="upload-box">
+        <strong>${fileName ? "已选择文件" : label}</strong>
+        <small class="upload-name">${escapeHtml(fileName || "点击选择本地文件")}</small>
+      </div>
+      <div class="upload-preview"></div>
+    </label>
+  `;
 }
 
-function sizeToAspectRatio(size) {
-  const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
-  const allowed = new Set(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"]);
-  if (allowed.has(value)) return value;
-  const known = {
-    "1024x1024": "1:1",
-    "1536x864": "16:9",
-    "864x1536": "9:16",
+function duplicateNode(node) {
+  const clone = createNode({
+    type: node.dataset.type,
+    title: `${node.querySelector(".node-title strong").textContent} 副本`,
+    content: getNodeContent(node),
+    imagePurpose: node.dataset.imagePurpose || "自定义",
+    referenceMode: node.dataset.referenceMode || "structureStyle",
+    imageRole: node.dataset.imageRole || "general",
+    imageQuality: node.dataset.imageQuality || "low",
+    imageModel: node.dataset.imageModel || "gpt-image-2-official",
+    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
+    apimartChannel: "b",
+    fileName: node.dataset.fileName || "",
+    imageNaturalWidth: node.dataset.imageNaturalWidth || "",
+    imageNaturalHeight: node.dataset.imageNaturalHeight || "",
+    imageUrls: parseJsonArray(node.dataset.imageUrls),
+    imageDataKey: node.dataset.imageDataKey || "",
+    imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
+    imageDataUrl: isDataImageUrl(node.dataset.imageDataUrl) ? "" : node.dataset.imageDataUrl || "",
+    referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
+    referenceImageDataUrl: isDataImageUrl(node.dataset.referenceImageDataUrl) ? "" : node.dataset.referenceImageDataUrl || "",
+    referenceFileName: node.dataset.referenceFileName || "",
+    generatedImageUrl: isDataImageUrl(node.dataset.generatedImageUrl) ? "" : node.dataset.generatedImageUrl || "",
+    generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls)),
+    imageGenerationRecords: getImageGenerationRecords(node),
+    generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
+    generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
+    videoUrls: parseJsonArray(node.dataset.videoUrls),
+    videoDataUrl: node.dataset.videoDataUrl || "",
+    referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
+    referenceVideoUrl: node.dataset.referenceVideoUrl || "",
+    generatedVideoUrl: node.dataset.generatedVideoUrl || "",
+    generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
+    videoMode: normalizeVideoModeValue(node.dataset.videoMode),
+    videoDuration: node.dataset.videoDuration || "5",
+    videoModel: normalizeVideoModelValue(node.dataset.videoModel),
+    videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
+    videoResolution: node.dataset.videoResolution || "1080p",
+    videoSeed: node.dataset.videoSeed || "",
+    videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
+    videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
+    videoWebSearch: node.dataset.videoWebSearch === "true",
+    videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
+    videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
+    videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
+    videoReferenceAudioUrls: parseJsonArray(node.dataset.videoReferenceAudioUrls),
+    folderNodes: parseJsonArray(node.dataset.folderNodes),
+    folderConnections: parseJsonArray(node.dataset.folderConnections),
+    x: Number(node.dataset.x) + 36,
+    y: Number(node.dataset.y) + 36,
+  });
+  selectNode(clone);
+  saveCurrentProject();
+}
+
+function deleteNode(node) {
+  connectorSvg
+    .querySelectorAll(`[data-from="${node.id}"], [data-to="${node.id}"]`)
+    .forEach((path) => path.remove());
+  node.remove();
+  selectNode(null);
+  saveCurrentProject();
+}
+
+function deleteSelectedNodes() {
+  const nodes = [...selectedNodes];
+  if (!nodes.length) return;
+  nodes.forEach((node) => {
+    connectorSvg
+      .querySelectorAll(`[data-from="${node.id}"], [data-to="${node.id}"]`)
+      .forEach((path) => path.remove());
+    node.remove();
+  });
+  selectNode(null);
+  saveCurrentProject();
+}
+
+function ungroupFolderNode(folderNode) {
+  if (!folderNode || folderNode.dataset.type !== "folder" || activeFolder) return;
+  const folderNodes = parseJsonArray(folderNode.dataset.folderNodes);
+  const folderConnections = parseJsonArray(folderNode.dataset.folderConnections);
+  if (!folderNodes.length) {
+    deleteNode(folderNode);
+    return;
+  }
+
+  const originX = Number(folderNode.dataset.x) || 0;
+  const originY = Number(folderNode.dataset.y) || 0;
+  const restoredNodes = folderNodes.map((saved) => {
+    const node = createNode({
+      ...saved,
+      x: originX + (Number(saved.x) || 0) - 120,
+      y: originY + (Number(saved.y) || 0) - 120,
+    });
+    node.dataset.imagePurpose = saved.imagePurpose || "自定义";
+    node.dataset.referenceMode = saved.referenceMode || "structureStyle";
+    node.dataset.imageRole = saved.imageRole || "general";
+    node.dataset.imageQuality = saved.imageQuality || "high";
+    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+    node.dataset.apimartChannel = "b";
+    if (saved.tone) node.dataset.tone = saved.tone;
+    if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
+    if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
+    setNodeType(node, saved.type, saved.content);
+    renderNodeImagePreview(node);
+    if (saved.imageDataKey) {
+      loadProjectImage(saved.imageDataKey).then((value) => {
+        if (!value) return;
+        node.dataset.imageDataUrl = value;
+        renderNodeImagePreview(node);
+      });
+    }
+    if (saved.referenceImageDataKey) {
+      loadProjectImage(saved.referenceImageDataKey).then((value) => {
+        if (value) node.dataset.referenceImageDataUrl = value;
+      });
+    }
+    return node;
+  });
+
+  folderNode.remove();
+  folderConnections.forEach((saved) => {
+    const from = document.getElementById(saved.from);
+    const to = document.getElementById(saved.to);
+    if (from && to) addConnection(from, to, saved.fromSide || "right", saved.toSide || "left");
+  });
+  selectNodes(restoredNodes);
+  saveCurrentProject();
+  refreshConnectionsSoon();
+}
+
+function createFolderFromSelectedNodes() {
+  const nodes = [...selectedNodes].filter((node) => node.isConnected);
+  if (!nodes.length || activeFolder) return;
+  const ids = new Set(nodes.map((node) => node.id));
+  const minX = Math.min(...nodes.map((node) => Number(node.dataset.x) || 0));
+  const minY = Math.min(...nodes.map((node) => Number(node.dataset.y) || 0));
+  const folderNodes = serializeNodes(nodes).map((node) => ({
+    ...node,
+    x: (Number(node.x) || 0) - minX + 120,
+    y: (Number(node.y) || 0) - minY + 120,
+  }));
+  const folderConnections = serializeConnections((path) => ids.has(path.dataset.from) && ids.has(path.dataset.to));
+
+  connectorSvg.querySelectorAll("path:not(.temp-wire)").forEach((path) => {
+    if (ids.has(path.dataset.from) || ids.has(path.dataset.to)) path.remove();
+  });
+  nodes.forEach((node) => node.remove());
+  clearSelectedNodes();
+
+  const folder = createNode({
+    type: "folder",
+    title: `文件夹 ${folderNodes.length}`,
+    content: `文件夹内包含 ${folderNodes.length} 个节点。`,
+    x: minX,
+    y: minY,
+    folderNodes,
+    folderConnections,
+  });
+  selectNode(folder);
+  saveCurrentProject();
+  refreshConnectionsSoon();
+}
+
+function enterFolder(folderNode) {
+  if (!folderNode || folderNode.dataset.type !== "folder" || activeFolder) return;
+  saveCurrentProject();
+  activeFolder = {
+    id: folderNode.id,
+    title: folderNode.querySelector(".node-title strong")?.textContent || "文件夹",
   };
-  if (known[value]) return known[value];
-  const match = value.match(/^(\d{3,5})x(\d{3,5})$/);
-  if (!match) return "16:9";
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "16:9";
-  return reduceAspectRatio(width, height);
+  const data = {
+    nodes: parseJsonArray(folderNode.dataset.folderNodes),
+    connections: parseJsonArray(folderNode.dataset.folderConnections),
+  };
+  clearCanvas();
+  restoreCanvasData(data);
+  syncFolderUi();
 }
 
-function reduceAspectRatio(width, height) {
-  const divisor = greatestCommonDivisor(width, height);
-  const reducedWidth = Math.round(width / divisor);
-  const reducedHeight = Math.round(height / divisor);
-  const allowed = new Set(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"]);
-  const ratio = `${reducedWidth}:${reducedHeight}`;
-  if (allowed.has(ratio)) return ratio;
-  return closestAllowedAspectRatio(width, height);
+function exitFolder() {
+  if (!activeFolder) return;
+  saveActiveFolder();
+  activeFolder = null;
+  clearCanvas();
+  restoreProject(currentProject);
+  syncFolderUi();
 }
 
-function closestAllowedAspectRatio(width, height) {
+function saveActiveFolder() {
+  if (!activeFolder || !currentProject) return;
+  const root = readCachedProjectData(currentProject, { nodes: [], connections: [], memories: conversationMemories });
+  const folder = root.nodes?.find((node) => node.id === activeFolder.id);
+  if (!folder) return;
+  const data = serializeCanvasData();
+  folder.folderNodes = data.nodes;
+  folder.folderConnections = data.connections;
+  folder.content = `文件夹内包含 ${data.nodes.length} 个节点。`;
+  rememberProjectData(currentProject, root);
+  storeProjectRecord(currentProject, root);
+  writeProjectStub(currentProject);
+}
+
+function syncFolderUi() {
+  if (exitFolderCanvas) exitFolderCanvas.hidden = !activeFolder;
+  if (folderExitTop) folderExitTop.hidden = !activeFolder;
+  if (createFolderFromSelection) createFolderFromSelection.hidden = Boolean(activeFolder);
+  if (workspaceProjectName) {
+    workspaceProjectName.textContent = activeFolder ? `${currentProject} / ${activeFolder.title}` : currentProject;
+  }
+}
+
+function getActionNodes(fallbackNode) {
+  if (fallbackNode && selectedNodes.size > 1 && selectedNodes.has(fallbackNode)) {
+    return [...selectedNodes];
+  }
+  return fallbackNode ? [fallbackNode] : [];
+}
+
+function runNode(node) {
+  if (node.dataset.type === "image") {
+    runImageGeneration(node);
+    return;
+  }
+  if (node.dataset.type === "video") {
+    runVideoGeneration(node);
+    return;
+  }
+
+  node.classList.add("running");
+  let status = node.querySelector(".node-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.className = "node-status";
+    node.appendChild(status);
+  }
+  status.textContent =
+    node.dataset.type === "image"
+      ? `正在提交 ${getImageProviderLabel(node.dataset.imageProvider || "apimart")} ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
+      : node.dataset.type === "video"
+        ? `正在提交 ApiMart ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || "Seedance2"} 视频项目...`
+        : "正在处理文本对话...";
+  setTimeout(() => {
+    node.classList.remove("running");
+    status.textContent = "任务已保存到当前画布。";
+  }, 800);
+}
+
+async function runVideoGeneration(node) {
+  const status = ensureNodeStatus(node);
+  const preview = node.querySelector(".upload-preview");
+  ensureVideoDefaults(node);
+  const prompt = buildPromptWithIncomingText(node, node.querySelector(".node-description")?.textContent || "");
+  const connectedNodes = getConnectedInputNodes(node);
+  const imageUrls = uniqueValues([
+    ...getNodeImageSources(node),
+    ...connectedNodes.flatMap(getNodeImageSources),
+  ].filter(isRemoteImageUrl));
+  const videoUrls = uniqueValues([
+    ...getNodeVideoSources(node),
+    ...connectedNodes.flatMap(getNodeVideoSources),
+  ].filter(isRemoteImageUrl));
+
+  node.classList.add("running");
+  status.textContent = "正在提交 ApiMart 视频任务...";
+  if (preview && !preview.innerHTML.trim()) {
+    preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
+  }
+
+  try {
+    const payload = {
+      model: normalizeVideoModelValue(node.dataset.videoModel),
+      mode: normalizeVideoModeValue(node.dataset.videoMode),
+      prompt,
+      imageUrls,
+      videoUrls,
+      duration: node.dataset.videoDuration || "5",
+      aspectRatio: node.dataset.videoAspectRatio || "16:9",
+      resolution: node.dataset.videoResolution || "1080p",
+      seed: node.dataset.videoSeed || "",
+      generateAudio: node.dataset.videoGenerateAudio === "true",
+      returnLastFrame: node.dataset.videoReturnLastFrame === "true",
+      webSearch: node.dataset.videoWebSearch === "true",
+      firstFrameUrl: node.dataset.videoFirstFrameUrl || "",
+      lastFrameUrl: node.dataset.videoLastFrameUrl || "",
+      referenceAudioUrls: uniqueValues([
+        node.dataset.videoReferenceAudioUrl,
+        ...parseJsonArray(node.dataset.videoReferenceAudioUrls),
+      ].filter(isRemoteImageUrl)),
+      apimartChannel: "b",
+    };
+    node.dataset.lastVideoPayload = JSON.stringify(payload);
+    const result = await submitAndPollVideoTask(payload, status);
+    if (!result.videoUrl) throw new Error("任务完成但没有返回视频地址");
+    node.dataset.generatedVideoUrl = result.videoUrl;
+    node.dataset.generatedVideoUrls = JSON.stringify(addGeneratedVideoHistory(node, result.videoUrl));
+    renderNodeVideoPreview(node);
+    status.textContent = "视频生成完成。";
+  } catch (error) {
+    status.textContent = `视频生成失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    node.classList.remove("running");
+    saveCurrentProject();
+  }
+}
+
+async function submitAndPollVideoTask(payload, status) {
+  const response = await fetch("/api/generate-video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await readResponseJson(response);
+  if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
+  if (!result.taskId) throw new Error("后端没有返回 video taskId");
+  status.textContent = "视频任务已提交，正在生成...";
+  return pollVideoTask(result.taskId, status, payload.apimartChannel);
+}
+
+async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
+  const deadline = Date.now() + 1800000;
+  let lastStatus = "submitted";
+  let attempts = 0;
+  while (Date.now() < deadline) {
+    await sleep(5000);
+    attempts += 1;
+    const response = await fetch(
+      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}`,
+    );
+    const result = await readResponseJson(response);
+    if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
+    lastStatus = result.status || lastStatus;
+    const minutes = Math.floor((attempts * 5) / 60);
+    if (statusEl) statusEl.textContent = `视频生成中：${lastStatus}，已等待约 ${minutes} 分钟`;
+    if (result.videoUrl) return result;
+    if (["failed", "error", "cancelled"].includes(lastStatus)) {
+      throw new Error(formatApiError(result, `ApiMart 视频任务失败：${lastStatus}`));
+    }
+  }
+  throw new Error(`等待视频生成超过 30 分钟，最后状态：${lastStatus}`);
+}
+
+async function runImageGeneration(node) {
+  if (imageGenerationControllers.has(node.id)) {
+    const startedAt = Number(node.dataset.imageGenerationStartedAt || 0);
+    if (startedAt && Date.now() - startedAt < 1200) return;
+    cancelImageGeneration(node);
+    return;
+  }
+
+  const controller = new AbortController();
+  imageGenerationControllers.set(node.id, controller);
+  node.dataset.imageGenerationStartedAt = String(Date.now());
+  syncImageSubmitButton(node);
+
+  const prompt = buildPromptWithIncomingText(node, node.querySelector(".node-description")?.textContent || "");
+  const generationMemory = buildGenerationMemoryPrompt(node);
+  const preview = node.querySelector(".upload-preview");
+  const uploadName = node.dataset.fileName || "";
+  const status = ensureNodeStatus(node);
+  const referenceMode = node.dataset.referenceMode || "structureStyle";
+  const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
+  const selectedModel = getGenerationModelForProvider(selectedProvider, node.dataset.imageModel || imageModelSelect?.value);
+  const roleImages = collectRoleReferenceImages(node);
+  const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
+  const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
+  const referenceImages = referencePlan.images;
+  const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
+  const brokenReferenceCount = [...node.querySelectorAll(".broken-image-placeholder")].length;
+  const referenceBindings = buildReferenceBindingPrompt(referencePlan);
+  const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
+    [generationMemory, referenceBindings, prompt].filter(Boolean).join("\n\n"),
+    referenceMode,
+    roleImages,
+    referencePlan,
+    node.dataset.imagePurpose || imageOptions.purpose,
+  ), selectedModel, requestedSize, referencePlan));
+
+  node.classList.add("running");
+  status.textContent = brokenReferenceCount
+    ? `检测到 ${brokenReferenceCount} 个失效图片链接，建议重新上传参考图；仍在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`
+    : `正在准备 ${getImageProviderLabel(selectedProvider)} ${selectedModel} 图片任务...`;
+
+    const payload = {
+      model: selectedModel,
+      prompt: enhancedPrompt,
+      imageName: safeAsciiFileName(uploadName, "image.png"),
+      imageDataUrls: referenceImages,
+      structureImageUrls: referencePlan.structureImages || [],
+      styleImageUrls: referencePlan.styleImages || [],
+      editBaseImageUrls: referencePlan.editBaseImages || [],
+      referenceBindings,
+      purpose: node.dataset.imagePurpose || imageOptions.purpose,
+      referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
+      quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
+      size: requestedSize,
+      provider: selectedProvider,
+      apimartChannel: "b",
+  };
+  exposeImagePromptDebug(node, {
+    userPrompt: prompt,
+    referenceBindings,
+    finalPrompt: enhancedPrompt,
+    referenceMode,
+    referencePlan,
+    roleImages,
+    payload,
+  });
+
+  try {
+    const hasLocalOnlyReferences = [
+      ...parseJsonArray(node.dataset.imageUrls),
+      node.dataset.imageDataUrl,
+      ...parseJsonArray(node.dataset.referenceImageUrls),
+      node.dataset.referenceImageDataUrl,
+      ...getConnectedInputNodes(node).flatMap(getNodeImageSources),
+    ].some((value) => value && !isRemoteImageUrl(value));
+
+    const sizeStatus = requestedSize || (referenceImages.length ? "按结构图/自动" : "自动");
+    const sourceStatus = formatReferenceSourceTitles(roleImages);
+    status.textContent = referenceImages.length
+      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}${sourceStatus ? `，${sourceStatus}` : ""}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
+      : hasLocalOnlyReferences
+        ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
+      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...payload,
+      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+      structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
+      styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
+      editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
+    });
+
+    const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
+    if (!finalResult.imageUrl) {
+      throw new Error("任务完成但没有返回图片地址");
+    }
+
+    if (preview) {
+      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`;
+    }
+    node.dataset.generatedImageUrl = finalResult.imageUrl;
+    node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
+    addImageGenerationRecord(node, finalResult.imageUrl, {
+      userPrompt: prompt,
+      referenceBindings,
+      finalPrompt: enhancedPrompt,
+      referencePlan,
+      payload,
+    });
+    getImageDimensions(finalResult.imageUrl).then((dimensions) => {
+      if (!dimensions) return;
+      node.dataset.generatedImageNaturalWidth = String(dimensions.width);
+      node.dataset.generatedImageNaturalHeight = String(dimensions.height);
+      saveCurrentProject({ silent: selectedProvider === "rhart" });
+    });
+    renderNodeImagePreview(node);
+    status.textContent = "图片生成完成。";
+  } catch (error) {
+    if (isAbortError(error) && controller.signal.aborted) {
+      status.textContent = "生成已取消，可以修改后重新提交。";
+    } else {
+      status.textContent = `生成失败：${error instanceof Error ? error.message : "请确认已部署后端并配置 APIMART_API_KEY。"}`;
+    }
+    if (preview && !preview.innerHTML.trim()) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      const placeholder = /fetch|network|Failed to fetch|后端未连接|Load failed/i.test(message)
+        ? "后端未连接"
+        : "上游返回失败";
+      preview.innerHTML = `<div class="generated-placeholder">${escapeHtml(placeholder)}</div>`;
+    }
+  } finally {
+    imageGenerationControllers.delete(node.id);
+    delete node.dataset.imageGenerationStartedAt;
+    syncImageSubmitButton(node);
+    node.classList.remove("running");
+    saveCurrentProject({ silent: selectedProvider === "rhart" });
+  }
+}
+
+function buildGenerationMemoryPrompt(node) {
+  const favorites = getImageGenerationRecords(node).filter((record) => record.favorite).slice(0, 3);
+  if (!favorites.length) return "";
+  const lines = favorites.map((record, index) => {
+    const prompt = String(record.userPrompt || record.finalPrompt || "").replace(/\s+/g, " ").slice(0, 360);
+    const meta = [record.provider, record.model, record.referenceSummary].filter(Boolean).join(" / ");
+    return `Favorite ${index + 1}: ${meta}${prompt ? `; prompt direction: ${prompt}` : ""}`;
+  });
+  return [
+    "Quality memory from user-selected excellent previous generations:",
+    ...lines,
+    "Use these favorites as direction for quality, composition discipline, material finish, lighting taste, and style consistency. Do not copy them exactly; keep the current structure reference and current user request authoritative.",
+  ].join("\n");
+}
+
+function exposeImagePromptDebug(node, debug) {
+  if (!node || !debug) return;
+  const payload = debug.payload || {};
+  const summary = {
+    provider: payload.provider,
+    model: payload.model,
+    size: payload.size,
+    quality: payload.quality,
+    referenceMode: debug.referenceMode,
+    purpose: payload.purpose,
+    imageCount: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.length : 0,
+    structureCount: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.length : 0,
+    styleCount: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.length : 0,
+    editBaseCount: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.length : 0,
+  };
+  const report = {
+    summary,
+    userPrompt: debug.userPrompt || "",
+    referenceBindings: debug.referenceBindings || "",
+    finalPrompt: debug.finalPrompt || "",
+    payload,
+    referencePlan: debug.referencePlan || null,
+  };
+  try {
+    node.dataset.lastImagePrompt = String(debug.finalPrompt || "").slice(0, 20000);
+    node.dataset.lastImagePromptDebug = JSON.stringify({
+      ...report,
+      payload: {
+        ...payload,
+        imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+        structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
+        styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
+        editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
+      },
+    });
+  } catch (error) {
+    console.warn("[AI Video Box] Failed to store image prompt debug data.", error);
+  }
+  if (typeof window === "undefined") return;
+  window.__lastImagePromptDebug = report;
+  console.groupCollapsed("[AI Video Box] Image prompt sent to backend");
+  console.log("Summary:", summary);
+  console.log("User prompt:", report.userPrompt);
+  console.log("Reference bindings:", report.referenceBindings);
+  console.log("Final prompt:", report.finalPrompt);
+  console.log("Payload:", payload);
+  console.groupEnd();
+}
+
+function summarizeImageSource(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  if (text.startsWith("data:")) {
+    const commaIndex = text.indexOf(",");
+    const header = commaIndex >= 0 ? text.slice(0, commaIndex) : text.slice(0, 64);
+    return `${header};base64...(${estimateDataUrlBytes(text)} bytes)`;
+  }
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", provider = "apimart") {
+  const deadline = Date.now() + 1800000;
+  let lastStatus = "submitted";
+  let attempts = 0;
+
+  while (Date.now() < deadline) {
+    await sleep(5000, signal);
+    attempts += 1;
+    const query = new URLSearchParams({
+      taskId: String(taskId),
+      apimartChannel: String(apimartChannel || "b"),
+      provider: String(provider || "apimart"),
+    });
+    const response = await fetch(
+      `/api/generate-image?${query.toString()}`,
+      { signal },
+    );
+    const result = await readResponseJson(response);
+    if (!response.ok) {
+      throw new Error(formatApiError(result, `HTTP ${response.status}`));
+    }
+    lastStatus = result.status || lastStatus;
+    if (statusEl) {
+      const minutes = Math.floor((attempts * 5) / 60);
+      const endpointHint = result.rayinEndpoint
+        ? "，RayinAI扩展接口"
+        : result.rhartEndpoint
+          ? "，RHarT查询接口"
+          : "";
+      statusEl.textContent = `生成中：${lastStatus}${endpointHint}，已等待约 ${minutes} 分钟`;
+    }
+    if (result.imageUrl) {
+      return result;
+    }
+    if (["failed", "error", "cancelled"].includes(lastStatus)) {
+      throw new Error(formatApiError(result, `ApiMart 任务失败：${lastStatus}`));
+    }
+  }
+
+  throw new Error(`等待图片生成超过 30 分钟，最后状态：${lastStatus}`);
+}
+
+async function submitAndPollImageTask(payload, status, preview, node, signal) {
+  try {
+    return await submitAndPollImageTaskOnce(payload, status, preview, node, signal);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/prohibited|flagged|safety|policy|moderation|敏感|违规|拦截/i.test(message)) throw error;
+    status.textContent = "提示词或参考图触发上游拦截，正在移除参考图并安全重试一次...";
+    const saferPayload = {
+      ...payload,
+      prompt: makePromptSafer(payload.prompt),
+      imageDataUrls: [],
+      imageName: "",
+    };
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...saferPayload,
+      imageDataUrls: [],
+    });
+    return submitAndPollImageTaskOnce(saferPayload, status, preview, node, signal);
+  }
+}
+
+async function submitAndPollImageTaskOnce(payload, status, preview, node, signal) {
+  let response = await fetchImageGenerationApi(payload, signal);
+
+  let result = await readResponseJson(response);
+  if (!response.ok && shouldRetryWithSaferPrompt(result)) {
+    status.textContent = "提示词触发上游拦截，正在安全改写后重试提交...";
+    payload.prompt = makePromptSafer(payload.prompt);
+    node.dataset.lastImagePayload = JSON.stringify({
+      ...payload,
+      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+    });
+    response = await fetchImageGenerationApi(payload, signal);
+    result = await readResponseJson(response);
+  }
+  if (!response.ok) {
+    throw new Error(formatApiError(result, `HTTP ${response.status}`));
+  }
+  if (result.imageUrl) {
+    status.textContent = result.provider === "rayinai"
+      ? "RayinAI 已直接返回图片。"
+      : result.provider === "rhart"
+        ? "RHarT 图片生成完成。"
+        : result.provider === "aihubmix"
+          ? "AIHubMix 图片生成完成。"
+        : "图片生成完成。";
+    return result;
+  }
+  if (!result.taskId) {
+    throw new Error(formatApiError(result, "后端没有返回 taskId"));
+  }
+
+  node.dataset.lastImageTaskId = result.taskId;
+  if (result.rayinEndpoint) node.dataset.lastRayinEndpoint = result.rayinEndpoint;
+  status.textContent = "任务已提交，正在生成...";
+  if (preview) {
+    preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
+  }
+  return pollImageTask(result.taskId, status, signal, payload.apimartChannel, result.provider);
+}
+
+async function fetchImageGenerationApi(payload, signal) {
+  try {
+    return await fetch("/api/generate-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new Error(`前端到 /api/generate-image 连接失败：${error instanceof Error ? error.message : String(error)}。可能是 Vercel 函数超时、部署正在重启，或网络请求被中断。`);
+  }
+}
+
+function cancelImageGeneration(node) {
+  const controller = imageGenerationControllers.get(node.id);
+  if (!controller) return;
+  const startedAt = Number(node.dataset.imageGenerationStartedAt || 0);
+  if (startedAt && Date.now() - startedAt < 1200) return;
+  controller.abort();
+  const status = ensureNodeStatus(node);
+  status.textContent = "正在取消生成...";
+  syncImageSubmitButton(node);
+}
+
+function syncImageSubmitButton(node) {
+  if (!submitImageConfig) return;
+  const activeNode = node || configNode;
+  const isRunning = activeNode ? imageGenerationControllers.has(activeNode.id) : false;
+  submitImageConfig.textContent = isRunning ? "停止生成" : "提交";
+  submitImageConfig.classList.toggle("danger", isRunning);
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError" || /abort/i.test(String(error?.message || error));
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
+function openImageViewer(src, sources = [src]) {
+  if (!imageViewer || !imageViewerImg || !src) return;
+  imageViewerSources = uniqueValues((sources.length ? sources : [src]).filter(Boolean));
+  imageViewerIndex = Math.max(0, imageViewerSources.indexOf(src));
+  imageViewerImg.src = src;
+  setImageViewerScale(1);
+  imageViewer.classList.add("show");
+  imageViewer.setAttribute("aria-hidden", "false");
+}
+
+function closeImageViewerPanel() {
+  if (!imageViewer || !imageViewerImg) return;
+  imageViewer.classList.remove("show");
+  imageViewer.setAttribute("aria-hidden", "true");
+  imageViewerImg.removeAttribute("src");
+  imageViewerSources = [];
+  imageViewerIndex = 0;
+  setImageViewerScale(1);
+}
+
+function setImageViewerScale(scale) {
+  imageViewerScale = Math.min(4, Math.max(0.5, scale));
+  if (imageViewerImg) {
+    imageViewerImg.style.transform = `scale(${imageViewerScale})`;
+    imageViewerImg.style.cursor = imageViewerScale > 1 ? "zoom-out" : "zoom-in";
+  }
+}
+
+function stepImageViewer(direction) {
+  if (!imageViewerSources.length || !imageViewerImg) return;
+  imageViewerIndex = (imageViewerIndex + direction + imageViewerSources.length) % imageViewerSources.length;
+  imageViewerImg.src = imageViewerSources[imageViewerIndex];
+  setImageViewerScale(1);
+}
+
+function getViewerSourcesForImage(image) {
+  const node = image.closest(".node");
+  if (node?.dataset.type === "image") {
+    return uniqueValues([
+      ...getGeneratedImageHistory(node),
+      ...parseJsonArray(node.dataset.imageUrls),
+      node.dataset.imageDataUrl,
+    ].filter(Boolean));
+  }
+  const scope = image.closest(".upload-preview, .config-input-thumbs, .output-history-popover") || document;
+  return uniqueValues([...scope.querySelectorAll("img")].map((item) => item.src).filter(Boolean));
+}
+
+function openGeneratedImageExportPanel() {
+  const items = collectGeneratedImageExportItems();
+  let modal = document.querySelector("#generatedImageExportModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "generatedImageExportModal";
+    modal.className = "generated-export-modal";
+    modal.setAttribute("aria-hidden", "true");
+    modal.innerHTML = `
+      <div class="generated-export-panel" role="dialog" aria-modal="true">
+        <header>
+          <div>
+            <strong>导出生成图片</strong>
+            <span data-export-summary></span>
+          </div>
+          <button type="button" data-export-close>关闭</button>
+        </header>
+        <div class="generated-export-actions">
+          <button type="button" data-export-select="all">全选</button>
+          <button type="button" data-export-select="none">取消</button>
+          <button type="button" data-export-select="latest">每个节点最新</button>
+        </div>
+        <div class="generated-export-grid" data-export-grid></div>
+        <footer>
+          <span data-export-status></span>
+          <button type="button" data-export-download>导出 ZIP</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", handleGeneratedImageExportClick);
+  }
+
+  exportImageSelection = new Set(items.map((item) => item.id));
+  modal.dataset.items = JSON.stringify(items);
+  renderGeneratedImageExportPanel(modal, items);
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function collectGeneratedImageExportItems() {
+  const nodes = [...canvasContent.querySelectorAll(".node")].filter((node) => node.dataset.type === "image");
+  const items = [];
+  const seen = new Set();
+  nodes.forEach((node) => {
+    const title = node.querySelector(".node-title strong")?.textContent || "图片节点";
+    const history = getGeneratedImageHistory(node);
+    history.forEach((url, index) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      items.push({
+        id: `img-${items.length}`,
+        url,
+        title,
+        index,
+        latest: index === 0,
+        fileName: buildExportImageFileName(title, index, url, items.length),
+      });
+    });
+  });
+  return items;
+}
+
+function buildExportImageFileName(title, index, url, globalIndex = 0) {
+  const safeTitle = String(title || "image").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 48) || "image";
+  const extension = getImageExtensionFromUrl(url);
+  const suffix = index === 0 ? "latest" : `history-${index + 1}`;
+  return `${String(globalIndex + 1).padStart(3, "0")}-${safeTitle}-${suffix}.${extension}`;
+}
+
+function getImageExtensionFromUrl(url) {
+  if (/^data:image\/jpe?g/i.test(url)) return "jpg";
+  if (/^data:image\/webp/i.test(url)) return "webp";
+  if (/^data:image\/gif/i.test(url)) return "gif";
+  const pathname = (() => {
+    try {
+      return new URL(url, window.location.href).pathname;
+    } catch {
+      return String(url || "");
+    }
+  })();
+  const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
+  return match ? match[1].toLowerCase().replace("jpeg", "jpg") : "png";
+}
+
+function renderGeneratedImageExportPanel(modal, items) {
+  const grid = modal.querySelector("[data-export-grid]");
+  const summary = modal.querySelector("[data-export-summary]");
+  const status = modal.querySelector("[data-export-status]");
+  if (summary) summary.textContent = items.length ? `共 ${items.length} 张生成图` : "暂无可导出的生成图";
+  if (status) status.textContent = items.length ? `已选 ${exportImageSelection.size} 张` : "画布上还没有生成图片";
+  if (!grid) return;
+  grid.innerHTML = items.length
+    ? items.map((item) => `
+      <label class="generated-export-item ${exportImageSelection.has(item.id) ? "selected" : ""}">
+        <input type="checkbox" data-export-item="${escapeHtml(item.id)}" ${exportImageSelection.has(item.id) ? "checked" : ""}>
+        <img src="${item.url}" alt="">
+        <span>${escapeHtml(item.title)}</span>
+        <small>${item.latest ? "最新" : `历史 ${item.index + 1}`}</small>
+      </label>
+    `).join("")
+    : '<div class="generated-export-empty">暂无生成图片</div>';
+}
+
+function handleGeneratedImageExportClick(event) {
+  const modal = event.currentTarget;
+  if (event.target === modal || event.target.closest("[data-export-close]")) {
+    closeGeneratedImageExportPanel();
+    return;
+  }
+  const items = readGeneratedExportItems(modal);
+  const checkbox = event.target.closest("[data-export-item]");
+  if (checkbox) {
+    if (checkbox.checked) exportImageSelection.add(checkbox.dataset.exportItem);
+    else exportImageSelection.delete(checkbox.dataset.exportItem);
+    renderGeneratedImageExportPanel(modal, items);
+    return;
+  }
+  const selectButton = event.target.closest("[data-export-select]");
+  if (selectButton) {
+    const mode = selectButton.dataset.exportSelect;
+    if (mode === "all") exportImageSelection = new Set(items.map((item) => item.id));
+    if (mode === "none") exportImageSelection = new Set();
+    if (mode === "latest") exportImageSelection = new Set(items.filter((item) => item.latest).map((item) => item.id));
+    renderGeneratedImageExportPanel(modal, items);
+    return;
+  }
+  if (event.target.closest("[data-export-download]")) {
+    exportSelectedGeneratedImages(modal);
+  }
+}
+
+function readGeneratedExportItems(modal) {
+  try {
+    return JSON.parse(modal.dataset.items || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function closeGeneratedImageExportPanel() {
+  const modal = document.querySelector("#generatedImageExportModal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function exportSelectedGeneratedImages(modal) {
+  const items = readGeneratedExportItems(modal).filter((item) => exportImageSelection.has(item.id));
+  const status = modal.querySelector("[data-export-status]");
+  const button = modal.querySelector("[data-export-download]");
+  if (!items.length) {
+    if (status) status.textContent = "请先选择图片";
+    return;
+  }
+  if (button) button.disabled = true;
+  if (status) status.textContent = `正在读取 ${items.length} 张图片...`;
+  const files = [];
+  const failures = [];
+  for (const item of items) {
+    try {
+      const bytes = await readImageAsUint8Array(item.url);
+      files.push({ name: item.fileName, bytes });
+    } catch (error) {
+      failures.push(item);
+    }
+  }
+  if (!files.length) {
+    if (status) status.textContent = "导出失败：选中图片都无法读取";
+    if (button) button.disabled = false;
+    return;
+  }
+  if (status) status.textContent = "正在打包 ZIP...";
+  const zipBlob = createZipBlob(files);
+  downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
+  if (status) status.textContent = failures.length ? `已导出 ${files.length} 张，${failures.length} 张读取失败` : `已导出 ${files.length} 张`;
+  if (button) button.disabled = false;
+}
+
+async function readImageAsUint8Array(url) {
+  if (/^data:image\//i.test(url)) {
+    const base64 = url.split(",")[1] || "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function createZipBlob(files) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  files.forEach((file) => {
+    const nameBytes = encodeUtf8(file.name);
+    const crc = crc32(file.bytes);
+    const localHeader = concatUint8Arrays([
+      uint32le(0x04034b50), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
+      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0), nameBytes,
+    ]);
+    const centralHeader = concatUint8Arrays([
+      uint32le(0x02014b50), uint16le(20), uint16le(20), uint16le(0x0800), uint16le(0), uint16le(0), uint16le(0),
+      uint32le(crc), uint32le(file.bytes.length), uint32le(file.bytes.length), uint16le(nameBytes.length), uint16le(0),
+      uint16le(0), uint16le(0), uint16le(0), uint32le(0), uint32le(offset), nameBytes,
+    ]);
+    localParts.push(localHeader, file.bytes);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + file.bytes.length;
+  });
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = concatUint8Arrays([
+    uint32le(0x06054b50), uint16le(0), uint16le(0), uint16le(files.length), uint16le(files.length),
+    uint32le(centralSize), uint32le(offset), uint16le(0),
+  ]);
+  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+}
+
+function encodeUtf8(value) {
+  return new TextEncoder().encode(String(value || ""));
+}
+
+function uint16le(value) {
+  return new Uint8Array([value & 255, (value >> 8) & 255]);
+}
+
+function uint32le(value) {
+  return new Uint8Array([value & 255, (value >> 8) & 255, (value >> 16) & 255, (value >> 24) & 255]);
+}
+
+function concatUint8Arrays(parts) {
+  const length = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+  return output;
+}
+
+function crc32(bytes) {
+  let crc = -1;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ bytes[index]) & 255];
+  }
+  return (crc ^ -1) >>> 0;
+}
+
+function downloadBlob(blob, fileName) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || "download").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 60) || "download";
+}
+
+async function resolveGenerationSize(prompt, referencePlan, model = "") {
+  const explicit = parseExplicitSize(prompt, model);
+  if (explicit) return explicit;
+  if (referencePlan?.structureDimensions?.width && referencePlan?.structureDimensions?.height) {
+    return sizeFromDimensions(referencePlan.structureDimensions.width, referencePlan.structureDimensions.height, model);
+  }
+  const structureImage = referencePlan?.images?.[0] || "";
+  const dimensions = await getImageDimensions(structureImage);
+  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height, model);
+  return "";
+}
+
+function parseExplicitSize(prompt, model = "") {
+  const text = String(prompt || "");
+  const sizeMatch = text.match(/(\d{3,5})\s*(?:x|\*|×|X)\s*(\d{3,5})/);
+  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]), model);
+  const ratioMatch = text.match(/(?:比例|画幅|aspect\s*ratio)?\s*(\d{1,2})\s*[:：]\s*(\d{1,2})/i);
+  if (!ratioMatch) return "";
+  const width = Number(ratioMatch[1]);
+  const height = Number(ratioMatch[2]);
+  if (!width || !height) return "";
+  if (width === height) return "2048x2048";
+  if (width > height) return "2560x1440";
+  return "1440x2560";
+}
+
+function getImageDimensions(src) {
+  return new Promise((resolve) => {
+    if (!src) {
+      resolve(null);
+      return;
+    }
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+function getImageFileDimensions(file) {
+  return new Promise((resolve) => {
+    if (!file || !file.type?.startsWith("image/")) {
+      resolve(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    image.src = url;
+  });
+}
+
+function sizeFromDimensions(width, height, model = "") {
+  return normalizeGenerationSize(width, height, model);
+}
+
+function normalizeGenerationSize(width, height, model = "") {
+  if (!width || !height) return "";
+  if (isRhartImageModel(model)) return closestRhartAspectRatio(width, height);
+  const maxEdge = Math.max(width, height);
+  const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
+  const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
+  const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
+  return `${nextWidth}x${nextHeight}`;
+}
+
+function closestRhartAspectRatio(width, height) {
   const ratio = Number(width) / Number(height);
-  if (!Number.isFinite(ratio) || ratio <= 0) return "16:9";
+  if (!Number.isFinite(ratio) || ratio <= 0) return "";
   const allowed = [
     ["1:1", 1],
     ["16:9", 16 / 9],
@@ -759,1502 +4632,1761 @@ function closestAllowedAspectRatio(width, height) {
   }, { value: "16:9", distance: Infinity }).value;
 }
 
-function greatestCommonDivisor(a, b) {
-  let x = Math.abs(Math.round(a));
-  let y = Math.abs(Math.round(b));
-  while (y) {
-    const next = x % y;
-    x = y;
-    y = next;
-  }
-  return x || 1;
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
 }
 
-function buildAiHubMixSubmitBody(context) {
-  const imageUrls = Array.isArray(context.image_urls) ? context.image_urls.filter(isImageReferenceValue).slice(0, 8) : [];
-  return {
-    model: getAiHubMixModel(context.model),
-    prompt: context.prompt,
-    n: context.n || 1,
-    output_format: context.output_format || "png",
-    quality: "auto",
-    size: context.size || "auto",
-    image_urls: imageUrls,
-    structure_image_urls: Array.isArray(context.structure_image_urls) ? context.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [],
-    style_image_urls: Array.isArray(context.style_image_urls) ? context.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [],
-  };
-}
-
-async function submitAiHubMixImageTask(apiKey, body) {
-  const baseUrl = getAiHubMixBaseUrl();
-  const hasReferences = Array.isArray(body.image_urls) && body.image_urls.length > 0;
+async function readResponseJson(response) {
+  const text = await response.text();
+  if (!text) return {};
   try {
-    const response = hasReferences
-      ? await submitAiHubMixImageEdit(apiKey, baseUrl, body)
-      : await fetch(`${baseUrl}/images/generations`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: body.model,
-            prompt: body.prompt,
-            n: body.n || 1,
-            size: body.size || "auto",
-            quality: body.quality || "auto",
-            output_format: body.output_format || "png",
-          }),
-        });
-    const payload = await readJson(response);
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      payload.aihubmixEndpoint = response.url || `${baseUrl}/images/${hasReferences ? "edits" : "generations"}`;
-    }
-    const imageUrl = extractResultUrl(payload);
+    return JSON.parse(text);
+  } catch {
     return {
-      ok: response.ok && Boolean(imageUrl),
-      status: response.status,
-      payload,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      status: 500,
-      payload: {
-        error: "AIHubMix request failed before reaching upstream",
-        message: error instanceof Error ? error.message : String(error),
-      },
+      error: text,
+      message: text.slice(0, 240),
     };
   }
 }
 
-async function submitAiHubMixImageEdit(apiKey, baseUrl, body) {
-  const form = new FormData();
-  form.set("model", body.model);
-  form.set("prompt", body.prompt);
-  form.set("n", String(body.n || 1));
-  form.set("size", body.size || "auto");
-  form.set("quality", body.quality || "auto");
-  form.set("output_format", body.output_format || "png");
-  const images = uniqueValues([
-    ...(Array.isArray(body.structure_image_urls) ? body.structure_image_urls : []),
-    ...(Array.isArray(body.style_image_urls) ? body.style_image_urls : []),
-    ...(Array.isArray(body.image_urls) ? body.image_urls : []),
-  ].filter(isImageReferenceValue)).slice(0, 8);
-  for (let index = 0; index < images.length; index += 1) {
-    const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
-    form.append(images.length > 1 ? "image[]" : "image", blob, filename);
-  }
-  return fetch(`${baseUrl}/images/edits`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: form,
-  });
-}
-
-async function imageReferenceToBlob(value, filename) {
-  const { buffer, contentType } = await readImageBytes(value);
-  const extension = contentTypeToExtension(contentType);
-  return {
-    blob: new Blob([buffer], { type: contentType }),
-    filename: filename.replace(/\.[^.]+$/, `.${extension}`),
-  };
-}
-
-async function submitRhartImageTask(apiKey, body) {
-  const endpoint = buildRhartEndpoint(body.model);
-  if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
-    return {
-      ok: false,
-      status: 500,
-      payload: {
-        error: "RHART_ENDPOINT_URL / RHART_BASE_URL is invalid",
-        message: endpoint
-          ? `RHarT 是独立生成后端，但当前 endpoint 不是完整 URL：${endpoint}。请把 RHART_ENDPOINT_URL 配成 https:// 开头的完整接口地址。`
-          : "RHarT 是独立生成后端，请配置 RHART_ENDPOINT_URL 为完整 image-to-image 接口地址，或配置 RHART_BASE_URL 为该平台域名。",
-        rhartEndpoint: endpoint || "",
-      },
-    };
-  }
-  const resolvedReferences = await resolveRhartImageUrls(apiKey, body.sourceImageUrls || body.imageUrls || []);
-  const imageUrls = resolvedReferences.urls;
-  if (!imageUrls.length) {
-    const uploadSummary = formatRhartUploadAttempts(resolvedReferences.uploadAttempts);
-    return {
-      ok: false,
-      status: 400,
-      payload: {
-        error: "RHarT requires public imageUrls",
-        message: `RunningHub RHarT 图生图接口要求 imageUrls。后端尝试上传本地参考图后仍没有拿到可用 URL，请检查图片上传接口或密钥权限。${uploadSummary ? ` 上传摘要：${uploadSummary}` : ""}`,
-        rhartEndpoint: endpoint,
-        referenceCount: body.referenceCount || 0,
-        publicReferenceCount: imageUrls.length,
-        uploadAttempts: resolvedReferences.uploadAttempts,
-      },
-    };
-  }
-  const submitBody = {
-    imageUrls,
-    prompt: body.prompt,
-    aspectRatio: body.aspectRatio || "16:9",
-    resolution: body.resolution || "1k",
-  };
-  let response;
+function formatApiError(result, fallback) {
+  if (!result) return fallback;
+  if (typeof result === "string") return result;
+  const message = extractApiErrorMessage(result);
+  const diagnostic = formatApiErrorDiagnostic(result);
+  if (message) return diagnostic ? `${message}（${diagnostic}）` : message;
   try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(submitBody),
-    });
-  } catch (error) {
-    return {
-      ok: false,
-      status: 500,
-      payload: {
-        error: "RHarT request failed before reaching upstream",
-        message: error instanceof Error ? error.message : String(error),
-        rhartEndpoint: endpoint,
-      },
-    };
+    return JSON.stringify(result);
+  } catch {
+    return fallback;
   }
-  const payload = await readJson(response);
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.rhartEndpoint = endpoint;
-    payload.rhartRequest = {
-      model: body.model,
-      aspectRatio: submitBody.aspectRatio,
-      resolution: submitBody.resolution,
-      referenceCount: body.referenceCount || 0,
-      publicReferenceCount: imageUrls.length,
-      uploadAttempts: resolvedReferences.uploadAttempts,
-    };
-  }
-  const imageUrl = extractRhartResultUrl(payload);
-  const taskId = extractTaskId(payload);
-  return {
-    ok: response.ok && Boolean(imageUrl || taskId),
-    status: response.status,
-    payload,
-  };
 }
 
-async function resolveRhartImageUrls(apiKey, imageUrls) {
-  const resolved = [];
-  const uploadAttempts = [];
-  const references = imageUrls.filter(isImageReferenceValue).slice(0, 14);
-  for (let index = 0; index < references.length; index += 1) {
-    const reference = references[index];
-    if (/^https?:\/\//i.test(reference)) {
-      resolved.push(reference);
-      continue;
-    }
-    if (/^data:image\//i.test(reference)) {
-      const uploadResult = await uploadRhartImageReference(apiKey, reference, index);
-      const uploaded = uploadResult.url;
-      uploadAttempts.push(uploadResult.report);
-      if (uploaded) resolved.push(uploaded);
+function formatApiErrorDiagnostic(result) {
+  const request = result?.request;
+  const parts = [];
+  if (request && typeof request === "object") {
+    if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
+    if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
+    if (request.rayinRequestType) parts.push(`type: ${request.rayinRequestType}`);
+    if (request.rhartEndpoint) parts.push(`endpoint: ${request.rhartEndpoint}`);
+    if (request.rhartKeyHint) parts.push(`key: ${request.rhartKeyHint}`);
+    if (request.upstreamStatus) parts.push(`status: ${request.upstreamStatus}`);
+    if (request.upstreamMessage) parts.push(`upstream: ${String(request.upstreamMessage).slice(0, 160)}`);
+    if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
+  }
+  const upstream = result?.upstream;
+  if (upstream && typeof upstream === "object") {
+    if (upstream.errorCode || upstream.code) parts.push(`code: ${upstream.errorCode || upstream.code}`);
+    if (upstream.rhartQueryShape) parts.push(`query: ${upstream.rhartQueryShape}`);
+    if (upstream.rhartEndpoint) parts.push(`endpoint: ${upstream.rhartEndpoint}`);
+    if (Array.isArray(upstream.uploadAttempts) && upstream.uploadAttempts.length) {
+      parts.push(`upload: ${formatUploadAttemptSummary(upstream.uploadAttempts)}`);
     }
   }
-  return {
-    urls: uniqueValues(resolved).slice(0, 14),
-    uploadAttempts,
-  };
-}
-
-async function uploadRhartImageReference(apiKey, imageUrl, index) {
-  const endpoint = buildRhartUploadEndpoint();
-  const { buffer, contentType } = await readImageBytes(imageUrl);
-  const extension = contentTypeToExtension(contentType);
-  const form = new FormData();
-  form.append("file", new Blob([buffer], { type: contentType }), `reference-${index + 1}.${extension}`);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: form,
-  });
-  const payload = await readJson(response);
-  if (!response.ok) {
-    throw new Error(JSON.stringify({
-      error: "RHarT reference upload failed",
-      message: formatUpstreamError(payload),
-      rhartEndpoint: endpoint,
-      upstream: payload,
-    }));
+  if (Array.isArray(result?.uploadAttempts) && result.uploadAttempts.length) {
+    parts.push(`upload: ${formatUploadAttemptSummary(result.uploadAttempts)}`);
   }
-  return {
-    url: extractUploadUrl(payload),
-    report: summarizeRhartUploadPayload(response.status, endpoint, payload),
-  };
+  return parts.join("，");
 }
 
-function extractUploadUrl(payload) {
-  const candidates = [
-    payload?.data?.download_url,
-    payload?.data?.downloadUrl,
-    payload?.data?.url,
-    payload?.data?.file_url,
-    payload?.data?.fileUrl,
-    payload?.data?.image_url,
-    payload?.data?.imageUrl,
-    payload?.data?.view_url,
-    payload?.data?.viewUrl,
-    payload?.download_url,
-    payload?.downloadUrl,
-    payload?.url,
-    payload?.file_url,
-    payload?.fileUrl,
-    payload?.image_url,
-    payload?.imageUrl,
-    payload?.view_url,
-    payload?.viewUrl,
-  ];
-  if (Array.isArray(payload?.data)) {
-    candidates.push(
-      payload.data[0]?.download_url,
-      payload.data[0]?.downloadUrl,
-      payload.data[0]?.url,
-      payload.data[0]?.file_url,
-      payload.data[0]?.fileUrl,
-      payload.data[0]?.image_url,
-      payload.data[0]?.imageUrl,
-      payload.data[0]?.view_url,
-      payload.data[0]?.viewUrl,
-    );
-  }
-  const direct = candidates.find((value) => typeof value === "string" && /^https?:\/\//i.test(value)) || findImageUrl(payload);
-  if (direct) return direct;
-  const filename = extractRunningHubFilename(payload);
-  return filename ? buildRunningHubViewUrl(filename) : "";
-}
-
-function extractRunningHubFilename(payload) {
-  const candidates = [
-    payload?.data?.filename,
-    payload?.data?.fileName,
-    payload?.data?.file_name,
-    payload?.data?.name,
-    payload?.data?.key,
-    payload?.filename,
-    payload?.fileName,
-    payload?.file_name,
-    payload?.name,
-    payload?.key,
-  ];
-  if (Array.isArray(payload?.data)) {
-    candidates.push(
-      payload.data[0]?.filename,
-      payload.data[0]?.fileName,
-      payload.data[0]?.file_name,
-      payload.data[0]?.name,
-      payload.data[0]?.key,
-    );
-  }
-  return candidates.find((value) => typeof value === "string" && value.trim()) || "";
-}
-
-function buildRunningHubViewUrl(filename) {
-  const base = getRhartBaseUrl().replace(/\/+$/, "");
-  return `${base}/view?filename=${encodeURIComponent(String(filename).trim())}`;
-}
-
-function summarizeRhartUploadPayload(status, endpoint, payload) {
-  return {
-    status,
-    endpoint,
-    code: payload?.code,
-    message: payload?.message || payload?.msg || payload?.error || "",
-    dataKeys: payload?.data && typeof payload.data === "object" ? Object.keys(payload.data).slice(0, 20) : [],
-    url: extractUploadUrl(payload),
-    filename: extractRunningHubFilename(payload),
-  };
-}
-
-function formatRhartUploadAttempts(attempts) {
-  if (!Array.isArray(attempts) || !attempts.length) return "";
-  return attempts.map((attempt, index) => {
-    const parts = [`#${index + 1}`];
-    if (attempt.status) parts.push(`status=${attempt.status}`);
-    if (attempt.code !== undefined && attempt.code !== null) parts.push(`code=${attempt.code}`);
-    if (attempt.message) parts.push(`message=${String(attempt.message).slice(0, 120)}`);
-    if (attempt.url) parts.push(`url=${attempt.url}`);
-    if (attempt.filename) parts.push(`filename=${attempt.filename}`);
-    if (Array.isArray(attempt.dataKeys) && attempt.dataKeys.length) parts.push(`dataKeys=${attempt.dataKeys.join("|")}`);
-    return parts.join(", ");
+function formatUploadAttemptSummary(attempts) {
+  return attempts.slice(0, 2).map((attempt, index) => {
+    const fields = [`#${index + 1}`];
+    if (attempt.status) fields.push(`status ${attempt.status}`);
+    if (attempt.code !== undefined && attempt.code !== null) fields.push(`code ${attempt.code}`);
+    if (attempt.message) fields.push(String(attempt.message).slice(0, 80));
+    if (attempt.url) fields.push("url ok");
+    if (attempt.filename) fields.push(`filename ${String(attempt.filename).slice(0, 80)}`);
+    if (Array.isArray(attempt.dataKeys) && attempt.dataKeys.length) fields.push(`keys ${attempt.dataKeys.join("|")}`);
+    return fields.join(" / ");
   }).join("; ");
 }
 
-async function getRhartTask(apiKey, taskId) {
-  const endpoint = buildRhartQueryEndpoint();
-  const attempts = [
-    { taskId },
-    { apiKey, taskId },
-    { task_id: taskId },
-    { api_key: apiKey, taskId },
-  ];
-  let lastPayload = null;
-  let lastStatus = 0;
-  for (const body of attempts) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    const payload = await readJson(response);
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      payload.rhartEndpoint = endpoint;
-      payload.rhartQueryShape = Object.keys(body).join(",");
-    }
-    if (response.ok && !isRhartQueryRejected(payload)) return payload;
-    lastPayload = payload;
-    lastStatus = response.status;
-  }
-  const error = new Error(JSON.stringify(lastPayload || { error: "RHarT query failed", status: lastStatus }));
-  error.status = lastStatus;
-  throw error;
-}
-
-function isRhartQueryRejected(payload) {
-  const code = String(payload?.errorCode || payload?.code || payload?.data?.errorCode || payload?.data?.code || "").trim();
-  const status = String(payload?.status || payload?.data?.status || "").toUpperCase();
-  if (status === "FAILED") return false;
-  return Boolean(code && code !== "0");
-}
-
-function shouldTryRayinAi(provider, model, apiKey) {
-  if (!apiKey) return false;
-  return provider === "rayinai";
-}
-
-function formatUpstreamError(payload) {
-  const message = findMessage(payload);
-  if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(message)) {
-    return "RHarT 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。请确认 RunningHub 后台 key 权限，或确认所选 RHarT 接口已对你的 key 开通。";
-  }
-  if (/sub2api auth returned HTTP 401|HTTP 401|401/i.test(message)) {
-    return "RayinAI API 认证失败：请确认 Vercel 里的 RAYINAI_API_KEY 是后台生成的 sk- 开头密钥，并重新部署。";
-  }
-  if (/selected model is at capacity|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙/i.test(message)) {
-    return `RayinAI 模型当前满载：${message}`;
-  }
-  if (/service temporarily unavailable|temporarily unavailable|bad gateway|gateway timeout/i.test(message)) {
-    return message
-      ? `RayinAI 上游暂时不可用：${message}`
-      : "RayinAI 上游暂时不可用，请稍后重试，或临时切换到 ApiMart 通道。";
-  }
-  if (/internal server error|server_error/i.test(message)) {
-    return message
-      ? `上游图片生成服务内部错误：${message}`
-      : "上游图片生成服务内部错误，请稍后重试或切换通道。";
-  }
-  if (/RayinAI structure-style references unsupported/i.test(message)) {
-    return "RayinAI 公开 API 当前无法稳定处理“结构图 + 风格图”双参考图，请改用单结构图生成、分两步生成，或切换到更稳定的图生图通道。";
-  }
-  return message || "Image generation request failed.";
-}
-
-function findMessage(value, seen = new Set()) {
+function extractApiErrorMessage(value, seen = new Set()) {
   if (!value) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(value)) {
+      return "RHarT 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。请确认 RunningHub 后台 key 权限，或确认所选 RHarT 接口已对你的 key 开通。";
+    }
+    if (/internal server error|server_error/i.test(value)) return "上游图片生成服务内部错误，请稍后重试，或切换 ApiMart 通道后再试。";
+    return value;
+  }
   if (typeof value !== "object" || seen.has(value)) return "";
   seen.add(value);
   const direct = value.errorMessage || value.failedReason || value.promptTips || value.message || value.error || value.detail || value.code || value.errorCode;
-  const directMessage = findMessage(direct, seen);
+  const directMessage = extractApiErrorMessage(direct, seen);
   if (directMessage) return directMessage;
   for (const item of Object.values(value)) {
-    const nested = findMessage(item, seen);
+    const nested = extractApiErrorMessage(item, seen);
     if (nested) return nested;
   }
   return "";
 }
 
-function parseErrorPayload(error) {
-  const text = error instanceof Error ? error.message : String(error || "");
-  if (!text || !/^[\[{]/.test(text.trim())) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+function shouldRetryWithSaferPrompt(result) {
+  const message = formatApiError(result, "");
+  return /prohibited|flagged|safety|policy|moderation|敏感|违规|拦截/i.test(message);
 }
 
-function normalizeModel(model) {
-  const value = String(model || "").trim();
-  if (value === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (/^(midjourney|mj)$/i.test(value)) return "midjourney";
-  if (value === "rhart-image-n-g31-flash/image-to-image" || value === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
-  if (value.toLowerCase().startsWith("rayinai:")) return "gpt-image-2";
-  if (value === "gpt-image-2" || value === "GPT Image 2" || value === "GPT图像2") return "gpt-image-2";
-  return "gpt-image-2-official";
+function sanitizeGenerationPrompt(prompt) {
+  return makePromptSafer(prompt);
 }
 
-function normalizeRayinRoute(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  if (["rayinai:mumu", "mumu", "木木"].includes(raw)) return "mumu";
-  if (["rayinai:tiancai", "tiancai", "甜菜"].includes(raw)) return "tiancai";
-  if (["rayinai:kaihua", "kaihua", "开花"].includes(raw)) return "kaihua";
-  if (["rayinai:haizhe", "haizhe", "海蜇"].includes(raw)) return "haizhe";
-  return "bunana";
+function makePromptSafer(prompt) {
+  return String(prompt || "")
+    .replace(/characters or creatures/gi, "extra subjects")
+    .replace(/characters/gi, "extra subjects")
+    .replace(/creatures/gi, "extra subjects")
+    .replace(/broken/gi, "damaged")
+    .replace(/破碎/g, "受损")
+    .replace(/不要有太繁复/g, "保持简洁")
+    .replace(/不要/g, "避免")
+    .replace(/禁止/g, "避免");
 }
 
-function getRayinRoutePath(route) {
-  const normalized = normalizeRayinRoute(route);
-  const envMap = {
-    bunana: process.env.RAYINAI_BUNANA_PATH,
-    mumu: process.env.RAYINAI_MUMU_PATH,
-    tiancai: process.env.RAYINAI_TIANCAI_PATH,
-    kaihua: process.env.RAYINAI_KAIHUA_PATH,
-    haizhe: process.env.RAYINAI_HAIZHE_PATH,
-  };
-  const configured = sanitizeHeaderValue(envMap[normalized] || "");
-  if (configured) return configured;
-  if (normalized === "bunana") return "";
-  return "";
-}
-
-function getRayinRouteLabel(route) {
-  return {
-    bunana: "不拿拿",
-    mumu: "木木",
-    tiancai: "甜菜",
-    kaihua: "开花",
-    haizhe: "海蜇",
-  }[normalizeRayinRoute(route)] || "不拿拿";
-}
-
-function getRayinRouteEnvName(route) {
-  return {
-    mumu: "RAYINAI_MUMU_PATH",
-    tiancai: "RAYINAI_TIANCAI_PATH",
-    kaihua: "RAYINAI_KAIHUA_PATH",
-    haizhe: "RAYINAI_HAIZHE_PATH",
-  }[normalizeRayinRoute(route)] || "RAYINAI_BUNANA_PATH";
-}
-
-function buildRayinRouteUrl(baseUrl, route, fallbackPath) {
-  const path = getRayinRoutePath(route) || fallbackPath;
-  if (/^https?:\/\//i.test(path)) return path;
-  return new URL(String(path || fallbackPath).replace(/^\/+/, ""), `${baseUrl.replace(/\/+$/, "")}/`).toString();
-}
-
-function normalizeRayinModel(model) {
-  const value = normalizeModel(model);
-  if (value === "gpt-image-2-official") return "gpt-image-2";
-  return value;
-}
-
-function normalizeQuality(quality, model) {
-  const value = String(quality || "").trim().toLowerCase();
-  if (!value) return "";
-  if (isRhartModel(model)) {
-    if (value === "low" || value === "standard" || value === "1k") return "1k";
-    if (value === "medium" || value === "hd" || value === "2k") return "2k";
-    if (value === "high" || value === "4k" || value === "ultra") return "4k";
-    return value;
-  }
-  if (model === "gpt-image-2") {
-    if (value === "low" || value === "standard" || value === "1k") return "1k";
-    if (value === "medium" || value === "hd" || value === "2k") return "2k";
-    if (value === "high" || value === "4k") return "4k";
-    return value;
-  }
-  if (value === "medium") return "standard";
-  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
-  return "high";
-}
-
-function isRhartModel(model) {
-  const value = String(model || "").trim().replace(/^\/+/, "");
-  return Object.prototype.hasOwnProperty.call(RHART_ENDPOINT_PATHS, value)
-    || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(value);
-}
-
-function shouldSendSize(model) {
-  return model !== "gemini-3-pro-image-preview";
-}
-
-function normalizeSize(size, model = "") {
-  const value = String(size || "").trim().toLowerCase().replace("*", "x").replace("×", "x");
-  if (!value) return "";
-  const match = value.match(/^(\d{3,5})x(\d{3,5})$/);
-  if (match) {
-    const sourceWidth = Number(match[1]);
-    const sourceHeight = Number(match[2]);
-    const maxEdge = Math.max(sourceWidth, sourceHeight);
-    const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-    const width = Math.min(3840, roundUpToMultiple(sourceWidth * scale, 16));
-    const height = Math.min(3840, roundUpToMultiple(sourceHeight * scale, 16));
-    return `${width}x${height}`;
-  }
-  if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
-  return "";
-}
-
-function roundUpToMultiple(value, multiple) {
-  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
-}
-
-async function persistResultImage(imageUrl, taskId) {
-  if (!imageUrl || typeof imageUrl !== "string") return imageUrl;
-  if (/^https?:\/\/[^/]*\.public\.blob\.vercel-storage\.com\//i.test(imageUrl)) return imageUrl;
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return imageUrl;
-
-  try {
-    const { put } = require("@vercel/blob");
-    const { buffer, contentType } = await readImageBytes(imageUrl);
-    const extension = contentTypeToExtension(contentType);
-    const pathname = `aivideobox/generated/${Date.now()}-${String(taskId || "image").replace(/[^a-z0-9_-]/gi, "-")}.${extension}`;
-    const blob = await put(pathname, buffer, {
-      access: "public",
-      contentType,
-      addRandomSuffix: false,
-    });
-    return blob.url;
-  } catch (error) {
-    console.error("Failed to persist generated image:", error);
-    return imageUrl;
-  }
-}
-
-async function materializeResultImage(imageUrl, taskId, options = {}) {
-  if (!imageUrl || typeof imageUrl !== "string") return imageUrl;
-  const persisted = await persistResultImage(imageUrl, taskId);
-  if (persisted && persisted !== imageUrl) return persisted;
-  if (!options.inlineFallback || /^data:image\//i.test(imageUrl)) return imageUrl;
-
-  try {
-    const { buffer, contentType } = await readImageBytes(imageUrl);
-    return `data:${contentType || "image/png"};base64,${buffer.toString("base64")}`;
-  } catch (error) {
-    console.error("Failed to inline generated image:", error);
-    return imageUrl;
-  }
-}
-
-async function readImageBytes(imageUrl, options = {}) {
-  if (/^data:image\//i.test(imageUrl)) {
-    const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) throw new Error("Invalid image data URL");
-    return {
-      contentType: match[1] || "image/png",
-      buffer: Buffer.from(match[2], "base64"),
-    };
+async function fileToDataUrl(file) {
+  if (file.type.startsWith("image/")) {
+    if (file.size <= 1.8 * 1024 * 1024) {
+      return readFileAsDataUrl(file);
+    }
+    return compressImageFile(file, 3.2 * 1024 * 1024);
   }
 
-  const response = await fetch(imageUrl, {
-    cache: "no-store",
-    headers: buildImageFetchHeaders(options),
+  return readFileAsDataUrl(file);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
+    reader.readAsDataURL(file);
   });
+}
+
+async function uploadImageFile(file) {
+  return uploadMediaFile(file);
+}
+
+async function uploadMediaFile(file) {
+  const imageDataUrl = await fileToDataUrl(file);
+  const response = await fetch("/api/upload-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: safeAsciiFileName(file.name, file.type.startsWith("video/") ? "media.mp4" : "image.png"),
+      imageDataUrl,
+    }),
+  });
+  const result = await readResponseJson(response);
   if (!response.ok) {
-    throw new Error(`Download generated image failed: HTTP ${response.status}`);
-  }
-  const contentType = response.headers.get("content-type")?.split(";")[0] || "application/octet-stream";
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  if (!/^image\//i.test(contentType) && !looksLikeImageBuffer(buffer)) {
-    throw new Error(`Download generated image failed: upstream returned ${contentType}`);
-  }
-  return {
-    contentType: /^image\//i.test(contentType) ? contentType : inferImageContentType(buffer),
-    buffer,
-  };
-}
-
-function buildImageFetchHeaders(options = {}) {
-  const headers = {};
-  if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
-  if (options.referer) headers.Referer = options.referer;
-  return headers;
-}
-
-function getKeyHint(value) {
-  const key = sanitizeBearerToken(value);
-  if (!key) return "empty";
-  return `len:${key.length}, tail:${key.slice(-4)}`;
-}
-
-function looksLikeImageBuffer(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return false;
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) return true;
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true;
-  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return true;
-  if (buffer.slice(0, 3).toString("ascii") === "GIF") return true;
-  return false;
-}
-
-function inferImageContentType(buffer) {
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) return "image/jpeg";
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "image/png";
-  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
-  if (buffer.slice(0, 3).toString("ascii") === "GIF") return "image/gif";
-  return "image/png";
-}
-
-function contentTypeToExtension(contentType) {
-  if (contentType === "image/jpeg") return "jpg";
-  if (contentType === "image/webp") return "webp";
-  if (contentType === "image/gif") return "gif";
-  return "png";
-}
-
-async function pollTask(apiKey, taskId) {
-  const deadline = Date.now() + 270000;
-  let lastPayload = null;
-
-  while (Date.now() < deadline) {
-    await sleep(5000);
-    const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    const payload = await readJson(response);
-    if (!response.ok) throw new Error(JSON.stringify(payload));
-
-    lastPayload = payload;
-    const status = payload?.data?.status || payload?.status;
-    const progress = payload?.data?.progress || payload?.progress;
-    console.log(`APIMart task ${taskId}: status=${status || "unknown"} progress=${progress || "unknown"}`);
-    if (["completed", "succeeded", "success"].includes(status)) return payload;
-    if (["failed", "error", "cancelled"].includes(status)) {
-      throw new Error(JSON.stringify(payload));
+    const message = formatApiError(result, `HTTP ${response.status}`);
+    if (file.type.startsWith("image/") && isBlobStorageQuotaError(message)) {
+      console.warn("Vercel Blob quota exceeded; using inline image reference instead.", message);
+      return imageDataUrl;
     }
+    throw new Error(message);
   }
-
-  throw new Error(`Timed out waiting for APIMart task ${taskId}: ${JSON.stringify(lastPayload)}`);
+  if (!result.url) {
+    throw new Error("上传接口没有返回图片 URL");
+  }
+  return result.url;
 }
 
-async function getTask(apiKey, taskId) {
-  const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  const payload = await readJson(response);
-  if (!response.ok) throw new Error(JSON.stringify(payload));
-  return payload;
+function isBlobStorageQuotaError(message) {
+  return /vercel blob|storage quota|quota exceeded|1gb maximum|blob.*quota/i.test(String(message || ""));
 }
 
-async function getRayinTask(apiKey, taskId, route = "bunana") {
-  const baseUrl = getRayinAiBaseUrl(route);
-  const endpoints = [
-    `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`,
-    `${baseUrl}/tasks/${encodeURIComponent(taskId)}`,
-  ];
-  let lastPayload = null;
-  for (const endpoint of endpoints) {
-    const headers = {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "*/*",
-    };
-    const response = await fetch(endpoint, { headers });
-    const payload = await readJson(response);
-    if (response.ok) {
-      const taskPayload = findTaskById(payload, taskId) || payload;
-      if (taskPayload !== payload && taskPayload && typeof taskPayload === "object" && !Array.isArray(taskPayload)) {
-        taskPayload.rayinEndpoint = endpoint;
-        return taskPayload;
+function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      const sourceMaxSide = Math.max(image.naturalWidth, image.naturalHeight);
+      const candidates = [
+        { maxSide: 3072, quality: 0.94 },
+        { maxSide: 2560, quality: 0.92 },
+        { maxSide: 2208, quality: 0.9 },
+        { maxSide: 1920, quality: 0.88 },
+        { maxSide: 1600, quality: 0.86 },
+        { maxSide: 1280, quality: 0.84 },
+      ];
+
+      let best = "";
+      for (const candidate of candidates) {
+        const scale = Math.min(1, candidate.maxSide / sourceMaxSide);
+        const width = Math.max(1, Math.round(image.naturalWidth * scale));
+        const height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.width = width;
+        canvas.height = height;
+        context.clearRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        const output = canvas.toDataURL("image/jpeg", candidate.quality);
+        best = output;
+        if (estimateDataUrlBytes(output) <= targetBytes) {
+          resolve(output);
+          return;
+        }
       }
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        payload.rayinEndpoint = endpoint;
-      }
-      return payload;
-    }
-    lastPayload = payload;
-    if (![404, 405].includes(response.status)) break;
-  }
-  throw new Error(JSON.stringify(lastPayload || { error: "RayinAI task polling failed" }));
-}
 
-async function submitRayinImageTask(apiKey, submitBody) {
-  const rayinRoute = normalizeRayinRoute(submitBody.rayin_route || submitBody.model);
-  const baseUrl = getRayinAiBaseUrl(rayinRoute);
-  const baseHeaders = {
-    Authorization: `Bearer ${apiKey}`,
-    Accept: "*/*",
-    Host: new URL(baseUrl).host,
-    Connection: "keep-alive",
-  };
-  const jsonHeaders = {
-    ...baseHeaders,
-    "Content-Type": "application/json",
-  };
-  const imageBody = {
-    ...submitBody,
-    model: normalizeRayinModel(submitBody.model),
-  };
-  const rayinImageBody = normalizeRayinImageBody(imageBody);
-  const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  const hasStructureStyleReferences = Array.isArray(rayinImageBody.structure_image_urls)
-    && rayinImageBody.structure_image_urls.length > 0
-    && Array.isArray(rayinImageBody.style_image_urls)
-    && rayinImageBody.style_image_urls.length > 0;
-  const models = getRayinAiResponsesModels();
-  const attempts = [];
-  for (const model of models) {
-    const responsesAttempt = {
-      url: `${baseUrl}/v1/responses`,
-      body: buildRayinResponsesBody(rayinImageBody, model),
-      type: "responses",
+      resolve(best);
     };
-    attempts.push(responsesAttempt);
-  }
-  let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
-  for (const attempt of attempts) {
-    const { response, payload } = await fetchRayinWithRetry(
-      attempt.url,
-      attempt.multipart ? baseHeaders : jsonHeaders,
-      attempt.body,
-      { multipart: attempt.multipart },
-    );
-    const imageUrl = extractResultUrl(payload);
-    const taskId = extractTaskId(payload);
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      const debugBody = attempt.debugBody || attempt.body || {};
-      payload.rayinRequest = {
-        model: debugBody?.model,
-        type: attempt.type,
-        route: attempt.route || rayinRoute,
-        configuredPath: attempt.configuredPath || "",
-        hasTools: Array.isArray(debugBody?.tools),
-        contentTypes: debugBody?.input?.[0]?.content?.map((item) => item?.type).filter(Boolean) || [],
-        referenceCount: getRayinAttemptReferenceCount(debugBody),
-        inputRoles: getRayinAttemptInputRoles(debugBody),
-      };
-    }
-    if (response.ok && (imageUrl || taskId)) {
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        payload.rayinEndpoint = attempt.url;
-      }
-      return { ok: true, status: response.status, payload };
-    }
-    last = { ok: false, status: response.status, payload };
-    if (response.ok) return last;
-    const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    const canFallbackToNextRayinEndpoint = false;
-    if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
-  }
-
-  if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
-    last.payload.endpoint = attempts[attempts.length - 1]?.url;
-    last.payload.status = last.status;
-    if (hasStructureStyleReferences) {
-      last.payload.message = last.payload.message || "RayinAI structure-style references unsupported";
-      last.payload.reason = last.payload.reason || "RayinAI public API did not return a reliable structure/style reference edit result.";
-    }
-  }
-  return last;
-}
-
-async function fetchRayinWithRetry(url, headers, body, options = {}) {
-  let response;
-  let payload;
-  const maxAttempts = getRayinAiRetryAttempts();
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      response = await fetchWithTimeout(url, {
-        method: "POST",
-        headers,
-        body: options.multipart ? body : JSON.stringify(body),
-      }, getRayinFetchTimeoutMs());
-      payload = await readJson(response);
-    } catch (error) {
-      payload = {
-        error: "RayinAI request timeout",
-        message: error instanceof Error ? error.message : String(error),
-        endpoint: url,
-      };
-      response = { status: 524, ok: false };
-    }
-    const message = formatUpstreamError(payload);
-    if (![429, 502, 503, 504, 524].includes(response.status) || attempt === maxAttempts - 1) return { response, payload };
-    if (!isRetryableRayinMessage(message)) {
-      return { response, payload };
-    }
-    await sleep(getRayinRetryDelay(attempt));
-  }
-  return { response, payload };
-}
-
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function getRayinRetryDelay(attempt) {
-  const delays = [800, 1600, 3000, 5000];
-  return delays[Math.min(attempt, delays.length - 1)];
-}
-
-function getRayinAttemptReferenceCount(body) {
-  if (Array.isArray(body?.input_images)) {
-    return body.input_images.reduce((total, group) => total + (Array.isArray(group) ? group.length : 1), 0);
-  }
-  if (Array.isArray(body?.inputs)) return body.inputs.length;
-  if (Array.isArray(body?.image_urls)) return body.image_urls.length;
-  return 0;
-}
-
-function getRayinAttemptInputRoles(body) {
-  if (Array.isArray(body?.input_images)) {
-    return body.input_images.map((_, index) => {
-      if (index === 0) return "structure";
-      if (index === 1) return "style";
-      return "reference";
-    });
-  }
-  return Array.isArray(body?.inputs) ? body.inputs.map((item) => item?.role).filter(Boolean) : [];
-}
-
-function isRetryableRayinMessage(message) {
-  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout|timeout occurred|a timeout occurred|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用/i.test(String(message || ""));
-}
-
-function normalizeRayinImageBody(body) {
-  const imageUrls = Array.isArray(body.image_urls) ? body.image_urls.filter(isImageReferenceValue) : [];
-  const structureUrls = Array.isArray(body.structure_image_urls) ? body.structure_image_urls.filter(isImageReferenceValue) : [];
-  const styleUrls = Array.isArray(body.style_image_urls) ? body.style_image_urls.filter(isImageReferenceValue) : [];
-  const editUrls = Array.isArray(body.edit_image_urls) ? body.edit_image_urls.filter(isImageReferenceValue) : [];
-  const references = uniqueArray([...structureUrls, ...styleUrls, ...editUrls, ...imageUrls]).slice(0, 16);
-  const next = {
-    model: normalizeRayinModel(body.model),
-    rayin_route: normalizeRayinRoute(body.rayin_route || body.model),
-    prompt: body.prompt,
-    n: 1,
-    provider: "gpt",
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    moderation: "auto",
-    output_format: body.output_format || "png",
-  };
-  if (body.quality) next.quality = body.quality;
-  if (body.size) next.size = body.size;
-  if (references.length) {
-    const inputImages = references.map(toRayinInputImage);
-    next.image_urls = references;
-    next.image_url = references[0];
-    next.images = inputImages;
-    next.reference_images = inputImages;
-    next.reference_image_urls = references;
-    next.input_image_urls = references;
-    next.operation = "edit";
-    next.provider = "gpt";
-    next.aspect_ratio = "auto";
-    next.base_resolution = "auto";
-    next.moderation = "auto";
-    next.input_images = inputImages;
-  }
-  if (structureUrls.length) {
-    next.structure_image_urls = structureUrls.slice(0, 4);
-    next.structure_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-    next.composition_image_urls = structureUrls.slice(0, 4);
-    next.composition_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-    next.layout_image_urls = structureUrls.slice(0, 4);
-    next.layout_images = structureUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  if (styleUrls.length) {
-    next.style_image_urls = styleUrls.slice(0, 4);
-    next.style_images = styleUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  if (editUrls.length) {
-    next.edit_image_urls = editUrls.slice(0, 4);
-    next.edit_images = editUrls.slice(0, 4).map(toRayinInputImage);
-    next.base_image_urls = editUrls.slice(0, 4);
-    next.base_images = editUrls.slice(0, 4).map(toRayinInputImage);
-  }
-  return next;
-}
-
-function toRayinInputImage(value) {
-  const item = { mime_type: "image/png" };
-  item.image_url = value;
-  if (/^data:image\//i.test(value)) {
-    item.data_url = value;
-    item.source_data_url = value;
-    item.image_data_url = value;
-  } else {
-    item.url = value;
-    item.image_url = value;
-    item.source_url = value;
-  }
-  return item;
-}
-
-function toRayinTaskInputImage(value) {
-  const mimeType = getImageMimeType(value);
-  if (/^data:image\//i.test(value)) {
-    return { data_url: value, mime_type: mimeType };
-  }
-  return { url: value, mime_type: mimeType };
-}
-
-function getImageMimeType(value) {
-  const match = typeof value === "string" ? value.match(/^data:([^;]+);base64,/i) : null;
-  return match?.[1] || "image/png";
-}
-
-function uniqueArray(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel()) {
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
-  const prompt = imageUrls.length
-    ? [
-        "You must use the attached input images as visual references.",
-        "Reference roles are strict and must not be swapped.",
-        "STRUCTURE reference controls scene content, architecture, camera, layout, perspective, scale, object placement, crop, and canvas ratio.",
-        "STYLE reference controls only palette, color temperature, brushwork, material finish, lighting mood, atmosphere, texture quality, and render style.",
-        "Do not copy the STYLE reference composition, objects, camera, perspective, or scene layout.",
-        "Do not let the STYLE reference replace or reinterpret the STRUCTURE reference content.",
-        "Do not create an unrelated scene.",
-        "Generate the final image and return the resulting image URL or base64 image data when available.",
-        submitBody.prompt,
-      ].join("\n")
-    : submitBody.prompt;
-  const content = [{ type: "input_text", text: prompt }];
-  imageUrls.slice(0, 16).forEach((url, index) => {
-    content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
-    content.push({ type: "input_image", image_url: url });
-  });
-  return {
-    model,
-    input: [{ type: "message", role: "user", content }],
-  };
-}
-
-async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesModel()) {
-  const form = new FormData();
-  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
-  form.set("model", model);
-  form.set("prompt", buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length));
-  form.set("n", String(submitBody.n || 1));
-  form.set("size", submitBody.size || "auto");
-  form.set("quality", submitBody.quality || "auto");
-  form.set("output_format", submitBody.output_format || "png");
-  form.set("provider", "gpt");
-  form.set("operation", images.length ? "edit" : "generation");
-  for (let index = 0; index < images.length; index += 1) {
-    const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
-    form.append(images.length > 1 ? "image[]" : "image", blob, filename);
-  }
-  return form;
-}
-
-function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesModel()) {
-  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
-  return {
-    model,
-    prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
-    size: submitBody.size || "auto",
-    quality: submitBody.quality || "auto",
-    output_format: submitBody.output_format || "png",
-    image_urls: images,
-    input_images: images.map(toRayinTaskInputImage),
-    inputs: buildRayinRoleInputs(submitBody, images),
-  };
-}
-
-function buildRayinImagesBody(submitBody, model = getRayinAiResponsesModel(), options = {}) {
-  const imageUrls = getRayinImageUrls(submitBody);
-  const structureUrls = getRayinStructureUrls(submitBody);
-  const styleUrls = getRayinStyleUrls(submitBody);
-  const structureAnchor = getRayinStructureAnchor(submitBody);
-  const structureOnlyUrls = getRayinStructureOnlyUrls(submitBody);
-  const roleInputUrls = getRayinOrderedImageUrls(submitBody).slice(0, 16);
-  if (options.minimal) {
-    return {
-      key_id: getRayinAiKeyId(submitBody.rayin_route),
-      provider: "gpt",
-      operation: roleInputUrls.length ? "edit" : "generation",
-      model,
-      prompt: submitBody.prompt,
-      size: submitBody.size || "auto",
-      aspect_ratio: "auto",
-      base_resolution: "auto",
-      quality: submitBody.quality || "auto",
-      output_format: submitBody.output_format || "png",
-      moderation: "auto",
-      n: 1,
-      input_images: roleInputUrls.map(toRayinTaskInputImage),
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("图片压缩失败"));
     };
-  }
-  const body = {
-    key_id: getRayinAiKeyId(submitBody.rayin_route),
-    provider: "gpt",
-    operation: roleInputUrls.length ? "edit" : "generation",
-    model,
-    prompt: buildRayinStrictPrompt(submitBody, structureAnchor, styleUrls.length),
-    n: 1,
-    aspect_ratio: "auto",
-    base_resolution: "auto",
-    moderation: "auto",
-    quality: submitBody.quality || "auto",
-    size: submitBody.size || "auto",
-  };
-  if (submitBody.output_format) body.output_format = submitBody.output_format;
-  if (structureOnlyUrls.length) {
-    body.image = structureAnchor;
-    body.image_url = structureAnchor;
-    body.reference_image = structureAnchor;
-    body.reference_image_url = structureAnchor;
-    body.structure_image_url = structureAnchor;
-    body.structure_image_urls = [structureAnchor];
-    body.composition_image_url = structureAnchor;
-    body.layout_image_url = structureAnchor;
-    body.edit_image_url = structureAnchor;
-    body.base_image_url = structureAnchor;
-  }
-  if (roleInputUrls.length) {
-    body.image_urls = roleInputUrls;
-    body.reference_image_urls = roleInputUrls;
-    body.input_image_urls = roleInputUrls;
-    body.images = roleInputUrls.map(toRayinInputImage);
-    body.input_images = roleInputUrls.map(toRayinTaskInputImage);
-    body.inputs = buildRayinRoleInputs(submitBody, roleInputUrls);
-    body.references = body.inputs;
-  }
-  if (structureAnchor) {
-    body.image = structureAnchor;
-    body.image_url = structureAnchor;
-    body.reference_image = structureAnchor;
-    body.reference_image_url = structureAnchor;
-    body.structure_image_url = structureAnchor;
-    body.structure_image_urls = [structureAnchor];
-    body.composition_image_url = structureAnchor;
-    body.layout_image_url = structureAnchor;
-    body.edit_image_url = structureAnchor;
-    body.base_image_url = structureAnchor;
-  }
-  if (styleUrls.length) {
-    body.style_image_urls = styleUrls;
-    body.style_images = styleUrls.map(toRayinInputImage);
-  }
-  return body;
-}
 
-function buildRayinRoleInputs(submitBody, imageUrls) {
-  return imageUrls.map((url, index) => {
-    const role = getRayinImageRole(submitBody, url, index);
-    const item = {
-      type: "image",
-      role,
-      image_url: url,
-      url,
-      weight: index === 0 || role === "structure" ? 0.85 : 0.45,
-    };
-    if (/^data:image\//i.test(url)) {
-      item.data_url = url;
-      item.image_data_url = url;
-      item.source_data_url = url;
-    }
-    return item;
+    image.src = objectUrl;
   });
 }
 
-function getRayinImageUrls(submitBody) {
-  return Array.isArray(submitBody.image_urls) ? submitBody.image_urls.filter(isImageReferenceValue).slice(0, 16) : [];
+function estimateDataUrlBytes(dataUrl) {
+  const commaIndex = dataUrl.indexOf(",");
+  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  return Math.ceil((base64.length * 3) / 4);
 }
 
-function getRayinStructureUrls(submitBody) {
-  return Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-}
-
-function getRayinStyleUrls(submitBody) {
-  return Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-}
-
-function getRayinEditUrls(submitBody) {
-  return Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls.filter(isImageReferenceValue).slice(0, 4) : [];
-}
-
-function getRayinStructureAnchor(submitBody) {
-  return getRayinStructureUrls(submitBody)[0] || getRayinEditUrls(submitBody)[0] || getRayinImageUrls(submitBody)[0] || "";
-}
-
-function getRayinStructureOnlyUrls(submitBody) {
-  const structureAnchor = getRayinStructureAnchor(submitBody);
-  return uniqueArray([
-    ...getRayinStructureUrls(submitBody),
-    ...getRayinEditUrls(submitBody),
-    structureAnchor,
-  ].filter(isImageReferenceValue));
-}
-
-function getRayinOrderedImageUrls(submitBody) {
-  const imageUrls = getRayinImageUrls(submitBody);
-  const styleUrls = getRayinStyleUrls(submitBody);
-  const structureOnlyUrls = getRayinStructureOnlyUrls(submitBody);
-  return uniqueArray([
-    ...structureOnlyUrls,
-    ...styleUrls,
-    ...imageUrls.filter((url) => !styleUrls.includes(url) && !structureOnlyUrls.includes(url)),
-  ]).slice(0, 16);
-}
-
-function getRayinImageRole(submitBody, url, index = 0) {
-  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
-  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
-  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls : [];
-  if (structureUrls.includes(url) || index === 0) return "structure";
-  if (styleUrls.includes(url)) return "style";
-  if (editUrls.includes(url)) return "edit_base";
-  return "reference";
-}
-
-function buildRayinStrictPrompt(submitBody, structureAnchor, styleCount) {
-  if (!structureAnchor) return submitBody.prompt;
-  const userPrompt = extractRayinUserPrompt(submitBody.prompt);
-  return [
-    "输入图一是渲染结构图。必须以图一为最终画面的空间蓝图：场景类型、构图、镜头角度、透视、墙地关系、开口位置、主体轮廓、物体位置、裁切和画幅比例都以图一为准。",
-    styleCount > 0
-      ? "输入图二是风格参考图。图二只用于参考色块笔触、美术样式、色彩氛围、材质质感、光照气质和渲染完成度；禁止采用图二的构图、镜头、场景内容或物体位置。"
-      : "",
-    styleCount > 0
-      ? "请按照图二的风格重建图一。最终结果必须看起来是图一的场景结构被重新渲染，而不是图二的场景，也不是无关新场景。"
-      : "请重建图一，不要生成无关新场景。",
-    "不要像素级照搬图一的模糊、压缩、污渍和偶然小细节；只重建结构和主要内容，并提升材质、光照、边缘清晰度和整体完成度。",
-    "如果文字要求、风格参考和结构图冲突，以图一的空间结构和内容为最高优先级。",
+function buildImageEditPrompt(
+  prompt,
+  mode = "structureStyle",
+  roleImages = { structure: [], style: [], general: [] },
+  referencePlan = { images: [], structureCount: 0, styleCount: 0, generalCount: 0 },
+  purpose = "自定义",
+) {
+  const referenceCount = Array.isArray(referencePlan.images) ? referencePlan.images.length : Number(referencePlan) || 0;
+  const styleCount = Number(referencePlan.styleCount || 0);
+  const hasEditBase = Number(referencePlan.editBaseCount || 0) > 0;
+  const hasStructureReference = Number(referencePlan.structureCount || 0) > 0;
+  const userPrompt = String(prompt || "").trim() || "生成一张高质量游戏宣发视觉图。";
+  const purposeText = purpose && purpose !== "自定义" ? `Image purpose: ${purpose}` : "Image purpose: game visual production";
+  const referenceSizeRule = hasEditBase
+    ? "Output size policy: If the user request explicitly states aspect ratio, canvas size, image size, or resolution, follow the user request. Otherwise match the edit base image's aspect ratio, framing, and output canvas proportions."
+    : hasStructureReference
+      ? "Output size policy: If the user request explicitly states aspect ratio, canvas size, image size, or resolution, follow the user request. Otherwise match the structure reference image's aspect ratio, framing, and output canvas proportions."
+      : "Output size policy: Follow any explicit aspect ratio, canvas size, image size, or resolution in the user request. If none is provided and no structure reference is attached, choose a natural production canvas for the requested scene without inventing arbitrary numeric dimensions.";
+  const baseRules = [
+    purposeText,
+    "Make a clean, high-quality game environment image.",
+    "Follow the user's request. Do not invent a different setting, architecture type, story, logo, text, or unrelated props.",
+    "Avoid blur, warped architecture, unstable perspective, duplicated objects, random text, watermark, logo, frame, UI overlay, and poster typography unless explicitly requested.",
+    referenceSizeRule,
+    "User request:",
     userPrompt,
-  ].filter(Boolean).join("\n");
-}
-
-function extractRayinUserPrompt(prompt) {
-  const text = String(prompt || "").trim();
-  if (!text) return "";
-  const markers = [
-    "User request and existing role instructions:",
-    "用户需求：",
-    "需求：",
   ];
-  for (const marker of markers) {
-    const index = text.lastIndexOf(marker);
-    if (index >= 0) {
-      return text.slice(index + marker.length).trim().slice(0, 1200);
+
+  if (!referenceCount) {
+    return [
+      ...baseRules,
+      "No reference image is attached. Build the scene from the user request.",
+    ].join("\n");
+  }
+
+  if (hasEditBase) {
+    return [
+      ...baseRules,
+      "Multimodal edit mode:",
+      "- Input image 1 is the edit base. Edit this scene instead of creating a new composition.",
+      "- Preserve camera, perspective, layout, scale, and object placement unless the user asks to change them.",
+      `- The next ${Math.max(0, styleCount)} input image(s) are style references for palette, lighting, material, atmosphere, texture, and finish.`,
+      "- Apply only the requested changes.",
+    ].join("\n");
+  }
+
+  if (mode === "structureStyle") {
+    if (!hasStructureReference) {
+      return [
+        ...baseRules,
+        "Image reference roles:",
+        `- The ${Math.max(0, styleCount)} input image(s) are style references only: use palette, lighting mood, material feel, atmosphere, texture, and finish.`,
+        "- Build the composition from the user request.",
+      ].join("\n");
     }
+    return [
+      ...baseRules,
+      "Image reference roles:",
+      "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
+      `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
+      "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
+      "- Red light must stay local: preserve red lamps, warning light spills, signs, and original red markings only where they physically exist. Do not turn the full scene, fog, shadows, walls, floor, or neutral materials reddish unless the style reference is globally red.",
+      "- User request decides the intended content. Structure decides geometry. Style decides look.",
+      "- Keep the structure reference's scene, camera, crop, and layout skeleton, but re-render surfaces, lighting, materials, edge definition, and fine details instead of copying pixels.",
+      "- Do not copy composition from style references.",
+    ].join("\n");
   }
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const useful = lines.filter((line) => !/^(Reference binding tags:|GPT Image 2 binding rules:|@渲染结构图|@风格参考图|Final image:|Keep local|Red light rule:|- )/i.test(line));
-  return (useful.length ? useful.slice(-6) : lines.slice(-6)).join("\n").slice(0, 1200);
+
+  if (mode === "style") {
+    return [
+      ...baseRules,
+      "Use the input images as style and mood references. Let the scene layout follow the user request.",
+    ].join("\n");
+  }
+
+  if (mode === "creative") {
+    return [
+      ...baseRules,
+      "Use the input images as loose inspiration. Keep the mood and material language, but follow the user request.",
+    ].join("\n");
+  }
+
+  return [
+    ...baseRules,
+    "Use the first input image as the scene reference. Preserve its camera, layout, scale, and main object positions while improving clarity and finish.",
+  ].join("\n");
 }
 
-function getRayinReferenceLabel(submitBody, url, index) {
-  const structureUrls = Array.isArray(submitBody.structure_image_urls) ? submitBody.structure_image_urls : [];
-  const styleUrls = Array.isArray(submitBody.style_image_urls) ? submitBody.style_image_urls : [];
-  const editUrls = Array.isArray(submitBody.edit_image_urls) ? submitBody.edit_image_urls : [];
-  if (structureUrls.includes(url)) {
-    return `Input image ${index + 1}: STRUCTURE reference. Use it for geometry, camera, composition, scene content, object placement, crop, and canvas ratio.`;
+function ensureNodeStatus(node) {
+  let status = node.querySelector(".node-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.className = "node-status";
+    node.appendChild(status);
   }
-  if (styleUrls.includes(url)) {
-    return `Input image ${index + 1}: STYLE reference. Use it only for color palette, lighting mood, brushwork, material finish, atmosphere, texture quality, and render style. Do not use its composition or objects.`;
-  }
-  if (editUrls.includes(url)) {
-    return `Input image ${index + 1}: EDIT BASE reference. Preserve its scene and apply only the requested edit.`;
-  }
-  return `Input image ${index + 1}: supporting reference. Use only if it does not conflict with STRUCTURE and STYLE references.`;
-}
-
-function getTaskStatus(payload) {
-  const status = payload?.data?.status || payload?.status || payload?.data?.state || payload?.state || "unknown";
-  const normalized = String(status || "").toUpperCase();
-  if (normalized === "SUCCESS") return "completed";
-  if (normalized === "FAILED") return "failed";
-  if (normalized === "RUNNING" || normalized === "QUEUED") return normalized.toLowerCase();
   return status;
 }
 
-async function readJson(response) {
-  const text = await response.text();
-  if (!text) return {};
-  if (/^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)) {
-    const title = text.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/\s+/g, " ").trim();
-    return {
-      error: `HTTP ${response.status} HTML error`,
-      message: title || `HTTP ${response.status}: upstream returned HTML instead of JSON`,
-    };
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
+function storeImageDataUrlsForNode(node, dataUrls, slotPrefix = "upload") {
+  if (!node || !currentProject) return [];
+  return arrayOrEmpty(dataUrls)
+    .filter(isDataImageUrl)
+    .map((dataUrl, index) => {
+      const key = projectImageKey(currentProject, node.id, `${slotPrefix}-${index}`);
+      storeProjectImage(key, dataUrl);
+      return key;
+    });
 }
 
-function extractTaskId(payload) {
-  if (payload?.data?.taskId) return String(payload.data.taskId);
-  if (payload?.data?.task_id) return String(payload.data.task_id);
-  if (payload?.data?.task_no) return String(payload.data.task_no);
-  if (payload?.data?.taskNo) return String(payload.data.taskNo);
-  if (payload?.data?.id) return String(payload.data.id);
-  if (payload?.taskId) return String(payload.taskId);
-  if (payload?.taskNo) return String(payload.taskNo);
-  if (payload?.task?.id) return String(payload.task.id);
-  if (payload?.task?.task_id) return String(payload.task.task_id);
-  if (payload?.task?.task_no) return String(payload.task.task_no);
-  if (payload?.task?.taskId) return String(payload.task.taskId);
-  if (payload?.task?.taskNo) return String(payload.task.taskNo);
-  if (payload?.task_no) return String(payload.task_no);
-  if (payload?.task_id) return String(payload.task_id);
-  if (payload?.id) return String(payload.id);
-  if (Array.isArray(payload?.data) && payload.data[0]?.task_id) {
-    return String(payload.data[0].task_id);
-  }
-  return findTaskId(payload);
-}
-
-function findTaskId(value, seen = new Set()) {
-  if (!value || typeof value !== "object") return null;
-  if (seen.has(value)) return null;
-  seen.add(value);
-  const keys = ["taskId", "task_id", "taskNo", "task_no"];
-  for (const key of keys) {
-    const candidate = value[key];
-    if (candidate !== undefined && candidate !== null && isLikelyTaskId(candidate)) return String(candidate);
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findTaskId(item, seen);
-      if (found) return found;
-    }
-    return null;
-  }
-  for (const item of Object.values(value)) {
-    const found = findTaskId(item, seen);
-    if (found) return found;
-  }
-  return null;
-}
-
-function isLikelyTaskId(value) {
-  const text = String(value || "").trim();
-  return text.length >= 8 && /^[A-Za-z0-9_-]+$/.test(text);
-}
-
-function findTaskById(payload, taskId, seen = new Set()) {
-  if (!payload || typeof payload !== "object") return null;
-  if (seen.has(payload)) return null;
-  seen.add(payload);
-  const ids = [payload.id, payload.task_id, payload.task_no, payload.key, payload.uuid]
-    .filter((value) => value !== undefined && value !== null)
-    .map(String);
-  if (ids.includes(String(taskId))) return payload;
-  if (Array.isArray(payload)) {
-    for (const item of payload) {
-      const found = findTaskById(item, taskId, seen);
-      if (found) return found;
-    }
-    return null;
-  }
-  for (const value of Object.values(payload)) {
-    const found = findTaskById(value, taskId, seen);
-    if (found) return found;
-  }
-  return null;
-}
-
-function extractResultUrl(payload) {
-  const data = payload?.data;
-  const candidates = [
-    data?.result,
-    data?.result?.url,
-    data?.result?.image_url,
-    data?.result?.output_url,
-    data?.result?.b64_json,
-    data?.result_url,
-    data?.output,
-    data?.output_url,
-    data?.file_url,
-    data?.b64_json,
-    data?.image,
-    data?.url,
-    data?.image_url,
-    data?.results,
-    data?.results?.[0]?.url,
-    data?.results?.[0]?.image_url,
-    data?.results?.[0]?.file_url,
-    Array.isArray(data) ? data[0]?.url : null,
-    Array.isArray(data) ? data[0]?.image_url : null,
-    Array.isArray(data) ? data[0]?.b64_json : null,
-    payload?.result,
-    payload?.result_url,
-    payload?.output,
-    payload?.output_url,
-    payload?.file_url,
-    payload?.b64_json,
-    payload?.image,
-    payload?.url,
-    payload?.image_url,
-    payload?.results,
-    payload?.results?.[0]?.url,
-    payload?.results?.[0]?.image_url,
-    payload?.results?.[0]?.file_url,
-  ];
-
-  if (Array.isArray(data?.result?.images)) {
-    candidates.push(data.result.images[0]?.url, data.result.images[0]?.image_url);
-  }
-  if (Array.isArray(data?.images)) {
-    candidates.push(data.images[0]?.url, data.images[0]?.image_url);
-  }
-  if (Array.isArray(payload?.data)) {
-    candidates.push(payload.data[0]?.url, payload.data[0]?.image_url, payload.data[0]?.b64_json);
-  }
-  if (Array.isArray(payload?.images)) {
-    candidates.push(payload.images[0]?.url, payload.images[0]?.image_url, payload.images[0]?.b64_json);
-  }
-  if (Array.isArray(data?.outputs)) {
-    candidates.push(data.outputs[0]?.url, data.outputs[0]?.image_url, data.outputs[0]?.file_url, data.outputs[0]?.b64_json);
-  }
-  if (Array.isArray(payload?.outputs)) {
-    candidates.push(payload.outputs[0]?.url, payload.outputs[0]?.image_url, payload.outputs[0]?.file_url, payload.outputs[0]?.b64_json);
-  }
-  if (Array.isArray(data?.files)) {
-    candidates.push(data.files[0]?.url, data.files[0]?.image_url, data.files[0]?.file_url);
-  }
-  if (Array.isArray(payload?.files)) {
-    candidates.push(payload.files[0]?.url, payload.files[0]?.image_url, payload.files[0]?.file_url);
-  }
-  if (Array.isArray(data?.assets)) {
-    const outputAsset = data.assets.find((asset) => asset?.kind === "output" && (asset.url || asset.download_url));
-    candidates.push(outputAsset?.url, outputAsset?.download_url);
-  }
-
-  const direct = candidates.map(normalizeImageValue).find(Boolean);
-  if (direct) return direct;
-
-  return findImageUrl(payload);
-}
-
-function extractRhartResultUrl(payload) {
-  const containers = [
-    payload?.results,
-    payload?.data?.results,
-    payload?.result?.results,
-    payload?.data?.result?.results,
-    payload?.outputs,
-    payload?.data?.outputs,
-    payload?.files,
-    payload?.data?.files,
-  ];
-  for (const container of containers) {
-    const found = extractResultUrlFromItems(container);
-    if (found) return found;
-  }
-
-  const direct = [
-    payload?.url,
-    payload?.data?.url,
-    payload?.outputUrl,
-    payload?.data?.outputUrl,
-    payload?.output_url,
-    payload?.data?.output_url,
-    payload?.fileUrl,
-    payload?.data?.fileUrl,
-    payload?.file_url,
-    payload?.data?.file_url,
-  ].map(normalizeImageValue).find(Boolean);
-  return direct || "";
-}
-
-function extractResultUrlFromItems(value) {
-  if (!value) return "";
-  const items = Array.isArray(value) ? value : [value];
-  const imageItems = items.filter((item) => {
-    if (typeof item === "string") return /\.(?:png|jpe?g|webp|gif)(?:[?#]|$)/i.test(item) || /^data:image\//i.test(item);
-    const type = String(item?.outputType || item?.type || item?.mimeType || item?.mime_type || "").toLowerCase();
-    return /image|png|jpg|jpeg|webp|gif/.test(type) || item?.url || item?.download_url || item?.downloadUrl;
+function restoreImageDataKeys(node, keys) {
+  const safeKeys = arrayOrEmpty(keys);
+  if (!node || !safeKeys.length) return;
+  Promise.all(safeKeys.map((key) => loadProjectImage(key))).then((values) => {
+    const dataUrls = values.filter(isDataImageUrl);
+    if (!dataUrls.length) return;
+    node.dataset.imageDataUrls = JSON.stringify(dataUrls);
+    node.dataset.imageDataInlineUrl = dataUrls[0];
+    if (!node.dataset.imageDataUrl) node.dataset.imageDataUrl = dataUrls[0];
+    renderNodeImagePreview(node);
   });
-  for (const item of imageItems.length ? imageItems : items) {
-    const url = [
-      typeof item === "string" ? item : "",
-      item?.url,
-      item?.download_url,
-      item?.downloadUrl,
-      item?.file_url,
-      item?.fileUrl,
-      item?.image_url,
-      item?.imageUrl,
-      item?.b64_json,
-    ].map(normalizeImageValue).find(Boolean);
-    if (url) return url;
-  }
-  return "";
 }
 
-function normalizeImageValue(value) {
-  if (typeof value !== "string" || !value) return null;
-  if (/^data:image\//i.test(value)) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (/^[A-Za-z0-9+/=]+$/.test(value) && value.length > 500) {
-    return `data:image/png;base64,${value}`;
+function uploadFilesToImageNode(node, files) {
+  const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+  if (!node || !imageFiles.length) return;
+
+  node.dataset.fileName = imageFiles.length === 1 ? imageFiles[0].name : `${imageFiles.length} 张图片`;
+  const nameEl = node.querySelector(".upload-name");
+  if (nameEl) nameEl.textContent = node.dataset.fileName;
+
+  const preview = node.querySelector(".upload-preview");
+  const status = ensureNodeStatus(node);
+  status.textContent = `正在上传 ${imageFiles.length} 张图片...`;
+  if (preview) {
+    preview.innerHTML = imageFiles.map((file) => `<img src="${URL.createObjectURL(file)}" alt="">`).join("");
   }
-  return null;
+
+  getImageFileDimensions(imageFiles[0]).then((dimensions) => {
+    if (!dimensions) return;
+    node.dataset.imageNaturalWidth = String(dimensions.width);
+    node.dataset.imageNaturalHeight = String(dimensions.height);
+    saveCurrentProject();
+  });
+
+  Promise.all(imageFiles.map((file) => fileToDataUrl(file)))
+    .then((inlineDataUrls) => {
+      const inlineKeys = storeImageDataUrlsForNode(node, inlineDataUrls, "upload");
+      node.dataset.imageUrls = JSON.stringify([]);
+      node.dataset.imageDataUrl = inlineDataUrls[0] || "";
+      node.dataset.imageDataKeys = JSON.stringify(inlineKeys);
+      node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
+      node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
+      renderNodeImagePreview(node);
+      status.textContent = `${inlineDataUrls.length} 张图片已保存为本地引用，正在上传云端...`;
+      saveCurrentProject();
+      return Promise.allSettled(imageFiles.map(uploadImageFile)).then((uploadResults) => ({ inlineDataUrls, inlineKeys, uploadResults }));
+    })
+    .then(({ inlineDataUrls, inlineKeys, uploadResults }) => {
+      const uploadedUrls = uploadResults
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter(Boolean);
+      const remoteUrls = uploadedUrls.filter(Boolean);
+      node.dataset.imageUrls = JSON.stringify(remoteUrls);
+      node.dataset.imageDataUrl = remoteUrls[0] || inlineDataUrls[0] || "";
+      node.dataset.imageDataKeys = JSON.stringify(inlineKeys);
+      node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
+      node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
+      renderNodeImagePreview(node);
+      const remoteCount = remoteUrls.filter(isRemoteImageUrl).length;
+      const failedUpload = uploadResults.find((result) => result.status === "rejected");
+      status.textContent = remoteCount
+        ? `${remoteCount} 张图片已上传并保存。`
+        : failedUpload
+          ? `${inlineDataUrls.length} 张图片已保存为本地引用；云端上传失败：${failedUpload.reason instanceof Error ? failedUpload.reason.message : String(failedUpload.reason)}`
+        : `${inlineDataUrls.length} 张图片已作为本地引用使用。`;
+      saveCurrentProject();
+    })
+    .catch((error) => {
+      status.textContent = `上传失败：${error instanceof Error ? error.message : String(error)}`;
+      saveCurrentProject();
+    });
 }
 
-function findImageUrl(value, seen = new Set()) {
-  if (!value) return null;
-  const normalized = normalizeImageValue(value);
-  if (normalized) return normalized;
-  if (typeof value !== "object") return null;
-  if (seen.has(value)) return null;
-  seen.add(value);
+function hasDraggedImageFiles(dataTransfer) {
+  return [...(dataTransfer?.items || [])].some((item) => item.kind === "file" && item.type.startsWith("image/"));
+}
 
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findImageUrl(item, seen);
-      if (found) return found;
+function hasDraggedVideoFiles(dataTransfer) {
+  return [...(dataTransfer?.items || [])].some((item) => item.kind === "file" && item.type.startsWith("video/"));
+}
+
+function hasDraggedMediaFiles(dataTransfer) {
+  return hasDraggedImageFiles(dataTransfer) || hasDraggedVideoFiles(dataTransfer);
+}
+
+function hasDraggedMemory(dataTransfer) {
+  return [...(dataTransfer?.types || [])].includes("application/x-aivideobox-memory");
+}
+
+function getImageFilesFromDataTransfer(dataTransfer) {
+  return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("image/"));
+}
+
+function getVideoFilesFromDataTransfer(dataTransfer) {
+  return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("video/"));
+}
+
+function askCanvasUploadImageRole() {
+  const choices = [
+    ["general", "普通图"],
+    ["editBase", "编辑底图"],
+    ["structure", "渲染结构图"],
+    ["style", "风格参考图"],
+    ["output", "输出图"],
+  ];
+  const answer = window.prompt(
+    ["选择上传图片角色：", ...choices.map(([, label], index) => `${index + 1}. ${label}`)].join("\n"),
+    "1",
+  );
+  if (answer === null) return "";
+  const trimmed = answer.trim();
+  const index = Number(trimmed);
+  if (Number.isInteger(index) && index >= 1 && index <= choices.length) return choices[index - 1][0];
+  const found = choices.find(([value, label]) => value === trimmed || label === trimmed);
+  return found?.[0] || "general";
+}
+
+function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general") {
+  const title = files.length === 1 ? stripFileExtension(files[0].name) : `${files.length} 张上传图片`;
+  const node = createNode({
+    type: "image",
+    title,
+    content: "",
+    x: point.x - 129,
+    y: point.y - 70,
+    fileName: files.length === 1 ? files[0].name : `${files.length} 张图片`,
+    imageRole,
+    imagePurpose: "自定义",
+    referenceMode: "structureStyle",
+  });
+  selectNode(node);
+  uploadFilesToImageNode(node, files);
+  saveCurrentProject();
+  return node;
+}
+
+function createImageInputNodeFromDrop(files, clientX, clientY) {
+  const point = clientPointToWorldPoint(clientX, clientY);
+  if (files.length > 1) {
+    createImageNodesFromFilesAtPoint(files, point);
+    return;
+  }
+  createImageInputNodeFromFilesAtPoint(files, point);
+}
+
+function uploadFilesToVideoNode(node, files) {
+  const videoFiles = files.filter((file) => file.type.startsWith("video/"));
+  if (!node || !videoFiles.length) return;
+
+  const file = videoFiles[0];
+  node.dataset.fileName = file.name;
+  const nameEl = node.querySelector(".upload-name");
+  if (nameEl) nameEl.textContent = node.dataset.fileName;
+
+  const preview = node.querySelector(".upload-preview");
+  const status = ensureNodeStatus(node);
+  status.textContent = "正在上传视频...";
+  if (preview) {
+    preview.innerHTML = `<video src="${URL.createObjectURL(file)}" muted controls playsinline></video>`;
+  }
+
+  uploadMediaFile(file)
+    .then((uploadedUrl) => {
+      node.dataset.videoUrls = JSON.stringify([uploadedUrl]);
+      node.dataset.videoDataUrl = uploadedUrl;
+      renderNodeVideoPreview(node);
+      status.textContent = "视频已上传并保存。";
+      saveCurrentProject();
+    })
+    .catch((error) => {
+      status.textContent = `视频上传失败：${error instanceof Error ? error.message : String(error)}`;
+      saveCurrentProject();
+    });
+}
+
+function createVideoInputNodeFromDrop(files, clientX, clientY) {
+  const point = clientPointToWorldPoint(clientX, clientY);
+  const file = files[0];
+  const node = createNode({
+    type: "video",
+    title: stripFileExtension(file.name),
+    content: "",
+    x: point.x - 129,
+    y: point.y - 70,
+    fileName: file.name,
+    videoMode: "video-to-video",
+    videoDuration: "5",
+  });
+  selectNode(node);
+  uploadFilesToVideoNode(node, files);
+  saveCurrentProject();
+}
+
+function clientPointToWorldPoint(clientX, clientY) {
+  const rect = canvasContent.getBoundingClientRect();
+  return {
+    x: (clientX - rect.left) / viewport.scale,
+    y: (clientY - rect.top) / viewport.scale,
+  };
+}
+
+function stripFileExtension(fileName) {
+  return String(fileName || "上传图片").replace(/\.[^.]+$/, "") || "上传图片";
+}
+
+function safeAsciiFileName(name, fallback = "file") {
+  const cleaned = String(name || fallback)
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function moveNode(node, x, y) {
+  const nextX = Math.max(-6000, Math.min(11500, x));
+  const nextY = Math.max(-6000, Math.min(11500, y));
+  node.dataset.x = String(Math.round(nextX));
+  node.dataset.y = String(Math.round(nextY));
+  node.style.left = `${nextX}px`;
+  node.style.top = `${nextY}px`;
+}
+
+function startSelectionBoxFromPoint(clientX, clientY) {
+  const rect = canvasContent.getBoundingClientRect();
+  const start = {
+    x: (clientX - rect.left) / viewport.scale,
+    y: (clientY - rect.top) / viewport.scale,
+  };
+  const box = document.createElement("div");
+  box.className = "selection-box";
+  canvasContent.appendChild(box);
+  selectionBoxState = { start, box };
+}
+
+function updateSelectionBox(event) {
+  const rect = canvasContent.getBoundingClientRect();
+  const current = {
+    x: (event.clientX - rect.left) / viewport.scale,
+    y: (event.clientY - rect.top) / viewport.scale,
+  };
+  const left = Math.min(selectionBoxState.start.x, current.x);
+  const top = Math.min(selectionBoxState.start.y, current.y);
+  const width = Math.abs(current.x - selectionBoxState.start.x);
+  const height = Math.abs(current.y - selectionBoxState.start.y);
+  Object.assign(selectionBoxState.box.style, {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+  });
+
+  const selected = [...canvasContent.querySelectorAll(".node")].filter((node) => rectsOverlap(getNodeWorldRect(node), { left, top, right: left + width, bottom: top + height }));
+  selectNodes(selected);
+}
+
+function finishSelectionBox() {
+  selectionBoxState.box.remove();
+  selectionBoxState = null;
+}
+
+function getNodeWorldRect(node) {
+  const left = Number(node.dataset.x) || 0;
+  const top = Number(node.dataset.y) || 0;
+  return {
+    left,
+    top,
+    right: left + node.offsetWidth,
+    bottom: top + node.offsetHeight,
+  };
+}
+
+function rectsOverlap(a, b) {
+  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+}
+
+function isTextEditingTarget(target) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable
+  );
+}
+
+function startWire(node, port, event) {
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.classList.add("temp-wire");
+  connectorSvg.appendChild(path);
+  wireState = { node, port, path, startPoint: getPortPoint(port) };
+  node.classList.add("linking");
+  updateTempWire(event);
+}
+
+function updateTempWire(event) {
+  const startSide = wireState.port.classList.contains("out") ? "right" : "left";
+  const start = wireState.startPoint;
+  const rect = canvasContent.getBoundingClientRect();
+  const end = {
+    x: (event.clientX - rect.left) / viewport.scale,
+    y: (event.clientY - rect.top) / viewport.scale,
+  };
+  const mid = Math.max(80, Math.abs(end.x - start.x) * 0.45);
+  const c1 = startSide === "left" ? start.x - mid : start.x + mid;
+  wireState.path.setAttribute("d", `M${start.x} ${start.y} C${c1} ${start.y} ${end.x - mid} ${end.y} ${end.x} ${end.y}`);
+}
+
+function finishWire(event) {
+  const targetPort = findPortNear(event.clientX, event.clientY);
+  const targetNode = targetPort?.closest(".node");
+  if (targetNode && targetNode !== wireState.node) {
+    addConnection(wireState.node, targetNode, sideForPort(wireState.port), sideForPort(targetPort));
+  }
+  wireState.node.classList.remove("linking");
+  wireState.path.remove();
+  wireState = null;
+  clearPortHighlights();
+}
+
+function addConnection(fromNode, toNode, fromSide, toSide) {
+  const duplicate = [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].some(
+    (path) =>
+      path.dataset.from === fromNode.id &&
+      path.dataset.to === toNode.id &&
+      path.dataset.fromSide === fromSide &&
+      path.dataset.toSide === toSide,
+  );
+  if (duplicate) return;
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.dataset.from = fromNode.id;
+  path.dataset.to = toNode.id;
+  path.dataset.fromSide = fromSide;
+  path.dataset.toSide = toSide;
+  connectorSvg.appendChild(path);
+  updateConnections();
+  saveCurrentProject();
+}
+
+function renderPortConnectionMenu(port) {
+  if (!portConnectionContextMenu) return;
+  const list = portConnectionContextMenu.querySelector(".port-connection-list");
+  if (!list) return;
+  const connections = getConnectionsForPort(port);
+  if (!connections.length) {
+    list.innerHTML = '<button class="empty" type="button" disabled>暂无连接</button>';
+    return;
+  }
+  list.innerHTML = connections
+    .map(
+      (connection, index) => `
+        <button type="button" data-connection-index="${index}">
+          <span>${escapeHtml(connection.label)}</span>
+          <small>删除连接线</small>
+        </button>
+      `,
+    )
+    .join("");
+}
+
+function getConnectionsForPort(port) {
+  const node = port?.closest(".node");
+  if (!node) return [];
+  const side = sideForPort(port);
+  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].reduce((items, path) => {
+    const isFrom = path.dataset.from === node.id && path.dataset.fromSide === side;
+    const isTo = path.dataset.to === node.id && path.dataset.toSide === side;
+    if (!isFrom && !isTo) return items;
+    const otherNode = document.getElementById(isFrom ? path.dataset.to : path.dataset.from);
+    const otherTitle = otherNode?.querySelector(".node-title strong")?.textContent || "未知节点";
+    const direction = isFrom ? "输出到" : "输入自";
+    items.push({ path, label: `${direction} ${otherTitle}` });
+    return items;
+  }, []);
+}
+
+function updateConnections() {
+  connectorSvg.querySelectorAll("path:not(.temp-wire)").forEach((path) => {
+    const from = document.getElementById(path.dataset.from);
+    const to = document.getElementById(path.dataset.to);
+    if (!from || !to) {
+      path.remove();
+      return;
     }
+    const start = getNodePortPoint(from, path.dataset.fromSide || "right");
+    const end = getNodePortPoint(to, path.dataset.toSide || "left");
+    const mid = Math.max(90, Math.abs(end.x - start.x) * 0.5);
+    const c1 = path.dataset.fromSide === "left" ? start.x - mid : start.x + mid;
+    const c2 = path.dataset.toSide === "right" ? end.x + mid : end.x - mid;
+    path.setAttribute("d", `M${start.x} ${start.y} C${c1} ${start.y} ${c2} ${end.y} ${end.x} ${end.y}`);
+  });
+}
+
+function saveCurrentProject(options = {}) {
+  if (!currentProject || isRestoring) return;
+  if (activeFolder) {
+    saveActiveFolder();
+    return;
+  }
+  const data = serializeCanvasData();
+  if (!shouldSaveProjectData(currentProject, data)) return;
+  const saved = writeProjectDataWithFallback(currentProject, data, options);
+  if (!saved) return;
+  updateProjectCardThumbnail(currentProject, data);
+}
+
+function writeProjectDataWithFallback(name, data, options = {}) {
+  rememberProjectData(name, data);
+  storeProjectRecord(name, data).then((saved) => {
+    if (!saved) notifyProjectSaveIssue("项目保存失败：IndexedDB 写入失败。请导出备份后刷新重试。", options);
+  });
+  writeProjectStub(name);
+  return true;
+}
+
+function cleanupLocalStorageForProjectSave(activeName) {
+  const removable = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key) continue;
+    if (key.endsWith(".backup")) {
+      removable.push(key);
+      continue;
+    }
+    if (key.startsWith("aivideobox.project.v2:") && key !== projectKey(activeName)) {
+      const value = localStorage.getItem(key) || "";
+      if (value.includes("data:image/")) removable.push(key);
+    }
+  }
+  removable.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.warn("Failed to remove old localStorage entry", key, error);
+    }
+  });
+}
+
+function slimProjectDataForLocalStorage(data) {
+  return {
+    ...data,
+    nodes: (data.nodes || []).map((node) => ({
+      ...node,
+      imageDataUrl: isDataImageUrl(node.imageDataUrl) ? "" : node.imageDataUrl,
+      imageDataUrls: undefined,
+      imageDataInlineUrl: undefined,
+      referenceImageDataUrl: isDataImageUrl(node.referenceImageDataUrl) ? "" : node.referenceImageDataUrl,
+      referenceImageDataUrls: undefined,
+      referenceImageDataInlineUrl: undefined,
+      generatedImageUrl: isDataImageUrl(node.generatedImageUrl) ? "" : node.generatedImageUrl,
+      generatedImageUrls: compactImageUrlsForLocalStorage(node.generatedImageUrls, 3),
+      imageGenerationRecords: compactImageGenerationRecords(node.imageGenerationRecords, 8),
+      folderNodes: Array.isArray(node.folderNodes) ? slimProjectDataForLocalStorage({ nodes: node.folderNodes }).nodes : node.folderNodes,
+    })),
+  };
+}
+
+function notifyProjectSaveIssue(message, options = {}) {
+  if (options.silent) {
+    console.warn(message);
+    return;
+  }
+  const target = selectedNode || [...canvasContent.querySelectorAll(".node")].at(-1);
+  if (target?.classList.contains("running")) {
+    console.warn(message);
+    return;
+  }
+  if (target) {
+    ensureNodeStatus(target).textContent = message;
+    return;
+  }
+  console.warn(message);
+}
+
+function shouldSaveProjectData(name, nextData) {
+  const nextNodeCount = Array.isArray(nextData?.nodes) ? nextData.nodes.length : 0;
+  if (nextNodeCount > 0) return true;
+  const existing = readCachedProjectData(name, null);
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  const existingNodeCount = Array.isArray(existing?.nodes) ? existing.nodes.length : 0;
+  const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
+  if (existingNodeCount > 0 || backupNodeCount > 0) {
+    console.warn(`Skipped empty save for ${name}`);
+    return false;
+  }
+  return true;
+}
+
+async function ensureSharedProjectImages(name, data) {
+  let changed = false;
+  for (const node of data.nodes || []) {
+    changed = (await makeNodeImagesShareable(node)) || changed;
+  }
+  if (changed) {
+    try {
+      localStorage.setItem(projectKey(name), JSON.stringify(data));
+    } catch {}
+  }
+  return data;
+}
+
+async function makeNodeImagesShareable(node) {
+  let changed = false;
+  if (node.imageDataUrl?.startsWith("data:image/")) {
+    try {
+      const url = await uploadDataUrlAsSharedImage(node.imageDataUrl, node.fileName || `${node.title || "image"}.png`);
+      node.imageUrls = uniqueValues([...(Array.isArray(node.imageUrls) ? node.imageUrls : []), url]);
+      node.imageDataUrl = "";
+      node.imageDataKey = "";
+      changed = true;
+    } catch (error) {
+      console.warn("Shared image upload failed", error);
+    }
+  }
+  if (node.referenceImageDataUrl?.startsWith("data:image/")) {
+    try {
+      const url = await uploadDataUrlAsSharedImage(node.referenceImageDataUrl, node.referenceFileName || `${node.title || "reference"}.png`);
+      node.referenceImageUrls = uniqueValues([...(Array.isArray(node.referenceImageUrls) ? node.referenceImageUrls : []), url]);
+      node.referenceImageDataUrl = "";
+      node.referenceImageDataKey = "";
+      changed = true;
+    } catch (error) {
+      console.warn("Shared reference image upload failed", error);
+    }
+  }
+  for (const child of Array.isArray(node.folderNodes) ? node.folderNodes : []) {
+    changed = (await makeNodeImagesShareable(child)) || changed;
+  }
+  return changed;
+}
+
+async function uploadDataUrlAsSharedImage(imageDataUrl, fileName) {
+  const response = await fetch("/api/upload-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: safeAsciiFileName(fileName, "image.png"), imageDataUrl }),
+  });
+  const result = await readResponseJson(response);
+  if (!response.ok || !result.url) throw new Error(formatApiError(result, `HTTP ${response.status}`));
+  return result.url;
+}
+
+async function saveSharedProject(code, name, data) {
+  if (!code || !hasProjectNodes(data)) return;
+  const response = await fetch(SHARED_PROJECTS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: normalizeProjectCode(code),
+      name,
+      data: stripLocalImageKeysFromProject(data),
+    }),
+  });
+  if (!response.ok) {
+    const result = await readResponseJson(response);
+    throw new Error(formatApiError(result, `HTTP ${response.status}`));
+  }
+}
+
+async function loadSharedProjectByCode(code) {
+  try {
+    const response = await fetch(`${SHARED_PROJECTS_API}?code=${encodeURIComponent(normalizeProjectCode(code))}`, { cache: "no-store" });
+    const result = await readResponseJson(response);
+    if (!response.ok || !result?.data) return null;
+    return result;
+  } catch (error) {
+    console.warn("Project code load failed", error);
     return null;
   }
+}
 
-  const preferredKeys = [
-    "url",
-    "image_url",
-    "output_url",
-    "result_url",
-    "file_url",
-    "fileUrl",
-    "results",
-    "outputs",
-    "files",
-    "b64_json",
-    "base64",
-    "image",
-    "output",
-    "content",
-    "result",
-    "images",
-    "data",
-  ];
+function hasProjectNodes(data) {
+  return Array.isArray(data?.nodes) && data.nodes.length > 0;
+}
 
-  for (const key of preferredKeys) {
-    if (Object.prototype.hasOwnProperty.call(value, key)) {
-      const found = findImageUrl(value[key], seen);
-      if (found) return found;
+function stripLocalImageKeysFromProject(data) {
+  return {
+    ...data,
+    nodes: (data.nodes || []).map(stripLocalImageKeysFromNode),
+  };
+}
+
+function stripLocalImageKeysFromNode(node) {
+  const clean = { ...node };
+  if (clean.imageDataKey) clean.imageDataKey = "";
+  if (clean.referenceImageDataKey) clean.referenceImageDataKey = "";
+  if (Array.isArray(clean.folderNodes)) clean.folderNodes = clean.folderNodes.map(stripLocalImageKeysFromNode);
+  return clean;
+}
+
+async function deleteSharedProject(name) { return; }
+
+function serializeCanvasData() {
+  const nodes = serializeNodes([...canvasContent.querySelectorAll(".node")]);
+  const connections = serializeConnections();
+  return { nodes, connections };
+}
+
+function serializeNodes(nodes) {
+  return nodes.map((node) => {
+    const imageIsData = isDataImageUrl(node.dataset.imageDataUrl);
+    const imageDataKey = imageIsData ? projectImageKey(currentProject, node.id, "upload") : "";
+    const referenceIsData = isDataImageUrl(node.dataset.referenceImageDataUrl);
+    const referenceImageDataKey = referenceIsData ? projectImageKey(currentProject, node.id, "reference") : "";
+    const generatedIsData = isDataImageUrl(node.dataset.generatedImageUrl);
+    const generatedImageDataKey = generatedIsData ? projectImageKey(currentProject, node.id, "generated") : "";
+
+    if (imageDataKey) storeProjectImage(imageDataKey, node.dataset.imageDataUrl);
+    if (referenceImageDataKey) storeProjectImage(referenceImageDataKey, node.dataset.referenceImageDataUrl);
+    if (generatedImageDataKey) storeProjectImage(generatedImageDataKey, node.dataset.generatedImageUrl);
+
+    return {
+      id: node.id,
+      type: node.dataset.type,
+      tone: node.dataset.tone,
+      title: node.querySelector(".node-title strong")?.textContent || "节点",
+      content: getNodeContent(node),
+      imagePurpose: node.dataset.imagePurpose || "自定义",
+      referenceMode: node.dataset.referenceMode || "structureStyle",
+    imageRole: node.dataset.imageRole || "general",
+    imageQuality: node.dataset.imageQuality || "high",
+    imageModel: node.dataset.imageModel || "gpt-image-2-official",
+    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
+    apimartChannel: "b",
+      fileName: node.dataset.fileName || "",
+      imageNaturalWidth: node.dataset.imageNaturalWidth || "",
+      imageNaturalHeight: node.dataset.imageNaturalHeight || "",
+      imageUrls: parseJsonArray(node.dataset.imageUrls),
+      imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
+      imageDataKey,
+      imageDataUrl: imageDataKey ? "" : node.dataset.imageDataUrl || "",
+      referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
+      referenceImageDataKey,
+      referenceImageDataUrl: referenceImageDataKey ? "" : node.dataset.referenceImageDataUrl || "",
+      referenceFileName: node.dataset.referenceFileName || "",
+      generatedImageDataKey,
+      generatedImageUrl: generatedImageDataKey ? "" : node.dataset.generatedImageUrl || "",
+      generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls), 6),
+      imageGenerationRecords: compactImageGenerationRecords(getImageGenerationRecords(node)),
+      generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
+      generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
+      videoUrls: parseJsonArray(node.dataset.videoUrls),
+      videoDataUrl: node.dataset.videoDataUrl || "",
+      referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
+      referenceVideoUrl: node.dataset.referenceVideoUrl || "",
+      generatedVideoUrl: node.dataset.generatedVideoUrl || "",
+      generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
+      videoMode: normalizeVideoModeValue(node.dataset.videoMode),
+      videoDuration: node.dataset.videoDuration || "5",
+      videoModel: normalizeVideoModelValue(node.dataset.videoModel),
+      videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
+      videoResolution: node.dataset.videoResolution || "1080p",
+      videoSeed: node.dataset.videoSeed || "",
+      videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
+      videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
+      videoWebSearch: node.dataset.videoWebSearch === "true",
+      videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
+      videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
+      videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
+      videoReferenceAudioUrls: parseJsonArray(node.dataset.videoReferenceAudioUrls),
+      folderNodes: parseJsonArray(node.dataset.folderNodes),
+      folderConnections: parseJsonArray(node.dataset.folderConnections),
+      x: Number(node.dataset.x),
+      y: Number(node.dataset.y),
+    };
+  });
+}
+
+function serializeConnections(filter = () => true) {
+  return [...connectorSvg.querySelectorAll("path:not(.temp-wire)")].filter(filter).map((path) => ({
+    from: path.dataset.from,
+    to: path.dataset.to,
+    fromSide: path.dataset.fromSide,
+    toSide: path.dataset.toSide,
+  }));
+}
+
+function restoreProject(name) {
+  const data = readProjectDataWithBackup(name);
+  backupProjectData(name, data);
+  migrateProjectMemoriesToGlobal(data.memories);
+  loadGlobalMemories();
+  renderConversationMemories();
+  restoreCanvasData(data);
+}
+
+function readProjectDataWithBackup(name) {
+  const data = readCachedProjectData(name, { nodes: [], connections: [], memories: [] });
+  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  const dataNodeCount = Array.isArray(data?.nodes) ? data.nodes.length : 0;
+  const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
+  if (dataNodeCount === 0 && backupNodeCount > 0) {
+    rememberProjectData(name, backup);
+    storeProjectRecord(name, backup);
+    writeProjectStub(name);
+    console.warn(`Restored ${name} from local backup`);
+    return backup;
+  }
+  return data;
+}
+
+async function loadSharedProject(name) { return; }
+
+function shouldUseSharedProjectData(name, sharedData) {
+  const localData = readCachedProjectData(name, null);
+  const localNodeCount = Array.isArray(localData?.nodes) ? localData.nodes.length : 0;
+  const sharedNodeCount = Array.isArray(sharedData?.nodes) ? sharedData.nodes.length : 0;
+  if (localNodeCount > 0 && sharedNodeCount < localNodeCount) {
+    console.warn(`Skipped smaller shared project overwrite for ${name}`);
+    return false;
+  }
+  return true;
+}
+
+function backupProjectData(name, data) {
+  if (!name || !data || !Array.isArray(data.nodes) || !data.nodes.length) return;
+  projectDataCache.set(`${name}::backup`, data);
+  storeProjectRecord(name, data, PROJECT_BACKUP_STORE_NAME);
+}
+
+function restoreCanvasData(data) {
+  isRestoring = true;
+  const restoredIds = new Set();
+  (data.nodes || []).forEach((saved) => {
+    let node = null;
+    try {
+      node = createNode(saved);
+      restoredIds.add(node.id);
+    } catch (error) {
+      console.error("Node restore failed", saved, error);
+      return;
+    }
+    try {
+    node.dataset.imagePurpose = saved.imagePurpose || "自定义";
+    node.dataset.referenceMode = saved.referenceMode || "structureStyle";
+    node.dataset.imageRole = saved.imageRole || "general";
+    delete node.dataset.imageRatio;
+    delete node.dataset.imageResolution;
+    node.dataset.imageQuality = saved.imageQuality || "high";
+    node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
+    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
+      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
+      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
+    node.dataset.apimartChannel = "b";
+    if (saved.fileName) node.dataset.fileName = saved.fileName;
+    if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
+    if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
+    if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
+    if (Array.isArray(saved.imageDataKeys)) {
+      node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
+      restoreImageDataKeys(node, saved.imageDataKeys);
+    }
+    if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
+    if (Array.isArray(saved.imageDataUrls)) {
+      const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
+      if (safeInlineUrls.length) {
+        node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
+        node.dataset.imageDataInlineUrl = safeInlineUrls[0];
+        const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
+        if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
+      }
+    }
+    if (saved.imageDataInlineUrl && isDataImageUrl(saved.imageDataInlineUrl)) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
+    if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
+    if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
+    if (Array.isArray(saved.referenceImageDataUrls)) node.dataset.referenceImageDataUrls = JSON.stringify(saved.referenceImageDataUrls);
+    if (saved.referenceImageDataInlineUrl) node.dataset.referenceImageDataInlineUrl = saved.referenceImageDataInlineUrl;
+    if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
+    if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
+    if (saved.generatedImageDataKey) {
+      loadProjectImage(saved.generatedImageDataKey).then((value) => {
+        if (!value) return;
+        node.dataset.generatedImageUrl = value;
+        renderNodeImagePreview(node);
+      });
+    }
+    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
+    if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
+    if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
+    if (saved.generatedImageNaturalHeight) node.dataset.generatedImageNaturalHeight = saved.generatedImageNaturalHeight;
+    if (Array.isArray(saved.videoUrls)) node.dataset.videoUrls = JSON.stringify(saved.videoUrls);
+    if (saved.videoDataUrl) node.dataset.videoDataUrl = saved.videoDataUrl;
+    if (Array.isArray(saved.referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(saved.referenceVideoUrls);
+    if (saved.referenceVideoUrl) node.dataset.referenceVideoUrl = saved.referenceVideoUrl;
+    if (saved.generatedVideoUrl) node.dataset.generatedVideoUrl = saved.generatedVideoUrl;
+    if (Array.isArray(saved.generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(saved.generatedVideoUrls);
+    node.dataset.videoMode = normalizeVideoModeValue(saved.videoMode);
+    node.dataset.videoDuration = saved.videoDuration || "5";
+    node.dataset.videoModel = normalizeVideoModelValue(saved.videoModel);
+    node.dataset.videoAspectRatio = saved.videoAspectRatio || "16:9";
+    node.dataset.videoResolution = saved.videoResolution || "1080p";
+    node.dataset.videoSeed = saved.videoSeed || "";
+    node.dataset.videoGenerateAudio = String(Boolean(saved.videoGenerateAudio));
+    node.dataset.videoReturnLastFrame = String(Boolean(saved.videoReturnLastFrame));
+    node.dataset.videoWebSearch = String(Boolean(saved.videoWebSearch));
+    if (saved.videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = saved.videoFirstFrameUrl;
+    if (saved.videoLastFrameUrl) node.dataset.videoLastFrameUrl = saved.videoLastFrameUrl;
+    if (saved.videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = saved.videoReferenceAudioUrl;
+    if (Array.isArray(saved.videoReferenceAudioUrls)) node.dataset.videoReferenceAudioUrls = JSON.stringify(saved.videoReferenceAudioUrls);
+    if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
+    if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
+    node.dataset.tone = saved.tone || node.dataset.tone;
+    setNodeType(node, saved.type, saved.content);
+    renderNodeImagePreview(node);
+    } catch (error) {
+      console.error("Node data hydrate failed", saved, error);
+      return;
+    }
+    if (saved.imageDataKey) {
+      loadProjectImage(saved.imageDataKey).then((value) => {
+        if (!value) return;
+        node.dataset.imageDataUrl = value;
+        renderNodeImagePreview(node);
+      });
+    }
+    if (saved.referenceImageDataKey) {
+      loadProjectImage(saved.referenceImageDataKey).then((value) => {
+        if (value) node.dataset.referenceImageDataUrl = value;
+      });
+    }
+  });
+  (data.connections || []).forEach((saved) => {
+    if (!restoredIds.has(saved.from) || !restoredIds.has(saved.to)) return;
+    const from = document.getElementById(saved.from);
+    const to = document.getElementById(saved.to);
+    if (from && to) addConnection(from, to, saved.fromSide || "right", saved.toSide || "left");
+  });
+  isRestoring = false;
+  refreshConnectionsSoon();
+}
+
+function clearCanvas() {
+  canvasContent.querySelectorAll(".node").forEach((node) => node.remove());
+  connectorSvg.innerHTML = "";
+  connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
+  selectNode(null);
+}
+
+function selectNode(node, additive = false) {
+  if (!additive) clearSelectedNodes();
+  selectedNode = node;
+  if (node) addSelectedNode(node);
+  if (node) {
+    document.body.tabIndex = -1;
+    document.body.focus();
+  }
+}
+
+function addSelectedNode(node) {
+  selectedNodes.add(node);
+  node.classList.add("selected");
+  selectedNode = node;
+}
+
+function clearSelectedNodes() {
+  selectedNodes.forEach((node) => node.classList.remove("selected"));
+  selectedNodes.clear();
+  selectedNode = null;
+}
+
+function selectNodes(nodes) {
+  clearSelectedNodes();
+  nodes.forEach(addSelectedNode);
+  if (!nodes.length) selectedNode = null;
+}
+
+function zoomCanvas(factor, clientX, clientY) {
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
+  const py = clientY === undefined ? rect.height / 2 : clientY - rect.top;
+  const wx = (px - viewport.x) / viewport.scale;
+  const wy = (py - viewport.y) / viewport.scale;
+  const scale = Math.min(3.5, Math.max(0.2, viewport.scale * factor));
+  viewport.x = px - wx * scale;
+  viewport.y = py - wy * scale;
+  viewport.scale = scale;
+  applyViewport();
+}
+
+function resetViewport() {
+  const bounds = getNodesBounds([...canvasContent.querySelectorAll(".node")]);
+  if (!bounds || !canvas) {
+    viewport = { x: 0, y: 0, scale: 1 };
+    applyViewport();
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const padding = 140;
+  const availableWidth = Math.max(320, rect.width - padding * 2);
+  const availableHeight = Math.max(240, rect.height - padding * 2);
+  const scale = Math.min(1, Math.max(0.25, Math.min(availableWidth / bounds.width, availableHeight / bounds.height)));
+  viewport = {
+    x: Math.round(rect.width / 2 - ((bounds.left + bounds.width / 2) * scale)),
+    y: Math.round(rect.height / 2 - ((bounds.top + bounds.height / 2) * scale)),
+    scale,
+  };
+  applyViewport();
+  refreshConnectionsSoon();
+}
+
+function arrangeNodes() {
+  const selected = [...selectedNodes].filter((node) => node.isConnected);
+  const nodes = selected.length ? selected : [...canvasContent.querySelectorAll(".node")];
+  if (!nodes.length) return;
+  arrangeExistingNodeLayout(nodes);
+  selectNodes(nodes);
+  resetViewport();
+  saveCurrentProject();
+  refreshConnectionsSoon();
+}
+
+function getNodesBounds(nodes) {
+  const visibleNodes = nodes.filter((node) => node.isConnected);
+  if (!visibleNodes.length) return null;
+  const left = Math.min(...visibleNodes.map((node) => Number(node.dataset.x) || 0));
+  const top = Math.min(...visibleNodes.map((node) => Number(node.dataset.y) || 0));
+  const right = Math.max(...visibleNodes.map((node) => (Number(node.dataset.x) || 0) + (node.offsetWidth || 260)));
+  const bottom = Math.max(...visibleNodes.map((node) => (Number(node.dataset.y) || 0) + (node.offsetHeight || 180)));
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
+function arrangeExistingNodeLayout(nodes) {
+  const columnThreshold = 190;
+  const rowGap = 42;
+  const columns = [];
+
+  [...nodes]
+    .sort((a, b) => nodeOriginalLeft(a) - nodeOriginalLeft(b))
+    .forEach((node) => {
+      const left = nodeOriginalLeft(node);
+      let column = columns.find((item) => Math.abs(item.anchorX - left) <= columnThreshold);
+      if (!column) {
+        column = { anchorX: left, nodes: [] };
+        columns.push(column);
+      }
+      column.nodes.push(node);
+      column.anchorX = column.nodes.reduce((sum, item) => sum + nodeOriginalLeft(item), 0) / column.nodes.length;
+    });
+
+  columns
+    .sort((a, b) => a.anchorX - b.anchorX)
+    .forEach((column) => {
+      const sorted = column.nodes.sort((a, b) => nodeOriginalTop(a) - nodeOriginalTop(b));
+      const alignedX = Math.round(column.anchorX);
+      let nextY = Math.min(...sorted.map(nodeOriginalTop));
+      sorted.forEach((node, index) => {
+        moveNode(node, alignedX, nextY);
+        nextY += Math.max(170, node.offsetHeight || 0) + rowGap;
+      });
+    });
+}
+
+function nodeTypeRank(node) {
+  return { image: 0, text: 1, video: 2 }[node?.dataset.type] ?? 3;
+}
+
+function nodeOriginalTop(node) {
+  return Number(node?.dataset.y) || 0;
+}
+
+function nodeOriginalLeft(node) {
+  return Number(node?.dataset.x) || 0;
+}
+
+function applyViewport() {
+  canvasContent.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+  if (canvasZoomLabel) canvasZoomLabel.textContent = `${Math.round(viewport.scale * 100)}%`;
+}
+
+function showMenu(menu, x, y) {
+  hideMenus();
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.classList.add("show");
+  menu.setAttribute("aria-hidden", "false");
+}
+
+function hideMenus() {
+  canvasContextMenu.classList.remove("show");
+  nodeContextMenu.classList.remove("show");
+  imageUploadContextMenu?.classList.remove("show");
+  portConnectionContextMenu?.classList.remove("show");
+  canvasContextMenu.setAttribute("aria-hidden", "true");
+  nodeContextMenu.setAttribute("aria-hidden", "true");
+  imageUploadContextMenu?.setAttribute("aria-hidden", "true");
+  portConnectionContextMenu?.setAttribute("aria-hidden", "true");
+  contextUploadNode = null;
+  contextPort = null;
+}
+
+function highlightNearestPort(event) {
+  clearPortHighlights();
+  const port = findPortNear(event.clientX, event.clientY);
+  if (port && port.closest(".node") !== wireState.node) port.classList.add("connect-target");
+}
+
+function clearPortHighlights() {
+  document.querySelectorAll(".node-port.connect-target").forEach((port) => port.classList.remove("connect-target"));
+}
+
+function findPortNear(clientX, clientY) {
+  const direct = document.elementFromPoint(clientX, clientY)?.closest(".node-port");
+  if (direct) return direct;
+  let best = null;
+  let distance = Infinity;
+  document.querySelectorAll(".node-port").forEach((port) => {
+    const rect = port.getBoundingClientRect();
+    const d = Math.hypot(rect.left + rect.width / 2 - clientX, rect.top + rect.height / 2 - clientY);
+    if (d < distance) {
+      distance = d;
+      best = port;
+    }
+  });
+  return distance <= 30 ? best : null;
+}
+
+function getPortPoint(port) {
+  const portRect = port.getBoundingClientRect();
+  const canvasRect = canvasContent.getBoundingClientRect();
+  return {
+    x: (portRect.left + portRect.width / 2 - canvasRect.left) / viewport.scale,
+    y: (portRect.top + portRect.height / 2 - canvasRect.top) / viewport.scale,
+  };
+}
+
+function getNodePortPoint(node, side) {
+  return getPortPoint(node.querySelector(side === "right" ? ".node-port.out" : ".node-port.in"));
+}
+
+function sideForPort(port) {
+  return port.classList.contains("out") ? "right" : "left";
+}
+
+function getNodeContent(node) {
+  const structuredFields = node.querySelectorAll(".text-brief-field");
+  if (structuredFields.length) {
+    const fields = {
+      requirement: "",
+      revision: "",
+      scene: "",
+      negative: "",
+    };
+    structuredFields.forEach((field) => {
+      fields[field.dataset.textField] = field.value;
+    });
+    return formatTextNodeFields(fields);
+  }
+  const input = node.querySelector(".text-input, .mini-textarea");
+  return input ? input.value : node.querySelector(".node-description")?.textContent || "";
+}
+
+function createNodeId() {
+  nodeCounter += 1;
+  return `node-${Date.now()}-${nodeCounter}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function projectKey(name) {
+  return `aivideobox.project.v2:${name}`;
+}
+
+function projectImageKey(projectName, nodeId, slot) {
+  return `${projectName}::${nodeId}::${slot}`;
+}
+
+function openProjectDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PROJECT_STORE_NAME)) db.createObjectStore(PROJECT_STORE_NAME);
+      if (!db.objectStoreNames.contains(PROJECT_BACKUP_STORE_NAME)) db.createObjectStore(PROJECT_BACKUP_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function storeProjectRecord(name, data, storeName = PROJECT_STORE_NAME) {
+  if (!name || !data) return false;
+  try {
+    const db = await openProjectDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).put(data, name);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+    return true;
+  } catch (error) {
+    console.error("Project IndexedDB save failed", error);
+    return false;
+  }
+}
+
+async function loadProjectRecord(name, storeName = PROJECT_STORE_NAME) {
+  if (!name) return null;
+  try {
+    const db = await openProjectDb();
+    const value = await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readonly");
+      const request = transaction.objectStore(storeName).get(name);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  } catch (error) {
+    console.error("Project IndexedDB load failed", error);
+    return null;
+  }
+}
+
+async function deleteProjectRecord(name) {
+  if (!name) return;
+  try {
+    const db = await openProjectDb();
+    await Promise.all([PROJECT_STORE_NAME, PROJECT_BACKUP_STORE_NAME].map((storeName) => new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).delete(name);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    })));
+    db.close();
+  } catch (error) {
+    console.error("Project IndexedDB delete failed", error);
+  }
+}
+
+function rememberProjectData(name, data) {
+  if (!name || !data) return data;
+  projectDataCache.set(name, data);
+  return data;
+}
+
+function readCachedProjectData(name, fallback = null) {
+  return projectDataCache.get(name) || readJson(projectKey(name), fallback);
+}
+
+function writeProjectStub(name) {
+  try {
+    localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [], storedInIndexedDB: true }));
+  } catch (error) {
+    console.warn("Project stub save failed", error);
+  }
+}
+
+function openImageDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IMAGE_DB_NAME, 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+        request.result.createObjectStore(IMAGE_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      if (db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+        resolve(db);
+        return;
+      }
+      db.close();
+      const upgradeRequest = indexedDB.open(IMAGE_DB_NAME, db.version + 1);
+      upgradeRequest.onupgradeneeded = () => {
+        if (!upgradeRequest.result.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+          upgradeRequest.result.createObjectStore(IMAGE_STORE_NAME);
+        }
+      };
+      upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
+      upgradeRequest.onerror = () => reject(upgradeRequest.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function storeProjectImage(key, value) {
+  if (!key || !value) return;
+  try {
+    const db = await openImageDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(IMAGE_STORE_NAME, "readwrite");
+      transaction.objectStore(IMAGE_STORE_NAME).put(value, key);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  } catch (error) {
+    console.error("Image save failed", error);
+  }
+}
+
+async function loadProjectImage(key) {
+  if (!key) return "";
+  try {
+    const db = await openImageDb();
+    const value = await new Promise((resolve, reject) => {
+      const transaction = db.transaction(IMAGE_STORE_NAME, "readonly");
+      const request = transaction.objectStore(IMAGE_STORE_NAME).get(key);
+      request.onsuccess = () => resolve(request.result || "");
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  } catch (error) {
+    console.error("Image load failed", error);
+    return "";
+  }
+}
+
+function readJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+window.aivideoboxRecovery = function aivideoboxRecovery() {
+  const rows = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("aivideobox.project.v2:")) continue;
+    const data = readJson(key, null);
+    rows.push({
+      key,
+      nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
+      connections: Array.isArray(data?.connections) ? data.connections.length : 0,
+      size: localStorage.getItem(key)?.length || 0,
+    });
+  }
+  console.table(rows);
+  return rows;
+};
+
+window.aivideoboxRestoreBackups = function aivideoboxRestoreBackups() {
+  const restored = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("aivideobox.project.v2:") || !key.endsWith(".backup")) continue;
+    const baseKey = key.replace(/\.backup$/, "");
+    const current = readJson(baseKey, null);
+    const backup = readJson(key, null);
+    const currentNodes = Array.isArray(current?.nodes) ? current.nodes.length : 0;
+    const backupNodes = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
+    if (currentNodes === 0 && backupNodes > 0) {
+      localStorage.setItem(baseKey, JSON.stringify(backup));
+      restored.push({ key: baseKey, nodes: backupNodes });
     }
   }
+  console.table(restored);
+  return restored;
+};
 
-  for (const item of Object.values(value)) {
-    const found = findImageUrl(item, seen);
-    if (found) return found;
+window.aivideoboxExportFullBackup = async function aivideoboxExportFullBackup() {
+  const local = Object.fromEntries(
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("aivideobox.project.v2:") || key === PROJECT_LIST_KEY)
+      .map((key) => [key, localStorage.getItem(key)]),
+  );
+  const images = await exportImageDb();
+  const inlined = await inlineReachableProjectImages(local);
+  downloadJson({ local, images, inlined, exportedAt: new Date().toISOString() }, "aivideobox-full-backup.json");
+  return {
+    localKeys: Object.keys(local).length,
+    imageKeys: Object.keys(images).length,
+    inlinedImages: countInlinedImages(inlined),
+  };
+};
+
+window.aivideoboxImportFullBackup = async function aivideoboxImportFullBackup() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    const backup = JSON.parse(await input.files[0].text());
+    Object.entries(backup.local || {}).forEach(([key, value]) => localStorage.setItem(key, value));
+    await importImageDb(backup.images || {});
+    Object.entries(backup.inlined || {}).forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+    location.reload();
+  };
+  input.click();
+};
+
+async function exportImageDb() {
+  try {
+    const db = await openImageDb();
+    if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+      db.close();
+      return {};
+    }
+    const transaction = db.transaction(IMAGE_STORE_NAME, "readonly");
+    const store = transaction.objectStore(IMAGE_STORE_NAME);
+    const keys = await idbRequest(store.getAllKeys());
+    const images = {};
+    for (const key of keys) {
+      images[key] = await idbRequest(store.get(key));
+    }
+    db.close();
+    return images;
+  } catch (error) {
+    console.warn("Image DB export skipped", error);
+    return {};
   }
-  return null;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function importImageDb(images) {
+  const db = await openImageDb();
+  const transaction = db.transaction(IMAGE_STORE_NAME, "readwrite");
+  const store = transaction.objectStore(IMAGE_STORE_NAME);
+  Object.entries(images).forEach(([key, value]) => store.put(value, key));
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
 }
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function inlineReachableProjectImages(local) {
+  const inlined = {};
+  for (const [key, raw] of Object.entries(local)) {
+    if (!key.startsWith("aivideobox.project.v2:")) continue;
+    const data = safeParseJson(raw);
+    if (!data?.nodes) continue;
+    const next = structuredClone(data);
+    await inlineProjectNodeImages(next.nodes);
+    inlined[key] = next;
+  }
+  return inlined;
+}
+
+async function inlineProjectNodeImages(nodes) {
+  for (const node of nodes || []) {
+    await inlineNodeImageFields(node);
+    if (Array.isArray(node.folderNodes)) await inlineProjectNodeImages(node.folderNodes);
+  }
+}
+
+async function inlineNodeImageFields(node) {
+  for (const key of ["generatedImageUrl", "imageDataUrl", "referenceImageDataUrl"]) {
+    if (isRemoteImageUrl(node[key])) node[key] = await fetchImageAsDataUrl(node[key]) || node[key];
+  }
+  for (const key of ["generatedImageUrls", "imageUrls", "referenceImageUrls"]) {
+    if (!Array.isArray(node[key])) continue;
+    node[key] = await Promise.all(node[key].map(async (url) => isRemoteImageUrl(url) ? (await fetchImageAsDataUrl(url)) || url : url));
+  }
+}
+
+async function fetchImageAsDataUrl(url) {
+  try {
+    const response = await fetch(url, { cache: "force-cache", mode: "cors" });
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return "";
+  }
+}
+
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function countInlinedImages(projects) {
+  let count = 0;
+  Object.values(projects || {}).forEach((project) => {
+    (project.nodes || []).forEach((node) => {
+      const candidates = [];
+      collectNodeThumbnailCandidates(node, candidates);
+      count += candidates.filter((value) => typeof value === "string" && value.startsWith("data:image/")).length;
+    });
+  });
+  return count;
+}
+
+function downloadJson(data, fileName) {
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function cssEscape(value) {
+  return window.CSS?.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+    return entities[char];
+  });
+}
+
+ensureImageProviderOptions();
+loadImageOptions();
+loadProjectList();
+showPage("home");
+startSharedProjectAutoRefresh();
+
