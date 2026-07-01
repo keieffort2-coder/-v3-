@@ -73,24 +73,16 @@ function getRayinAiKeyId(route = "bunana") {
 }
 
 function getRayinAiResponsesModel() {
-  return normalizeRayinResponsesModel(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
 }
 
 function getRayinAiResponsesModels() {
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
   const models = configured
     .split(/[,\s;]+/)
     .map((value) => value.trim())
-    .map(normalizeRayinResponsesModel)
     .filter(Boolean);
-  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
-}
-
-function normalizeRayinResponsesModel(model) {
-  const value = sanitizeHeaderValue(model || "").trim();
-  if (!value) return "gpt-5.4";
-  if (/^gpt-image-2(?:-official)?$/i.test(value)) return "gpt-5.4";
-  return value;
+  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-image-2"];
 }
 
 function getRayinAiRetryAttempts() {
@@ -1541,8 +1533,10 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
+    const hasNextRayinAttempt = attempts.indexOf(attempt) < attempts.length - 1;
+    const canTryNextRayinModel = hasNextRayinAttempt && [400, 404, 422].includes(response.status);
     const canFallbackToNextRayinEndpoint = false;
-    if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
+    if (!canTryNextRayinModel && !canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
   }
 
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
