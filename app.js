@@ -14,8 +14,8 @@ const canvasToolbar = document.querySelector(".canvas-toolbar");
 const connectorSvg = document.querySelector(".connectors");
 const nodeTemplate = document.querySelector("#nodeTemplate");
 const canvasContextMenu = document.querySelector("#canvasContextMenu");
-const canvasFilePicker = document.querySelector("#canvasFilePicker");
 const nodeContextMenu = document.querySelector("#nodeContextMenu");
+const assetContextMenu = document.querySelector("#assetContextMenu");
 const imageUploadContextMenu = document.querySelector("#imageUploadContextMenu");
 const portConnectionContextMenu = document.querySelector("#portConnectionContextMenu");
 const imageConfigPanel = document.querySelector("#imageConfigPanel");
@@ -49,15 +49,19 @@ let memoryList = document.querySelector("#memoryList");
 
 const PROJECT_LIST_KEY = "aivideobox.projects.v2";
 const PROJECT_CODE_INDEX_KEY = "aivideobox.projectCodes.v1";
-const SHARED_PROJECTS_API = "/api/shared-projects";
 const GLOBAL_MEMORY_KEY = "aivideobox.globalMemories.v1";
 const IMAGE_OPTIONS_KEY = "aivideobox.imageOptions.v1";
 const WORKSPACE_SIDE_STATE_KEY = "aivideobox.workspaceSidebarsHidden.v1";
+const LOCAL_ASSETS_KEY = "aivideobox.localAssets.v1";
+const TEMPLATE_LIBRARY_KEY = "aivideobox.templates.v1";
+const SHARED_PROJECTS_API = "/api/shared-projects";
+const SHARED_ASSETS_API = "/api/shared-assets";
+const SHARED_TEMPLATES_API = "/api/shared-templates";
+const AUTH_CONFIG_API = "/api/auth-config";
+const ACCESS_AUTH_API = "/api/access-auth";
+const ACCESS_ADMIN_API = "/api/access-admin";
 const IMAGE_DB_NAME = "aivideobox.images";
 const IMAGE_STORE_NAME = "images";
-const PROJECT_DB_NAME = "aivideobox.projects.db";
-const PROJECT_STORE_NAME = "projects";
-const PROJECT_BACKUP_STORE_NAME = "projectBackups";
 const typeLabels = { text: "Text", image: "Image", video: "Video", folder: "Folder" };
 const typeNames = { text: "文本", image: "图片", video: "视频", folder: "文件夹" };
 const roleLabels = {
@@ -79,27 +83,6 @@ const videoModelLabels = {
 };
 const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
 const videoResolutions = ["480p", "720p", "1080p"];
-const defaultImageModelOptions = [
-  ["gpt-image-2", "GPT图像2"],
-  ["gpt-image-2-official", "gpt-image-2-官方"],
-  ["gemini-3-pro-image-preview", "Nano Banana 2"],
-];
-const apiMartImageModelOptions = [
-  ...defaultImageModelOptions,
-  ["midjourney", "Midjourney（ApiMart）"],
-];
-const rhartImageModelOptions = [
-  ["rhart-image-n-g31-flash/image-to-image", "RHarT G31 低价"],
-  ["rhart-image-g-2/image-to-image", "RHarT G-2 低价"],
-  ["rhart-image-g-2-official/image-to-image", "RHarT G-2 官方"],
-];
-const rayinAiProviderOptions = [
-  ["rayinai:bunana", "RayinAI 不拿拿"],
-  ["rayinai:mumu", "RayinAI 木木"],
-  ["rayinai:tiancai", "RayinAI 甜菜"],
-  ["rayinai:kaihua", "RayinAI 开花"],
-  ["rayinai:haizhe", "RayinAI 海蜇"],
-];
 const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
   let value = index;
   for (let bit = 0; bit < 8; bit += 1) {
@@ -125,8 +108,9 @@ let pendingCanvasDrag = null;
 let selectionBoxState = null;
 let wireState = null;
 let contextPoint = { x: 120, y: 120 };
-let canvasFileUploadMode = "ask";
 let contextNode = null;
+let contextAssetId = "";
+let contextTemplateId = "";
 let contextUploadNode = null;
 let contextPort = null;
 let configNode = null;
@@ -138,7 +122,12 @@ let exportImageSelection = new Set();
 const imageGenerationControllers = new Map();
 const selectedNodes = new Set();
 let conversationMemories = [];
+let localAssets = [];
+let platformSharedAssets = [];
+let localTemplates = [];
+let platformSharedTemplates = [];
 let pendingDeletedProjectNames = [];
+let accessSession = null;
 let imageOptions = {
   purpose: "自定义",
   referenceMode: "structureStyle",
@@ -147,22 +136,115 @@ let imageOptions = {
 };
 let isRestoring = false;
 let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
-const projectDataCache = new Map();
-let pendingDimensionSaveTimer = null;
 
 connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
 ensureMemoryUi();
 applyWorkspaceSidebarsState();
+initAccessAuth();
 
 pageButtons.forEach((button) => {
   button.addEventListener("click", () => showPage(button.dataset.page));
 });
 
 document.addEventListener("click", (event) => {
+  const saveTemplateButton = event.target.closest("[data-save-current-template]");
+  if (saveTemplateButton) {
+    saveCurrentProjectAsLocalTemplate();
+    return;
+  }
+
+  const templateUseButton = event.target.closest("[data-use-template]");
+  if (templateUseButton) {
+    useTemplate(templateUseButton.dataset.useTemplate);
+    return;
+  }
+
+  const templatePreviewButton = event.target.closest("[data-preview-template]");
+  if (templatePreviewButton) {
+    const template = getTemplateById(templatePreviewButton.dataset.previewTemplate);
+    if (template) openTemplatePreview(template);
+    return;
+  }
+
+  const templateDeleteButton = event.target.closest("[data-delete-template]");
+  if (templateDeleteButton) {
+    deleteLocalTemplate(templateDeleteButton.dataset.deleteTemplate);
+    return;
+  }
+
+  const templateUnpublishButton = event.target.closest("[data-unpublish-template]");
+  if (templateUnpublishButton) {
+    pendingDeletedTemplateIds.add(templateUnpublishButton.dataset.unpublishTemplate);
+    platformSharedTemplates = platformSharedTemplates.filter((template) => template.id !== templateUnpublishButton.dataset.unpublishTemplate);
+    renderTemplatesPage();
+    saveSharedTemplatesSoon();
+    return;
+  }
+
+  const assetUseButton = event.target.closest("[data-use-asset]");
+  if (assetUseButton) {
+    const asset = getAssetById(assetUseButton.dataset.useAsset);
+    if (asset) {
+      if (!currentProject) {
+        const name = createFreshProject("素材画布");
+        openProject(name);
+      }
+      createNodeFromMemory(asset);
+    }
+    return;
+  }
+
+  const assetPreviewButton = event.target.closest("[data-preview-asset]");
+  if (assetPreviewButton) {
+    const asset = getAssetById(assetPreviewButton.dataset.previewAsset);
+    if (asset) openAssetPreview(asset);
+    return;
+  }
+
+  const assetDeleteButton = event.target.closest("[data-delete-asset]");
+  if (assetDeleteButton) {
+    deleteAssetFromLibrary(assetDeleteButton.dataset.deleteAsset);
+    return;
+  }
+
+  const publishAssetButton = event.target.closest("[data-publish-asset]");
+  if (publishAssetButton) {
+    publishLocalAssetToPlatform(publishAssetButton.dataset.publishAsset);
+    return;
+  }
+
+  const unpublishAssetButton = event.target.closest("[data-unpublish-asset]");
+  if (unpublishAssetButton) {
+    pendingDeletedAssetIds.add(unpublishAssetButton.dataset.unpublishAsset);
+    platformSharedAssets = platformSharedAssets.filter((asset) => asset.id !== unpublishAssetButton.dataset.unpublishAsset);
+    renderConversationMemories();
+    renderAssetsPage();
+    saveSharedAssetsSoon();
+    return;
+  }
+
   const pageButton = event.target.closest("[data-page]");
   if (!pageButton) return;
   event.preventDefault();
   showPage(pageButton.dataset.page);
+});
+
+document.addEventListener("contextmenu", (event) => {
+  const templateCard = event.target.closest("[data-template-card]");
+  if (templateCard) {
+    event.preventDefault();
+    contextTemplateId = templateCard.dataset.templateCard || "";
+    syncTemplateContextMenu(getTemplateById(contextTemplateId));
+    showMenu(ensureTemplateContextMenu(), event.clientX, event.clientY);
+    return;
+  }
+
+  const assetCard = event.target.closest("[data-asset-card]");
+  if (!assetCard || !assetContextMenu) return;
+  event.preventDefault();
+  contextAssetId = assetCard.dataset.assetCard || "";
+  syncAssetContextMenu(getAssetById(contextAssetId));
+  showMenu(assetContextMenu, event.clientX, event.clientY);
 });
 
 createProjectButton?.addEventListener("click", () => {
@@ -210,10 +292,10 @@ projectGrid?.addEventListener("click", (event) => {
   if (projectCodeButton) {
     projectCodeButton.disabled = true;
     const oldText = projectCodeButton.textContent;
-    projectCodeButton.textContent = "正在生成...";
+    projectCodeButton.textContent = "正在上传平台...";
     publishProjectCode(card)
       .catch((error) => {
-        console.warn("Project code publish failed", error);
+        console.warn("Project publish failed", error);
         projectCodeButton.textContent = oldText || "生成项目码";
       })
       .finally(() => {
@@ -235,12 +317,15 @@ document.addEventListener("submit", (event) => {
         title: createMemoryTitle(content),
         content,
         createdAt: new Date().toISOString(),
-      };
+  };
   if (!memory.content && !memory.nodeSnapshot) return;
   conversationMemories.unshift(memory);
+  conversationMemories = uniqueMemories(conversationMemories);
   memoryInput.value = "";
   renderConversationMemories();
+  renderAssetsPage();
   saveGlobalMemories();
+  saveSharedAssetsSoon();
 });
 
 document.addEventListener("click", (event) => {
@@ -250,7 +335,9 @@ document.addEventListener("click", (event) => {
     event.stopPropagation();
     conversationMemories = conversationMemories.filter((memory) => memory.id !== deleteButton.dataset.memoryId);
     renderConversationMemories();
+    renderAssetsPage();
     saveGlobalMemories();
+    saveSharedAssetsSoon();
     return;
   }
 
@@ -319,17 +406,6 @@ canvas?.addEventListener("contextmenu", (event) => {
 });
 
 canvasContextMenu?.addEventListener("click", (event) => {
-  const actionButton = event.target.closest("[data-canvas-action]");
-  if (actionButton?.dataset.canvasAction === "open-files" || actionButton?.dataset.canvasAction === "open-files-split") {
-    hideMenus();
-    canvasFileUploadMode = actionButton.dataset.canvasAction === "open-files-split" ? "split" : "ask";
-    if (canvasFilePicker) {
-      canvasFilePicker.value = "";
-      canvasFilePicker.click();
-    }
-    return;
-  }
-
   const button = event.target.closest("[data-create-type]");
   if (!button) return;
 
@@ -364,6 +440,8 @@ nodeContextMenu?.addEventListener("click", (event) => {
     }
   } else if (action === "duplicate") {
     getActionNodes(contextNode).forEach(duplicateNode);
+  } else if (action === "save-asset") {
+    saveNodesToAssetLibrary(getActionNodes(contextNode));
   } else if (action === "ungroup-folder") {
     ungroupFolderNode(contextNode);
   } else if (action === "run") {
@@ -409,6 +487,39 @@ portConnectionContextMenu?.addEventListener("click", (event) => {
   hideMenus();
 });
 
+assetContextMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-asset-action]");
+  if (!button || !contextAssetId) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (button.dataset.assetAction === "publish") {
+    publishLocalAssetToPlatform(contextAssetId);
+  }
+  if (button.dataset.assetAction === "unpublish") {
+    pendingDeletedAssetIds.add(contextAssetId);
+    platformSharedAssets = platformSharedAssets.filter((asset) => asset.id !== contextAssetId);
+    renderAssetsPage();
+    saveSharedAssetsSoon();
+  }
+  hideMenus();
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-template-action]");
+  if (!button || !contextTemplateId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (button.dataset.templateAction === "publish") publishLocalTemplateToPlatform(contextTemplateId);
+  if (button.dataset.templateAction === "unpublish") {
+    pendingDeletedTemplateIds.add(contextTemplateId);
+    platformSharedTemplates = platformSharedTemplates.filter((template) => template.id !== contextTemplateId);
+    renderTemplatesPage();
+    saveSharedTemplatesSoon();
+  }
+  hideMenus();
+});
+
 document.addEventListener("click", (event) => {
   const roleButton = event.target.closest(".image-role-button");
   if (roleButton) {
@@ -428,6 +539,14 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const previewImage = event.target.closest(".upload-preview img, .config-input-thumb img");
+  if (previewImage) {
+    event.preventDefault();
+    event.stopPropagation();
+    openImageViewer(previewImage.src, getViewerSourcesForImage(previewImage));
+    return;
+  }
+
   const historyButton = event.target.closest(".output-history-button");
   if (historyButton) {
     event.preventDefault();
@@ -436,19 +555,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const favoriteButton = event.target.closest("[data-generation-favorite]");
-  if (favoriteButton) {
+  const persistButton = event.target.closest(".persist-output-button");
+  if (persistButton) {
     event.preventDefault();
     event.stopPropagation();
-    toggleGenerationFavorite(favoriteButton.closest(".node"), favoriteButton.dataset.generationFavorite);
-    return;
-  }
-
-  const previewImage = event.target.closest(".upload-preview img, .config-input-thumb img");
-  if (previewImage) {
-    event.preventDefault();
-    event.stopPropagation();
-    openImageViewer(previewImage.src, getViewerSourcesForImage(previewImage));
+    saveGeneratedOutputToBlob(persistButton.closest(".node"), persistButton);
     return;
   }
 
@@ -500,6 +611,10 @@ imageViewer?.addEventListener(
 );
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.querySelector("#assetPreviewModal")?.classList.contains("show")) {
+    closeAssetPreview();
+    return;
+  }
   if (!imageViewer?.classList.contains("show")) return;
   if (event.key === "Escape") {
     closeImageViewerPanel();
@@ -621,8 +736,8 @@ submitImageConfig?.addEventListener("click", () => {
   delete configNode.dataset.imageRatio;
   delete configNode.dataset.imageResolution;
   configNode.dataset.imageQuality = imageOptions.quality;
-  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || "apimart");
-  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value);
+  configNode.dataset.imageModel = imageModelSelect?.value || "gpt-image-2-official";
+  configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect?.value || configNode.dataset.imageProvider || inferImageProviderFromModel(configNode.dataset.imageModel));
   configNode.dataset.apimartChannel = "b";
   saveCurrentProject();
   runImageGeneration(configNode);
@@ -652,18 +767,13 @@ imageModelSelect?.addEventListener("change", () => {
     saveCurrentProject();
     return;
   }
-  const provider = normalizeImageProvider(configNode.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  configNode.dataset.imageModel = normalizeProviderImageModel(provider, imageModelSelect.value);
-  syncImageOptionsUi();
+  configNode.dataset.imageModel = imageModelSelect.value || "gpt-image-2-official";
   saveCurrentProject();
 });
 
 imageProviderSelect?.addEventListener("change", () => {
   if (!configNode || configNode.dataset.type !== "image") return;
   configNode.dataset.imageProvider = normalizeImageProvider(imageProviderSelect.value);
-  setImageModelOptionsForProvider(configNode.dataset.imageProvider, configNode.dataset.imageModel);
-  configNode.dataset.imageModel = normalizeProviderImageModel(configNode.dataset.imageProvider, imageModelSelect?.value || configNode.dataset.imageModel);
-  syncImageOptionsUi();
   saveCurrentProject();
 });
 
@@ -682,14 +792,9 @@ referenceList?.addEventListener("click", (event) => {
     return node.querySelector(".node-title strong")?.textContent === item.dataset.referenceNode;
   });
   const sourceImages = getNodeImageSources(sourceNode);
-  const sourceInlineImages = getNodeImageSources(sourceNode, { preferData: true }).filter((value) => /^data:image\//i.test(value));
   if (configNode && sourceImages.length) {
     configNode.dataset.referenceImageUrls = JSON.stringify(sourceImages);
     configNode.dataset.referenceImageDataUrl = sourceImages[0];
-    if (sourceInlineImages.length) {
-      configNode.dataset.referenceImageDataUrls = JSON.stringify(sourceInlineImages);
-      configNode.dataset.referenceImageDataInlineUrl = sourceInlineImages[0];
-    }
     configNode.dataset.referenceFileName = item.dataset.referenceNode;
   }
   referencePicker.classList.remove("show");
@@ -704,15 +809,10 @@ addLocalReference?.addEventListener("change", async () => {
   if (configNode && file.type.startsWith("image/")) {
     configNode.dataset.referenceFileName = file.name;
     const url = await uploadImageFile(file);
-    const inlineDataUrl = await fileToDataUrl(file);
     const current = parseJsonArray(configNode.dataset.referenceImageUrls);
     const next = uniqueValues([...current, url]);
     configNode.dataset.referenceImageUrls = JSON.stringify(next);
     configNode.dataset.referenceImageDataUrl = next[0] || "";
-    const currentInline = parseJsonArray(configNode.dataset.referenceImageDataUrls);
-    const nextInline = uniqueValues([...currentInline, inlineDataUrl]);
-    configNode.dataset.referenceImageDataUrls = JSON.stringify(nextInline);
-    configNode.dataset.referenceImageDataInlineUrl = nextInline[0] || "";
   } else if (configNode && file.type.startsWith("video/")) {
     configNode.dataset.referenceFileName = file.name;
     const url = await uploadMediaFile(file);
@@ -783,47 +883,6 @@ document.addEventListener("change", (event) => {
     return;
   }
 });
-
-canvasFilePicker?.addEventListener("change", () => {
-  const imageFiles = [...(canvasFilePicker.files || [])].filter((file) => file.type.startsWith("image/"));
-  const uploadMode = canvasFileUploadMode;
-  canvasFileUploadMode = "ask";
-  canvasFilePicker.value = "";
-  if (!imageFiles.length) return;
-
-  const imageRole = askCanvasUploadImageRole();
-  if (!imageRole) return;
-
-  if (imageFiles.length === 1) {
-    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
-
-  if (uploadMode === "split") {
-    createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
-
-  const mergeIntoOne = window.confirm("检测到多张图片。\n\n确定：上传到一个图片节点\n取消：每张图片分成单独节点");
-  if (mergeIntoOne) {
-    createImageInputNodeFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-    return;
-  }
-
-  createImageNodesFromFilesAtPoint(imageFiles, contextPoint, imageRole);
-});
-
-function createImageNodesFromFilesAtPoint(files, point, imageRole = "general") {
-  const spacingX = 310;
-  const spacingY = 290;
-  files.forEach((file, index) => {
-    const nodePoint = {
-      x: point.x + (index % 3) * spacingX,
-      y: point.y + Math.floor(index / 3) * spacingY,
-    };
-    createImageInputNodeFromFilesAtPoint([file], nodePoint, imageRole);
-  });
-}
 
 canvas?.addEventListener("dragenter", (event) => {
   if (!event.dataTransfer || (!hasDraggedMediaFiles(event.dataTransfer) && !hasDraggedMemory(event.dataTransfer))) return;
@@ -1093,6 +1152,14 @@ function showPage(name) {
   pages.forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.page === name));
   applyWorkspaceSidebarsState();
+  if (name === "assets") {
+    loadSharedAssets();
+    renderAssetsPage();
+  }
+  if (name === "templates") {
+    loadSharedTemplates();
+    renderTemplatesPage();
+  }
 }
 
 function upsertProject(name) {
@@ -1105,13 +1172,11 @@ function upsertProject(name) {
 
 function createFreshProject(baseName) {
   const name = uniqueProjectName(baseName);
-  rememberProjectData(name, { nodes: [], connections: [] });
-  storeProjectRecord(name, { nodes: [], connections: [] });
-  writeProjectStub(name);
+  localStorage.removeItem(projectKey(name));
+  localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [] }));
   addProjectCard(name);
   updateProjectGridState();
   saveProjectList();
-  setTimeout(saveProjectList, 800);
   return name;
 }
 
@@ -1180,25 +1245,11 @@ function renameProject(oldName, nextName, card) {
   if (!oldName || !nextName || oldName === nextName) return;
   const oldKey = projectKey(oldName);
   const nextKey = projectKey(nextName);
-  const cached = readCachedProjectData(oldName, null);
-  const cachedBackup = projectDataCache.get(`${oldName}::backup`);
-  if (cached) {
-    rememberProjectData(nextName, cached);
-    storeProjectRecord(nextName, cached);
-    projectDataCache.delete(oldName);
-    deleteProjectRecord(oldName);
-    writeProjectStub(nextName);
-  } else {
-    const savedProject = localStorage.getItem(oldKey);
-    if (savedProject !== null) localStorage.setItem(nextKey, savedProject);
+  const savedProject = localStorage.getItem(oldKey);
+  if (savedProject !== null) {
+    localStorage.setItem(nextKey, savedProject);
+    localStorage.removeItem(oldKey);
   }
-  if (cachedBackup) {
-    projectDataCache.set(`${nextName}::backup`, cachedBackup);
-    projectDataCache.delete(`${oldName}::backup`);
-    storeProjectRecord(nextName, cachedBackup, PROJECT_BACKUP_STORE_NAME);
-  }
-  localStorage.removeItem(oldKey);
-  localStorage.removeItem(`${oldKey}.backup`);
   card.dataset.project = nextName;
   const openButton = card.querySelector("[data-open-project]");
   if (openButton) openButton.dataset.openProject = nextName;
@@ -1243,8 +1294,8 @@ function addProjectCard(name, date = new Date().toLocaleDateString("zh-CN"), cod
 }
 
 function getProjectStorageStats(name) {
-  const data = readCachedProjectData(name, null);
-  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  const data = readJson(projectKey(name), null);
+  const backup = readJson(`${projectKey(name)}.backup`, null);
   return {
     nodes: Array.isArray(data?.nodes) ? data.nodes.length : 0,
     backupNodes: Array.isArray(backup?.nodes) ? backup.nodes.length : 0,
@@ -1252,7 +1303,7 @@ function getProjectStorageStats(name) {
 }
 
 function getProjectThumbnailFromLocal(name) {
-  return getProjectThumbnail(readCachedProjectData(name, null));
+  return getProjectThumbnail(readJson(projectKey(name), null));
 }
 
 function getProjectThumbnail(data) {
@@ -1306,7 +1357,6 @@ function loadProjectList() {
   const projects = repairProjectListFromStorage(Array.isArray(saved) ? saved : []);
   projectGrid.innerHTML = "";
   projects.reverse().forEach((project) => addProjectCard(project.name, project.date, project.code));
-  migrateProjectsToIndexedDB(projects);
   try {
     localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects.slice().reverse()));
   } catch (error) {
@@ -1334,36 +1384,75 @@ function repairProjectListFromStorage(projects) {
   return [...byName.values()].filter((project) => project?.name);
 }
 
-async function migrateProjectsToIndexedDB(projects = []) {
-  for (const project of projects) {
-    const name = project?.name;
-    if (!name) continue;
-    const key = projectKey(name);
-    const localData = readJson(key, null);
-    if (localData && Array.isArray(localData.nodes) && !localData.storedInIndexedDB) {
-      rememberProjectData(name, localData);
-      await storeProjectRecord(name, localData);
-      writeProjectStub(name);
+async function loadSharedProjectList() {
+  try {
+    const response = await fetch(SHARED_PROJECTS_API, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    const sharedProjects = Array.isArray(result.projects) ? result.projects : [];
+    const deletedNames = uniqueValues([...pendingDeletedProjectNames]);
+    const localProjects = readJson(PROJECT_LIST_KEY, []);
+    const projects = mergeProjectLists(
+      Array.isArray(localProjects) ? localProjects : [],
+      sharedProjects,
+      deletedNames,
+    );
+    if (!projects.length) {
+      return;
     }
-    const localBackup = readJson(`${key}.backup`, null);
-    if (localBackup && Array.isArray(localBackup.nodes)) {
-      projectDataCache.set(`${name}::backup`, localBackup);
-      await storeProjectRecord(name, localBackup, PROJECT_BACKUP_STORE_NAME);
-      try {
-        localStorage.removeItem(`${key}.backup`);
-      } catch {}
+    projectGrid.innerHTML = "";
+    projects.slice().reverse().forEach((project) => addProjectCard(project.name, project.date, project.code));
+    localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(projects));
+    rebuildProjectCodeIndex();
+    updateProjectGridState();
+    refreshProjectThumbnails(projects);
+    if (JSON.stringify(projects) !== JSON.stringify(sharedProjects)) {
+      console.info("Shared projects were merged locally without writing back to Blob.");
     }
+  } catch (error) {
+    console.warn("Shared project list load failed", error);
   }
 }
 
+function refreshProjectThumbnails(projects) {
+  projects.forEach((project) => {
+    if (!project?.name) return;
+    loadSharedProjectThumbnail(project.name);
+  });
+}
 
-async function loadSharedProjectList() { return; }
+async function loadSharedProjectThumbnail(name) {
+  try {
+    const response = await fetch(`${SHARED_PROJECTS_API}?name=${encodeURIComponent(name)}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const result = await response.json();
+    if (result?.data) {
+      updateProjectCardThumbnail(name, result.data);
+    }
+  } catch (error) {
+    console.warn("Shared project thumbnail load failed", error);
+  }
+}
 
-function refreshProjectThumbnails(projects) { return; }
-
-async function loadSharedProjectThumbnail(name) { return; }
-
-async function saveSharedProjectList(projects) { return; }
+async function saveSharedProjectList(projects) {
+  try {
+    const deletedNames = uniqueValues([...pendingDeletedProjectNames]);
+    pendingDeletedProjectNames = [];
+    const response = await fetch(SHARED_PROJECTS_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "list", projects, deletedNames }),
+    });
+    if (response.ok) {
+      const result = await response.json();
+      if (Array.isArray(result.projects)) {
+        localStorage.setItem(PROJECT_LIST_KEY, JSON.stringify(result.projects));
+      }
+    }
+  } catch (error) {
+    console.warn("Shared project list save failed", error);
+  }
+}
 
 function mergeProjectLists(localProjects = [], sharedProjects = [], deletedNames = []) {
   const deleted = new Set(deletedNames.map((name) => String(name || "")));
@@ -1384,10 +1473,11 @@ function deleteProject(name) {
   const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
   const code = card?.dataset.code;
   card?.remove();
-  projectDataCache.delete(name);
-  deleteProjectRecord(name);
   localStorage.removeItem(projectKey(name));
-  localStorage.removeItem(`${projectKey(name)}.backup`);
+  if (code) {
+    pendingDeletedProjectNames.push(name);
+    deleteSharedProject(name);
+  }
   if (code) removeProjectCode(code);
   if (currentProject === name) {
     currentProject = "";
@@ -1399,52 +1489,59 @@ function deleteProject(name) {
 
 async function publishProjectCode(card) {
   if (!card) return "";
-  const name = card.dataset.project;
-  if (currentProject === name) saveCurrentProject();
+  if (currentProject === card.dataset.project) saveCurrentProject();
   const code = card.dataset.code || createUniqueProjectCode();
   card.dataset.code = code;
   const button = card.querySelector(".project-code");
   if (button) button.textContent = `项目码 ${code}`;
   const index = readProjectCodeIndex();
-  index[code] = name;
+  index[code] = card.dataset.project;
   writeProjectCodeIndex(index);
   saveProjectList();
-
-  const data = readCachedProjectData(name, null);
-  if (hasProjectNodes(data)) {
-    const shareableData = await ensureSharedProjectImages(name, data);
-    await saveSharedProject(code, name, shareableData || data);
-  }
+  await publishProjectToPlatform(card.dataset.project);
   return code;
 }
 
 async function cloneProjectByCode(code) {
-  const normalized = normalizeProjectCode(code);
-  if (!normalized) return "";
-  const localName = findProjectNameByCode(normalized);
-  let sourceName = localName;
-  let sourceProjectData = localName ? readCachedProjectData(localName, null) || rememberProjectData(localName, await loadProjectRecord(localName)) : null;
-  let sourceData = sourceProjectData ? JSON.stringify(sourceProjectData) : "";
-
+  const sourceName = findProjectNameByCode(code);
+  let sourceData = "";
+  let baseName = sourceName;
+  if (sourceName) {
+    if (currentProject === sourceName) saveCurrentProject();
+    sourceData = localStorage.getItem(projectKey(sourceName)) || "";
+  }
   if (!sourceData) {
-    const shared = await loadSharedProjectByCode(normalized);
-    if (!shared?.data || !hasProjectNodes(shared.data)) return "";
-    sourceName = shared.name || `项目 ${normalized}`;
+    const shared = await fetchSharedProjectByCode(code);
+    if (!shared?.name || !shared?.data) return "";
+    baseName = shared.name;
     sourceData = JSON.stringify(shared.data);
   }
-
-  const name = uniqueProjectName(`${sourceName} 副本`);
-  if (sourceProjectData) {
-    rememberProjectData(name, sourceProjectData);
-    storeProjectRecord(name, sourceProjectData);
-    writeProjectStub(name);
-  } else {
-    localStorage.setItem(projectKey(name), sourceData);
-  }
+  if (!sourceData) return "";
+  const name = uniqueProjectName(`${baseName} 副本`);
+  localStorage.setItem(projectKey(name), sourceData);
   addProjectCard(name, new Date().toLocaleDateString("zh-CN"));
   updateProjectGridState();
   saveProjectList();
   return name;
+}
+
+async function fetchSharedProjectByCode(code) {
+  const normalized = normalizeProjectCode(code);
+  if (!normalized) return null;
+  try {
+    const listResponse = await fetch(SHARED_PROJECTS_API, { cache: "no-store" });
+    const listResult = await readResponseJson(listResponse);
+    if (!listResponse.ok || !Array.isArray(listResult.projects)) return null;
+    const project = listResult.projects.find((item) => normalizeProjectCode(item?.code) === normalized);
+    if (!project?.name) return null;
+    const dataResponse = await fetch(`${SHARED_PROJECTS_API}?name=${encodeURIComponent(project.name)}`, { cache: "no-store" });
+    const dataResult = await readResponseJson(dataResponse);
+    if (!dataResponse.ok || !dataResult?.data) return null;
+    return { name: project.name, data: dataResult.data };
+  } catch (error) {
+    console.warn("Shared project clone failed", error);
+    return null;
+  }
 }
 
 function findProjectNameByCode(code) {
@@ -1513,7 +1610,7 @@ function updateProjectGridState() {
   projectGrid?.classList.toggle("empty", !projectGrid.querySelector(".project-card"));
 }
 
-async function openProject(name) {
+function openProject(name) {
   if (currentProject) saveCurrentProject();
   activeFolder = null;
   ensureMemoryUi();
@@ -1524,8 +1621,6 @@ async function openProject(name) {
     card.classList.toggle("active", card.dataset.project === name);
   });
   clearCanvas();
-  const stored = await loadProjectRecord(name);
-  if (stored) rememberProjectData(name, stored);
   restoreProject(name);
   syncFolderUi();
   showPage("workspace");
@@ -1636,7 +1731,7 @@ function createNodeFromMemory(memory, point = null) {
 }
 
 function createMemoryFromNode(node, note = "") {
-  const snapshot = stripMediaFromNodeSnapshot(serializeNodes([node])[0]);
+  const snapshot = createAssetSnapshotFromNode(node);
   const title = note.trim() || snapshot.title || node.querySelector(".node-title strong")?.textContent || "节点记忆";
   return {
     id: createMemoryId(),
@@ -1644,8 +1739,65 @@ function createMemoryFromNode(node, note = "") {
     title: createMemoryTitle(title),
     content: note.trim() || snapshot.content || snapshot.title || "",
     nodeSnapshot: snapshot,
+    assetKind: "node",
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
+}
+
+function createAssetSnapshotFromNode(node) {
+  const snapshot = serializeNodes([node])[0];
+  if (node.dataset.imageDataUrl) {
+    snapshot.imageDataUrl = node.dataset.imageDataUrl;
+    snapshot.imageDataKey = "";
+  }
+  if (node.dataset.referenceImageDataUrl) {
+    snapshot.referenceImageDataUrl = node.dataset.referenceImageDataUrl;
+    snapshot.referenceImageDataKey = "";
+  }
+  return snapshot;
+}
+
+function saveNodesToAssetLibrary(nodes) {
+  const validNodes = nodes.filter((node) => node?.isConnected);
+  if (!validNodes.length) return;
+  const assets = validNodes.map((node) => createMemoryFromNode(node));
+  localAssets = uniqueMemories([...assets, ...localAssets]);
+  renderConversationMemories();
+  renderAssetsPage();
+  saveGlobalMemories();
+  validNodes.forEach((node) => {
+    ensureNodeStatus(node).textContent = validNodes.length > 1 ? "已批量上传到素材库。" : "已上传到素材库。";
+  });
+}
+
+function publishLocalAssetToPlatform(id) {
+  const asset = localAssets.find((item) => item.id === id);
+  if (!asset) return;
+  const sharedAsset = {
+    ...asset,
+    source: "platform",
+    updatedAt: new Date().toISOString(),
+  };
+  platformSharedAssets = uniqueMemories([sharedAsset, ...platformSharedAssets]);
+  renderAssetsPage();
+  saveSharedAssetsSoon();
+}
+
+function deleteAssetFromLibrary(id) {
+  localAssets = localAssets.filter((asset) => asset.id !== id);
+  conversationMemories = conversationMemories.filter((memory) => memory.id !== id);
+  renderConversationMemories();
+  renderAssetsPage();
+  saveGlobalMemories();
+}
+
+function syncAssetContextMenu(asset) {
+  const publishButton = assetContextMenu?.querySelector('[data-asset-action="publish"]');
+  const unpublishButton = assetContextMenu?.querySelector('[data-asset-action="unpublish"]');
+  const isPlatform = platformSharedAssets.some((item) => item.id === asset?.id);
+  if (publishButton) publishButton.hidden = !asset || isPlatform || !localAssets.some((item) => item.id === asset.id);
+  if (unpublishButton) unpublishButton.hidden = !asset || !isPlatform;
 }
 
 function stripMediaFromNodeSnapshot(snapshot) {
@@ -1670,40 +1822,17 @@ function hydrateRestoredNodeData(node, saved) {
   node.dataset.referenceMode = saved.referenceMode || "structureStyle";
   node.dataset.imageRole = saved.imageRole || "general";
   node.dataset.imageQuality = saved.imageQuality || "high";
+  node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
   node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-  node.dataset.imageModel = node.dataset.imageProvider === "rhart"
-    ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
-    : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
   node.dataset.apimartChannel = "b";
   if (saved.fileName) node.dataset.fileName = saved.fileName;
   if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
-  if (Array.isArray(saved.imageDataKeys)) {
-    node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
-    restoreImageDataKeys(node, saved.imageDataKeys);
-  }
   if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
-  if (Array.isArray(saved.imageDataUrls)) {
-    const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
-    if (safeInlineUrls.length) {
-      node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
-      node.dataset.imageDataInlineUrl = safeInlineUrls[0];
-      const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
-      if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
-    }
-  }
   if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
   if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
   if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
   if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
-  if (saved.generatedImageDataKey) {
-    loadProjectImage(saved.generatedImageDataKey).then((value) => {
-      if (!value) return;
-      node.dataset.generatedImageUrl = value;
-      renderNodeImagePreview(node);
-    });
-  }
-  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
-  if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
+  if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
   if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
   if (Array.isArray(saved.folderConnections)) node.dataset.folderConnections = JSON.stringify(saved.folderConnections);
   if (saved.tone) node.dataset.tone = saved.tone;
@@ -1755,16 +1884,762 @@ function getMemoryById(id) {
   return conversationMemories.find((memory) => memory.id === id) || getDefaultMemories().find((memory) => memory.id === id) || null;
 }
 
+function getAssetById(id) {
+  return localAssets.find((asset) => asset.id === id) || platformSharedAssets.find((asset) => asset.id === id) || getMemoryById(id);
+}
+
 function loadGlobalMemories() {
   const saved = readJson(GLOBAL_MEMORY_KEY, []);
   conversationMemories = Array.isArray(saved) ? saved : [];
+  const savedAssets = readJson(LOCAL_ASSETS_KEY, null);
+  localAssets = Array.isArray(savedAssets) ? savedAssets : conversationMemories.filter((asset) => asset?.assetKind === "node");
 }
 
 function saveGlobalMemories() {
   try {
     localStorage.setItem(GLOBAL_MEMORY_KEY, JSON.stringify(conversationMemories));
+    localStorage.setItem(LOCAL_ASSETS_KEY, JSON.stringify(localAssets));
   } catch (error) {
     console.error("Global memory save failed", error);
+  }
+}
+
+function renderAssetsPage() {
+  const section = document.querySelector(".my-assets");
+  if (!section) return;
+  let list = section.querySelector(".my-assets-list");
+  if (!list) {
+    list = document.createElement("div");
+    list.className = "my-assets-list";
+    section.appendChild(list);
+  }
+  const empty = section.querySelector(".empty-assets");
+  empty?.toggleAttribute("hidden", localAssets.length > 0);
+  list.innerHTML = localAssets.map((asset) => renderAssetCard(asset, "local")).join("");
+
+  const platformSection = document.querySelector(".platform-assets");
+  if (!platformSection) return;
+  let platformList = platformSection.querySelector(".platform-assets-list");
+  if (!platformList) {
+    platformList = document.createElement("div");
+    platformList.className = "platform-assets-list my-assets-list";
+    platformSection.appendChild(platformList);
+  }
+  let platformEmpty = platformSection.querySelector(".empty-platform-assets");
+  if (!platformEmpty) {
+    platformEmpty = document.createElement("div");
+    platformEmpty.className = "empty-assets empty-platform-assets";
+    platformEmpty.innerHTML = "<div>P</div><strong>暂无平台素材</strong><span>在我的素材卡片上右键，选择上传到平台后会显示在这里。</span>";
+    platformSection.insertBefore(platformEmpty, platformList);
+  }
+  platformEmpty.toggleAttribute("hidden", platformSharedAssets.length > 0);
+  platformList.innerHTML = platformSharedAssets.map((asset) => renderAssetCard(asset, "platform")).join("");
+}
+
+function renderAssetCard(asset, scope) {
+  const typeLabel = asset.nodeSnapshot ? "节点配置" : typeNames[asset.type] || "文本";
+  const preview = getAssetPreview(asset);
+  const isPlatform = scope === "platform";
+  return `
+    <article class="asset-card project-card" data-asset-card="${escapeHtml(asset.id)}" data-asset-scope="${escapeHtml(scope)}">
+      <div class="project-row">
+        <div class="folder-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z" /><path d="M7 7V5h10v2" /></svg></div>
+        <div>
+          <strong>${escapeHtml(asset.title || "未命名素材")}</strong>
+          <span>${escapeHtml(typeLabel)}</span>
+          <small>${escapeHtml(getAssetMeta(asset, scope))}</small>
+        </div>
+      </div>
+      <div class="project-thumb asset-thumb ${preview ? "has-image" : ""}">
+        ${renderAssetPreview(asset, preview)}
+      </div>
+      <div class="asset-card-actions">
+        <button type="button" data-preview-asset="${escapeHtml(asset.id)}">预览</button>
+        <button class="open-canvas" type="button" data-use-asset="${escapeHtml(asset.id)}">上传画布</button>
+        ${
+          isPlatform
+            ? `<button class="delete-project" type="button" data-unpublish-asset="${escapeHtml(asset.id)}">移出平台</button>`
+            : `<button class="delete-project" type="button" data-delete-asset="${escapeHtml(asset.id)}">删除</button>`
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderAssetPreview(asset, preview) {
+  if (preview) return `<img src="${escapeHtml(preview)}" alt="">`;
+  const video = getAssetVideoPreview(asset);
+  if (video) return `<video src="${escapeHtml(video)}" muted controls playsinline></video>`;
+  return `<span>${escapeHtml(asset.content || asset.nodeSnapshot?.content || "已保存的画布节点素材。")}</span>`;
+}
+
+function getAssetMeta(asset, scope = "local") {
+  if (asset.nodeSnapshot) {
+    const snapshot = asset.nodeSnapshot;
+    const childCount = Array.isArray(snapshot.folderNodes) ? snapshot.folderNodes.length : 0;
+    const base = childCount ? `完整节点 / 子节点 ${childCount}` : "完整节点";
+    return scope === "platform" ? `平台素材 / ${base}` : `本地素材 / ${base}`;
+  }
+  return scope === "platform" ? "平台素材" : "本地素材";
+}
+
+function getAssetPreview(asset) {
+  const candidates = [];
+  if (asset.nodeSnapshot) collectNodeThumbnailCandidates(asset.nodeSnapshot, candidates);
+  return candidates.find(isRemoteImageUrl) || candidates.find((value) => typeof value === "string" && value.startsWith("data:image/")) || "";
+}
+
+function getAssetVideoPreview(asset) {
+  const node = asset.nodeSnapshot;
+  if (!node) return "";
+  const candidates = [
+    node.generatedVideoUrl,
+    ...arrayOrEmpty(node.generatedVideoUrls),
+    ...arrayOrEmpty(node.videoUrls),
+    node.videoDataUrl,
+    node.referenceVideoUrl,
+    ...arrayOrEmpty(node.referenceVideoUrls),
+  ];
+  return candidates.find(Boolean) || "";
+}
+
+function openAssetPreview(asset) {
+  const modal = ensureAssetPreviewModal();
+  modal.querySelector(".asset-preview-body").innerHTML = renderAssetPreviewDetails(asset);
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function ensureAssetPreviewModal() {
+  let modal = document.querySelector("#assetPreviewModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "assetPreviewModal";
+  modal.className = "asset-preview-modal";
+  modal.setAttribute("aria-hidden", "true");
+  modal.innerHTML = `
+    <div class="asset-preview-panel" role="dialog" aria-modal="true">
+      <div class="asset-preview-head">
+        <strong>素材预览</strong>
+        <button type="button" data-close-asset-preview>关闭</button>
+      </div>
+      <div class="asset-preview-body"></div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.closest("[data-close-asset-preview]")) closeAssetPreview();
+  });
+  return modal;
+}
+
+function closeAssetPreview() {
+  const modal = document.querySelector("#assetPreviewModal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function renderAssetPreviewDetails(asset) {
+  const node = asset.nodeSnapshot || {};
+  const images = getAssetImageSources(asset);
+  const videos = getAssetVideoSources(asset);
+  const params = getAssetNodeParams(node);
+  return `
+    <section class="asset-preview-summary">
+      <div>
+        <small>${escapeHtml(asset.source === "platform" ? "平台素材" : "本地素材")}</small>
+        <h2>${escapeHtml(asset.title || node.title || "未命名素材")}</h2>
+        <p>${escapeHtml(asset.content || node.content || "暂无文本内容。")}</p>
+      </div>
+      <dl>
+        <div><dt>节点类型</dt><dd>${escapeHtml(typeNames[node.type || asset.type] || node.type || asset.type || "未知")}</dd></div>
+        <div><dt>素材编号</dt><dd>${escapeHtml(asset.id || "-")}</dd></div>
+        <div><dt>更新时间</dt><dd>${escapeHtml(formatAssetTime(asset.updatedAt || asset.createdAt))}</dd></div>
+      </dl>
+    </section>
+    ${renderAssetMediaSection("图片", images, "image")}
+    ${renderAssetMediaSection("视频", videos, "video")}
+    <section class="asset-preview-section">
+      <h3>节点参数</h3>
+      <div class="asset-param-grid">
+        ${params.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") || "<p>暂无参数。</p>"}
+      </div>
+    </section>
+    <section class="asset-preview-section">
+      <h3>完整节点信息</h3>
+      <pre>${escapeHtml(JSON.stringify(asset.nodeSnapshot || asset, null, 2))}</pre>
+    </section>
+  `;
+}
+
+function getAssetImageSources(asset) {
+  const node = asset.nodeSnapshot;
+  if (!node) return [];
+  const images = [
+    node.generatedImageUrl,
+    ...arrayOrEmpty(node.generatedImageUrls),
+    ...arrayOrEmpty(node.imageUrls),
+    node.imageDataUrl,
+    ...arrayOrEmpty(node.referenceImageUrls),
+    node.referenceImageDataUrl,
+  ];
+  arrayOrEmpty(node.folderNodes).forEach((child) => {
+    images.push(...getAssetImageSources({ nodeSnapshot: child }));
+  });
+  return uniqueValues(images.filter(Boolean));
+}
+
+function getAssetVideoSources(asset) {
+  const node = asset.nodeSnapshot;
+  if (!node) return [];
+  const videos = [
+    node.generatedVideoUrl,
+    ...arrayOrEmpty(node.generatedVideoUrls),
+    ...arrayOrEmpty(node.videoUrls),
+    node.videoDataUrl,
+    node.referenceVideoUrl,
+    ...arrayOrEmpty(node.referenceVideoUrls),
+  ];
+  arrayOrEmpty(node.folderNodes).forEach((child) => {
+    videos.push(...getAssetVideoSources({ nodeSnapshot: child }));
+  });
+  return uniqueValues(videos.filter(Boolean));
+}
+
+function renderAssetMediaSection(title, sources, type) {
+  return `
+    <section class="asset-preview-section">
+      <h3>${escapeHtml(title)}</h3>
+      ${
+        sources.length
+          ? `<div class="asset-preview-media-grid">${sources.map((source) => renderAssetMediaItem(source, type)).join("")}</div>`
+          : "<p>暂无媒体。</p>"
+      }
+    </section>
+  `;
+}
+
+function renderAssetMediaItem(source, type) {
+  if (type === "video") {
+    return `<video src="${escapeHtml(source)}" controls muted playsinline></video>`;
+  }
+  return `<img src="${escapeHtml(source)}" alt="">`;
+}
+
+function getAssetNodeParams(node) {
+  if (!node || !Object.keys(node).length) return [];
+  const rows = [
+    ["标题", node.title],
+    ["内容", node.content],
+    ["图片模型", node.imageModel],
+    ["图片用途", node.imagePurpose],
+    ["参考模式", node.referenceMode],
+    ["图片角色", node.imageRole],
+    ["图片质量", node.imageQuality],
+    ["视频模型", node.videoModel],
+    ["视频模式", node.videoMode],
+    ["时长", node.videoDuration],
+    ["宽高比", node.videoAspectRatio],
+    ["分辨率", node.videoResolution],
+    ["随机种子", node.videoSeed],
+    ["生成音频", node.videoGenerateAudio === true ? "是" : node.videoGenerateAudio === false ? "否" : ""],
+    ["返回尾帧", node.videoReturnLastFrame === true ? "是" : node.videoReturnLastFrame === false ? "否" : ""],
+    ["联网搜索", node.videoWebSearch === true ? "是" : node.videoWebSearch === false ? "否" : ""],
+  ];
+  return rows.filter(([, value]) => value !== undefined && value !== null && String(value) !== "").map(([label, value]) => [label, String(value)]);
+}
+
+function formatAssetTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN");
+}
+
+async function initAccessAuth() {
+  createAuthOverlay();
+  try {
+    const response = await fetch(ACCESS_AUTH_API, { cache: "no-store" });
+    const result = await readResponseJson(response);
+    accessSession = result.authenticated ? result.session : null;
+    syncAuthUi();
+  } catch (error) {
+    setAuthStatus(`登录初始化失败：${error instanceof Error ? error.message : String(error)}`);
+    lockAppForAuth(true);
+  }
+}
+
+function createAuthOverlay() {
+  if (document.querySelector("#authOverlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "authOverlay";
+  overlay.className = "auth-overlay";
+  overlay.innerHTML = `
+    <form class="auth-card" id="authForm">
+      <span class="kicker">ACCESS</span>
+      <h1>AIVideoBox 访问口令</h1>
+      <p>输入管理员发放的访问口令后进入工作台、素材库和模板库。</p>
+      <label>
+        <span>访问口令</span>
+        <input id="accessCodeInput" type="password" autocomplete="current-password" required />
+      </label>
+      <div class="auth-actions">
+        <button class="yellow-button" type="submit" data-auth-mode="signin">进入</button>
+        <button class="subtle-button" type="button" data-auth-admin-toggle>管理员</button>
+      </div>
+      <div class="auth-admin-panel" id="authAdminPanel" hidden>
+        <label>
+          <span>管理员密钥</span>
+          <input id="adminKeyInput" type="password" autocomplete="off" />
+        </label>
+        <label>
+          <span>口令名称</span>
+          <input id="adminCodeName" type="text" placeholder="例如：剪辑师 A" />
+        </label>
+        <div class="auth-actions">
+          <button class="subtle-button" type="button" data-auth-admin-create>生成口令</button>
+          <button class="subtle-button" type="button" data-auth-admin-load>查看列表</button>
+        </div>
+        <div class="auth-admin-result" id="authAdminResult"></div>
+      </div>
+      <small id="authStatus">正在检查登录状态...</small>
+    </form>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#authForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await signInWithAccessCode();
+  });
+  overlay.querySelector("[data-auth-admin-toggle]")?.addEventListener("click", toggleAdminPanel);
+  overlay.querySelector("[data-auth-admin-create]")?.addEventListener("click", createAccessCodeFromAdmin);
+  overlay.querySelector("[data-auth-admin-load]")?.addEventListener("click", loadAccessCodesFromAdmin);
+  ensureAuthSignOutButton();
+}
+
+function ensureAuthSignOutButton() {
+  if (document.querySelector("#authSignOut")) return;
+  const button = document.createElement("button");
+  button.id = "authSignOut";
+  button.className = "auth-signout";
+  button.type = "button";
+  button.textContent = "退出登录";
+  button.hidden = true;
+  button.addEventListener("click", async () => {
+    await fetch(ACCESS_AUTH_API, { method: "DELETE" });
+    accessSession = null;
+    syncAuthUi();
+  });
+  document.body.appendChild(button);
+}
+
+async function signInWithAccessCode() {
+  const code = document.querySelector("#accessCodeInput")?.value.trim() || "";
+  if (!code) {
+    setAuthStatus("请输入访问口令。");
+    document.querySelector("#accessCodeInput")?.focus();
+    return;
+  }
+  setAuthBusy(true);
+  setAuthStatus("正在校验口令...");
+  try {
+    const response = await fetch(ACCESS_AUTH_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const result = await readResponseJson(response);
+    if (!response.ok) {
+      setAuthStatus(result.error || `登录失败：HTTP ${response.status}`);
+      return;
+    }
+    accessSession = { name: result.user?.name || "访问用户" };
+    syncAuthUi();
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+function setAuthBusy(isBusy) {
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+    button.disabled = isBusy;
+  });
+}
+
+function syncAuthUi() {
+  lockAppForAuth(!accessSession);
+  const signOut = document.querySelector("#authSignOut");
+  if (signOut) signOut.hidden = !accessSession;
+  if (accessSession?.name) setAuthStatus(`已登录：${accessSession.name}`);
+}
+
+function lockAppForAuth(locked) {
+  document.body.classList.toggle("auth-locked", locked);
+  const overlay = document.querySelector("#authOverlay");
+  if (overlay) overlay.hidden = !locked;
+}
+
+function setAuthStatus(message) {
+  const status = document.querySelector("#authStatus");
+  if (status) status.textContent = message;
+}
+
+function toggleAdminPanel() {
+  const panel = document.querySelector("#authAdminPanel");
+  if (panel) panel.hidden = !panel.hidden;
+}
+
+async function createAccessCodeFromAdmin() {
+  const adminKey = document.querySelector("#adminKeyInput")?.value.trim() || "";
+  const name = document.querySelector("#adminCodeName")?.value.trim() || "访问用户";
+  if (!adminKey) {
+    setAuthStatus("请输入管理员密钥。");
+    return;
+  }
+  const result = await callAccessAdmin("POST", adminKey, { name });
+  if (!result) return;
+  document.querySelector("#authAdminResult").innerHTML = `
+    <div class="admin-code-box">
+      <span>新口令只显示一次</span>
+      <strong>${escapeHtml(result.code)}</strong>
+    </div>
+  `;
+}
+
+async function loadAccessCodesFromAdmin() {
+  const adminKey = document.querySelector("#adminKeyInput")?.value.trim() || "";
+  if (!adminKey) {
+    setAuthStatus("请输入管理员密钥。");
+    return;
+  }
+  const result = await callAccessAdmin("GET", adminKey);
+  if (!result) return;
+  renderAccessCodeList(result.codes || [], adminKey);
+}
+
+async function callAccessAdmin(method, adminKey, body = {}) {
+  setAuthStatus("正在请求管理员接口...");
+  const response = await fetch(ACCESS_ADMIN_API, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Key": adminKey,
+    },
+    body: method === "GET" ? undefined : JSON.stringify(body),
+  });
+  const result = await readResponseJson(response);
+  if (!response.ok || result.disabled) {
+    setAuthStatus(result.error || `管理员接口失败：HTTP ${response.status}`);
+    return null;
+  }
+  setAuthStatus("管理员操作完成。");
+  return result;
+}
+
+function renderAccessCodeList(codes, adminKey) {
+  const target = document.querySelector("#authAdminResult");
+  if (!target) return;
+  target.innerHTML = codes.length
+    ? codes.map((item) => `
+        <div class="admin-code-row">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(item.active ? "启用" : "停用")} / ${escapeHtml(formatAssetTime(item.createdAt))}</span>
+          </div>
+          <button type="button" data-toggle-code="${escapeHtml(item.id)}" data-next-active="${item.active ? "false" : "true"}">${item.active ? "停用" : "启用"}</button>
+        </div>
+      `).join("")
+    : "<p>暂无口令。</p>";
+  target.querySelectorAll("[data-toggle-code]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const result = await callAccessAdmin("PATCH", adminKey, {
+        id: button.dataset.toggleCode,
+        active: button.dataset.nextActive === "true",
+      });
+      if (result?.codes) renderAccessCodeList(result.codes, adminKey);
+    });
+  });
+}
+
+function loadTemplates() {
+  const saved = readJson(TEMPLATE_LIBRARY_KEY, []);
+  localTemplates = Array.isArray(saved) ? saved : [];
+}
+
+function saveTemplates() {
+  try {
+    localStorage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(localTemplates));
+  } catch (error) {
+    console.error("Template save failed", error);
+  }
+}
+
+async function saveCurrentProjectAsLocalTemplate() {
+  if (!currentProject) return;
+  saveCurrentProject();
+  const source = readJson(projectKey(currentProject), serializeCanvasData());
+  const data = structuredClone(source || { nodes: [], connections: [] });
+  await inlineProjectNodeImages(data.nodes);
+  const template = {
+    id: createTemplateId(),
+    source: "local",
+    title: `${currentProject} 模板`,
+    description: `来自工作台项目：${currentProject}`,
+    projectName: currentProject,
+    data,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  localTemplates = uniqueTemplates([template, ...localTemplates]);
+  saveTemplates();
+  renderTemplatesPage();
+}
+
+function renderTemplatesPage() {
+  const page = document.querySelector("#page-templates");
+  if (!page) return;
+  page.innerHTML = `
+    <div class="assets-header">
+      <div>
+        <span class="kicker">TEMPLATES</span>
+        <h1>模板库</h1>
+        <p>保存完整工作台画布为本地模板；确认可复用后，再右键上传到平台模板。</p>
+      </div>
+      <button class="subtle-button" data-page="projects" type="button">返回工作台</button>
+    </div>
+    <div class="assets-actions">
+      <button class="yellow-button" data-save-current-template type="button">+ 保存当前项目为模板</button>
+    </div>
+    <section class="my-assets template-section">
+      <h2>本地模板</h2>
+      <p>只保存在当前浏览器，不会自动共享。</p>
+      <div class="empty-assets local-template-empty" ${localTemplates.length ? "hidden" : ""}>
+        <div>T</div>
+        <strong>还没有本地模板</strong>
+        <span>打开一个工作台项目后，点击上方按钮保存完整画布。</span>
+      </div>
+      <div class="template-grid my-assets-list">${localTemplates.map((template) => renderTemplateCard(template, "local")).join("")}</div>
+    </section>
+    <section class="platform-assets template-section">
+      <h2>平台模板</h2>
+      <p>上传到平台后，其他电脑和账号也能复用。</p>
+      <div class="empty-assets platform-template-empty" ${platformSharedTemplates.length ? "hidden" : ""}>
+        <div>P</div>
+        <strong>暂无平台模板</strong>
+        <span>在本地模板卡片上右键，选择上传到平台。</span>
+      </div>
+      <div class="template-grid my-assets-list">${platformSharedTemplates.map((template) => renderTemplateCard(template, "platform")).join("")}</div>
+    </section>
+  `;
+}
+
+function renderTemplateCard(template, scope) {
+  const stats = getTemplateStats(template);
+  const thumb = getProjectThumbnail(template.data);
+  const isPlatform = scope === "platform";
+  return `
+    <article class="asset-card project-card template-card" data-template-card="${escapeHtml(template.id)}" data-template-scope="${escapeHtml(scope)}">
+      <div class="project-row">
+        <div class="folder-icon"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg></div>
+        <div>
+          <strong>${escapeHtml(template.title || "未命名模板")}</strong>
+          <span>${escapeHtml(isPlatform ? "平台模板" : "本地模板")}</span>
+          <small>${escapeHtml(`节点 ${stats.nodes} / 连接 ${stats.connections}`)}</small>
+        </div>
+      </div>
+      <div class="project-thumb asset-thumb ${thumb ? "has-image" : ""}">
+        ${thumb ? `<img src="${escapeHtml(thumb)}" alt="">` : `<span>${escapeHtml(template.description || "完整画布模板。")}</span>`}
+      </div>
+      <div class="asset-card-actions">
+        <button type="button" data-preview-template="${escapeHtml(template.id)}">预览</button>
+        <button class="open-canvas" type="button" data-use-template="${escapeHtml(template.id)}">使用模板</button>
+        ${
+          isPlatform
+            ? `<button class="delete-project" type="button" data-unpublish-template="${escapeHtml(template.id)}">移出平台</button>`
+            : `<button class="delete-project" type="button" data-delete-template="${escapeHtml(template.id)}">删除</button>`
+        }
+      </div>
+    </article>
+  `;
+}
+
+function getTemplateStats(template) {
+  return {
+    nodes: Array.isArray(template?.data?.nodes) ? template.data.nodes.length : 0,
+    connections: Array.isArray(template?.data?.connections) ? template.data.connections.length : 0,
+  };
+}
+
+function getTemplateById(id) {
+  return localTemplates.find((template) => template.id === id) || platformSharedTemplates.find((template) => template.id === id) || null;
+}
+
+function useTemplate(id) {
+  const template = getTemplateById(id);
+  if (!template?.data) return;
+  const name = createFreshProject(template.title || "模板项目");
+  const data = structuredClone(template.data);
+  localStorage.setItem(projectKey(name), JSON.stringify(data));
+  updateProjectCardThumbnail(name, data);
+  openProject(name);
+}
+
+function deleteLocalTemplate(id) {
+  localTemplates = localTemplates.filter((template) => template.id !== id);
+  saveTemplates();
+  renderTemplatesPage();
+}
+
+async function publishLocalTemplateToPlatform(id) {
+  const template = localTemplates.find((item) => item.id === id);
+  if (!template) return;
+  const shared = {
+    ...template,
+    source: "platform",
+    updatedAt: new Date().toISOString(),
+  };
+  platformSharedTemplates = uniqueTemplates([shared, ...platformSharedTemplates]);
+  renderTemplatesPage();
+  saveSharedTemplatesSoon();
+}
+
+function openTemplatePreview(template) {
+  const stats = getTemplateStats(template);
+  const previewAsset = {
+    id: template.id,
+    source: template.source,
+    title: template.title,
+    content: template.description || `节点 ${stats.nodes} / 连接 ${stats.connections}`,
+    nodeSnapshot: {
+      type: "folder",
+      title: template.title,
+      content: template.description,
+      folderNodes: template.data?.nodes || [],
+      folderConnections: template.data?.connections || [],
+    },
+    updatedAt: template.updatedAt,
+    createdAt: template.createdAt,
+  };
+  openAssetPreview(previewAsset);
+}
+
+function uniqueTemplates(templates) {
+  const seen = new Set();
+  return templates.filter((template) => {
+    const id = String(template?.id || "").trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function createTemplateId() {
+  return `template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureTemplateContextMenu() {
+  let menu = document.querySelector("#templateContextMenu");
+  if (menu) return menu;
+  menu = document.createElement("div");
+  menu.id = "templateContextMenu";
+  menu.className = "context-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-hidden", "true");
+  menu.innerHTML = `
+    <div class="context-title">模板操作</div>
+    <button type="button" data-template-action="publish">上传到平台</button>
+    <button type="button" data-template-action="unpublish">移出平台</button>
+  `;
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function syncTemplateContextMenu(template) {
+  const menu = ensureTemplateContextMenu();
+  const publishButton = menu.querySelector('[data-template-action="publish"]');
+  const unpublishButton = menu.querySelector('[data-template-action="unpublish"]');
+  const isPlatform = platformSharedTemplates.some((item) => item.id === template?.id);
+  if (publishButton) publishButton.hidden = !template || isPlatform || !localTemplates.some((item) => item.id === template.id);
+  if (unpublishButton) unpublishButton.hidden = !template || !isPlatform;
+}
+
+let sharedTemplatesSaveTimer = null;
+const pendingDeletedTemplateIds = new Set();
+
+function saveSharedTemplatesSoon() {
+  clearTimeout(sharedTemplatesSaveTimer);
+  sharedTemplatesSaveTimer = setTimeout(saveSharedTemplates, 900);
+}
+
+async function loadSharedTemplates() {
+  try {
+    const response = await fetch(SHARED_TEMPLATES_API, { cache: "no-store" });
+    const result = await readResponseJson(response);
+    if (!response.ok || result.disabled || !Array.isArray(result.templates)) return;
+    platformSharedTemplates = uniqueTemplates(result.templates.filter((template) => !pendingDeletedTemplateIds.has(template?.id)));
+    renderTemplatesPage();
+  } catch (error) {
+    console.warn("Shared templates load failed", error);
+  }
+}
+
+async function saveSharedTemplates() {
+  if (!platformSharedTemplates.length && !pendingDeletedTemplateIds.size) return;
+  try {
+    const response = await fetch(SHARED_TEMPLATES_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templates: platformSharedTemplates, deletedIds: [...pendingDeletedTemplateIds] }),
+    });
+    const result = await readResponseJson(response);
+    if (!response.ok || result.disabled) return;
+    pendingDeletedTemplateIds.clear();
+    if (Array.isArray(result.templates)) {
+      platformSharedTemplates = uniqueTemplates(result.templates);
+      renderTemplatesPage();
+    }
+  } catch (error) {
+    console.warn("Shared templates save failed", error);
+  }
+}
+
+let sharedAssetsSaveTimer = null;
+const pendingDeletedAssetIds = new Set();
+
+function saveSharedAssetsSoon() {
+  clearTimeout(sharedAssetsSaveTimer);
+  sharedAssetsSaveTimer = setTimeout(saveSharedAssets, 900);
+}
+
+async function loadSharedAssets() {
+  try {
+    const response = await fetch(SHARED_ASSETS_API, { cache: "no-store" });
+    const result = await readResponseJson(response);
+    if (!response.ok || result.disabled || !Array.isArray(result.assets)) return;
+    const remoteAssets = result.assets.filter((asset) => !pendingDeletedAssetIds.has(asset?.id));
+    platformSharedAssets = uniqueMemories(remoteAssets);
+    renderAssetsPage();
+  } catch (error) {
+    console.warn("Shared assets load failed", error);
+  }
+}
+
+async function saveSharedAssets() {
+  if (!platformSharedAssets.length && !pendingDeletedAssetIds.size) return;
+  try {
+    const response = await fetch(SHARED_ASSETS_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assets: platformSharedAssets, deletedIds: [...pendingDeletedAssetIds] }),
+    });
+    const result = await readResponseJson(response);
+    if (!response.ok || result.disabled) return;
+    pendingDeletedAssetIds.clear();
+    if (Array.isArray(result.assets)) {
+      platformSharedAssets = uniqueMemories(result.assets);
+      renderAssetsPage();
+    }
+  } catch (error) {
+    console.warn("Shared assets save failed", error);
   }
 }
 
@@ -1820,7 +2695,6 @@ function createNode({
   x,
   y,
   fileName,
-  imageDataKeys,
   imageDataUrl,
   imageUrls,
   referenceImageDataUrl,
@@ -1828,7 +2702,6 @@ function createNode({
   referenceFileName,
   generatedImageUrl,
   generatedImageUrls,
-  imageGenerationRecords,
   videoDataUrl,
   videoUrls,
   referenceVideoUrl,
@@ -1865,17 +2738,12 @@ function createNode({
   node.dataset.tone = `slot-${["a", "b", "c", "d"][nodeCounter % 4]}`;
   if (fileName) node.dataset.fileName = fileName;
   if (Array.isArray(imageUrls)) node.dataset.imageUrls = JSON.stringify(imageUrls);
-  if (Array.isArray(imageDataKeys)) {
-    node.dataset.imageDataKeys = JSON.stringify(imageDataKeys);
-    restoreImageDataKeys(node, imageDataKeys);
-  }
   if (imageDataUrl) node.dataset.imageDataUrl = imageDataUrl;
   if (Array.isArray(referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(referenceImageUrls);
   if (referenceImageDataUrl) node.dataset.referenceImageDataUrl = referenceImageDataUrl;
   if (referenceFileName) node.dataset.referenceFileName = referenceFileName;
   if (generatedImageUrl) node.dataset.generatedImageUrl = generatedImageUrl;
   if (Array.isArray(generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(generatedImageUrls);
-  if (Array.isArray(imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(imageGenerationRecords);
   if (Array.isArray(videoUrls)) node.dataset.videoUrls = JSON.stringify(videoUrls);
   if (videoDataUrl) node.dataset.videoDataUrl = videoDataUrl;
   if (Array.isArray(referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(referenceVideoUrls);
@@ -1900,7 +2768,7 @@ function createNode({
   if (imageRole) node.dataset.imageRole = imageRole;
   if (imageQuality) node.dataset.imageQuality = imageQuality;
   if (imageModel) node.dataset.imageModel = imageModel;
-  node.dataset.imageProvider = normalizeImageProvider(imageProvider || node.dataset.imageProvider || "apimart");
+  if (imageProvider) node.dataset.imageProvider = normalizeImageProvider(imageProvider);
   if (apimartChannel) node.dataset.apimartChannel = apimartChannel;
   if (Array.isArray(folderNodes)) node.dataset.folderNodes = JSON.stringify(folderNodes);
   if (Array.isArray(folderConnections)) node.dataset.folderConnections = JSON.stringify(folderConnections);
@@ -2169,18 +3037,17 @@ function renderNodeImagePreview(node) {
   if (!preview) return;
   const uploaded = parseJsonArray(node.dataset.imageUrls);
   const generated = getGeneratedImageHistory(node);
-  const records = getImageGenerationRecords(node);
   if (node.dataset.generatedImageUrl) {
     const historyCount = Math.max(0, generated.length - 1);
     preview.classList.add("output-preview");
     preview.innerHTML = `
-      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">
+      <img src="${node.dataset.generatedImageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">
+      <button class="persist-output-button" type="button">保存成品</button>
       ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
       <div class="output-history-popover" aria-hidden="true">
-        ${renderImageGenerationRecords(records.length ? records : generated.map((src) => ({ id: src, imageUrl: src })))}
+        ${generated.slice(1).map((src) => `<img src="${src}" alt="">`).join("")}
       </div>
     `;
-    bindPreviewDimensionCapture(node, preview);
     refreshConnectionsAfterImages(preview);
     return;
   }
@@ -2188,45 +3055,9 @@ function renderNodeImagePreview(node) {
   const sources = [...uploaded, node.dataset.imageDataUrl].filter(Boolean);
   const uniqueSources = uniqueValues(sources);
   if (uniqueSources.length) {
-    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`).join("");
-    bindPreviewDimensionCapture(node, preview);
+    preview.innerHTML = uniqueSources.map((src) => `<img src="${src}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'图片链接失效'}))">`).join("");
     refreshConnectionsAfterImages(preview);
   }
-}
-
-function bindPreviewDimensionCapture(node, preview) {
-  preview.querySelectorAll("img").forEach((image) => {
-    const capture = () => {
-      if (!image.naturalWidth || !image.naturalHeight) return;
-      if (node.dataset.generatedImageUrl && image.src === node.dataset.generatedImageUrl) {
-        const sameSize = node.dataset.generatedImageNaturalWidth === String(image.naturalWidth)
-          && node.dataset.generatedImageNaturalHeight === String(image.naturalHeight);
-        if (sameSize) return;
-        node.dataset.generatedImageNaturalWidth = String(image.naturalWidth);
-        node.dataset.generatedImageNaturalHeight = String(image.naturalHeight);
-      } else {
-        const sameSize = node.dataset.imageNaturalWidth === String(image.naturalWidth)
-          && node.dataset.imageNaturalHeight === String(image.naturalHeight);
-        if (sameSize) return;
-        node.dataset.imageNaturalWidth = String(image.naturalWidth);
-        node.dataset.imageNaturalHeight = String(image.naturalHeight);
-      }
-      scheduleDimensionSave();
-    };
-    if (image.complete) {
-      capture();
-    } else {
-      image.addEventListener("load", capture, { once: true });
-    }
-  });
-}
-
-function scheduleDimensionSave() {
-  clearTimeout(pendingDimensionSaveTimer);
-  pendingDimensionSaveTimer = setTimeout(() => {
-    pendingDimensionSaveTimer = null;
-    saveCurrentProject({ silent: true });
-  }, 900);
 }
 
 function renderNodeVideoPreview(node) {
@@ -2239,6 +3070,7 @@ function renderNodeVideoPreview(node) {
     preview.classList.add("output-preview");
     preview.innerHTML = `
       <video src="${node.dataset.generatedVideoUrl}" controls muted playsinline onerror="this.replaceWith(Object.assign(document.createElement('div'), {className:'broken-image-placeholder', textContent:'视频链接失效'}))"></video>
+      <button class="persist-output-button" type="button">保存成品</button>
       ${historyCount ? `<button class="output-history-button" type="button">历史 ${historyCount}</button>` : ""}
       <div class="output-history-popover" aria-hidden="true">
         ${generated.slice(1).map((src) => `<video src="${src}" controls muted playsinline></video>`).join("")}
@@ -2281,85 +3113,7 @@ function addGeneratedImageHistory(node, imageUrl) {
     imageUrl,
     node.dataset.generatedImageUrl,
     ...parseJsonArray(node.dataset.generatedImageUrls),
-  ].filter(Boolean)).slice(0, 6);
-}
-
-function addImageGenerationRecord(node, imageUrl, debug = {}) {
-  const records = getImageGenerationRecords(node).filter((record) => record.imageUrl !== imageUrl);
-  const record = {
-    id: `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    imageUrl,
-    createdAt: new Date().toISOString(),
-    favorite: false,
-    provider: debug.payload?.provider || "",
-    model: debug.payload?.model || "",
-    size: debug.payload?.size || "",
-    quality: debug.payload?.quality || "",
-    userPrompt: String(debug.userPrompt || "").slice(0, 1000),
-    finalPrompt: String(debug.finalPrompt || "").slice(0, 2000),
-    referenceBindings: String(debug.referenceBindings || "").slice(0, 1000),
-    referenceSummary: formatReferencePlan(debug.referencePlan || { images: [] }),
-  };
-  const nextRecords = [record, ...records].slice(0, 10);
-  node.dataset.imageGenerationRecords = JSON.stringify(nextRecords);
-  return nextRecords;
-}
-
-function getImageGenerationRecords(node) {
-  const records = parseJsonArray(node?.dataset.imageGenerationRecords);
-  return Array.isArray(records) ? records.filter((record) => record && record.imageUrl) : [];
-}
-
-function compactImageGenerationRecords(records, limit = 10) {
-  return arrayOrEmpty(records)
-    .filter((record) => record?.imageUrl && !isDataImageUrl(record.imageUrl))
-    .slice(0, limit)
-    .map((record) => ({
-    id: record.id || `gen-${Math.random().toString(36).slice(2, 8)}`,
-    imageUrl: record.imageUrl || "",
-    createdAt: record.createdAt || "",
-    favorite: Boolean(record.favorite),
-    provider: record.provider || "",
-    model: record.model || "",
-    size: record.size || "",
-    quality: record.quality || "",
-    userPrompt: String(record.userPrompt || "").slice(0, 1000),
-    finalPrompt: String(record.finalPrompt || "").slice(0, 2000),
-    referenceBindings: String(record.referenceBindings || "").slice(0, 1000),
-    referenceSummary: String(record.referenceSummary || "").slice(0, 240),
-  })).filter((record) => record.imageUrl);
-}
-
-function renderImageGenerationRecords(records) {
-  return records
-    .map((record) => {
-      const rawId = String(record.id || record.imageUrl || "");
-      const id = escapeHtml(rawId);
-      const imageUrl = escapeHtml(record.imageUrl || "");
-      const prompt = escapeHtml(record.userPrompt || record.finalPrompt || "");
-      const meta = escapeHtml([record.provider, record.model, record.referenceSummary].filter(Boolean).join(" / "));
-      return `
-        <div class="generation-record ${record.favorite ? "favorite" : ""}">
-          <img data-src="${imageUrl}" alt="" loading="lazy">
-          <button class="generation-favorite-button" type="button" data-generation-favorite="${id}">${record.favorite ? "已优选" : "优选"}</button>
-          <small>${meta || "生成记录"}</small>
-          ${prompt ? `<p>${prompt}</p>` : ""}
-        </div>
-      `;
-    })
-    .join("");
-}
-
-function toggleGenerationFavorite(node, recordId) {
-  if (!node) return;
-  const records = getImageGenerationRecords(node);
-  const nextRecords = records.map((record) => {
-    const id = String(record.id || record.imageUrl || "");
-    return id === recordId ? { ...record, favorite: !record.favorite } : record;
-  });
-  node.dataset.imageGenerationRecords = JSON.stringify(nextRecords);
-  renderNodeImagePreview(node);
-  saveCurrentProject();
+  ].filter(Boolean)).slice(0, 12);
 }
 
 function getGeneratedImageHistory(node) {
@@ -2384,6 +3138,51 @@ function getGeneratedVideoHistory(node) {
   ].filter(Boolean));
 }
 
+async function saveGeneratedOutputToBlob(node, button) {
+  if (!node) return;
+  const isVideo = node.dataset.type === "video";
+  const sourceUrl = isVideo ? node.dataset.generatedVideoUrl : node.dataset.generatedImageUrl;
+  if (!sourceUrl) return;
+
+  const originalText = button?.textContent || "保存成品";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "保存中";
+  }
+
+  try {
+    const response = await fetch("/api/save-media-to-blob", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: sourceUrl,
+        mediaType: isVideo ? "video" : "image",
+        fileName: `${node.querySelector(".node-title strong")?.textContent || "output"}-${Date.now()}.${isVideo ? "mp4" : "png"}`,
+      }),
+    });
+    const result = await readResponseJson(response);
+    if (!response.ok || !result.url) throw new Error(formatApiError(result, `HTTP ${response.status}`));
+
+    if (isVideo) {
+      node.dataset.generatedVideoUrl = result.url;
+      node.dataset.generatedVideoUrls = JSON.stringify(addGeneratedVideoHistory(node, result.url));
+      renderNodeVideoPreview(node);
+    } else {
+      node.dataset.generatedImageUrl = result.url;
+      node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, result.url));
+      renderNodeImagePreview(node);
+    }
+    ensureNodeStatus(node).textContent = "成品已保存到 Blob。";
+    saveCurrentProject();
+  } catch (error) {
+    ensureNodeStatus(node).textContent = `保存成品失败：${error instanceof Error ? error.message : String(error)}`;
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
 function toggleOutputHistory(node) {
   const popover = node?.querySelector(".output-history-popover");
   if (!popover) return;
@@ -2392,7 +3191,6 @@ function toggleOutputHistory(node) {
   if (wasOpen) return;
   const isOpen = popover.classList.toggle("show");
   popover.setAttribute("aria-hidden", isOpen ? "false" : "true");
-  if (isOpen) hydrateOutputHistoryImages(popover);
 }
 
 function closeOutputHistoryPopovers() {
@@ -2400,16 +3198,6 @@ function closeOutputHistoryPopovers() {
     popover.classList.remove("show");
     popover.setAttribute("aria-hidden", "true");
   });
-}
-
-function hydrateOutputHistoryImages(popover) {
-  popover.querySelectorAll("img[data-src]").forEach((image) => {
-    const src = image.dataset.src;
-    if (!src) return;
-    image.src = src;
-    image.removeAttribute("data-src");
-  });
-  refreshConnectionsAfterImages(popover);
 }
 
 function refreshConnectionsAfterImages(scope) {
@@ -2467,7 +3255,6 @@ function openImageConfig(node) {
   }
   imageOptionsPopover?.classList.toggle("video-config-hidden", isVideo);
   openImageOptions?.classList.toggle("video-config-hidden", isVideo);
-  imageProviderSelect?.classList.toggle("video-config-hidden", isVideo);
   removeVideoSettingsPanel();
   if (isVideo) {
     ensureVideoDefaults(node);
@@ -2487,13 +3274,12 @@ function openImageConfig(node) {
     imageRole: node.dataset.imageRole || imageOptions.imageRole || "general",
     quality: node.dataset.imageQuality || imageOptions.quality || "high",
   };
-  ensureImageProviderOptions();
-  const currentProvider = normalizeImageProvider(node.dataset.imageProvider || "apimart");
-  if (imageProviderSelect) {
-    imageProviderSelect.value = currentProvider;
+  if (imageModelSelect) {
+    imageModelSelect.value = node.dataset.imageModel || "gpt-image-2-official";
   }
-  setImageModelOptionsForProvider(currentProvider, node.dataset.imageModel || getDefaultImageModelForProvider(currentProvider));
-  node.dataset.imageModel = normalizeProviderImageModel(currentProvider, imageModelSelect?.value || node.dataset.imageModel);
+  if (imageProviderSelect) {
+    imageProviderSelect.value = normalizeImageProvider(node.dataset.imageProvider || inferImageProviderFromModel(node.dataset.imageModel));
+  }
   syncImageOptionsUi();
   renderConfigInputThumbnails(node);
   syncImageSubmitButton(node);
@@ -2529,14 +3315,10 @@ function syncImageOptionsSummary() {
     style: "风格图",
     output: "输出图",
   }[imageOptions.imageRole] || "普通图片";
-  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = normalizeProviderImageModel(provider, configNode?.dataset.imageModel || imageModelSelect?.value);
-  const qualityLabel = normalizeImageQualityForModel(imageOptions.quality, model);
-  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${qualityLabel}`;
+  openImageOptions.textContent = `${imageOptions.purpose} / ${modeLabel} / ${roleLabel} / 尺寸提示词优先，默认结构图 / ${imageOptions.quality}`;
 }
 
 function syncImageOptionsUi() {
-  syncImageQualityOptionLabels();
   Object.entries(imageOptions).forEach(([group, value]) => {
     const grid = imageOptionsPopover.querySelector(`[data-option-group="${group}"]`);
     grid?.querySelectorAll("button").forEach((button) => {
@@ -2548,21 +3330,6 @@ function syncImageOptionsUi() {
     updateImageRoleSelectLabel(configNode);
   }
   syncImageOptionsSummary();
-}
-
-function syncImageQualityOptionLabels() {
-  const qualityGrid = imageOptionsPopover?.querySelector('[data-option-group="quality"]');
-  if (!qualityGrid) return;
-  const provider = normalizeImageProvider(configNode?.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const model = configNode?.dataset.type === "image"
-    ? normalizeProviderImageModel(provider, configNode.dataset.imageModel || imageModelSelect?.value)
-    : normalizeImageModel(imageModelSelect?.value || "gpt-image-2-official");
-  const labels = model === "gpt-image-2" || isRhartImageModel(model)
-    ? { low: "1k", medium: "2k", high: "4k" }
-    : { low: "low", medium: "medium", high: "high" };
-  qualityGrid.querySelectorAll("[data-value]").forEach((button) => {
-    button.textContent = labels[button.dataset.value] || button.dataset.value;
-  });
 }
 
 function ensureVideoDefaults(node) {
@@ -2584,12 +3351,6 @@ function renderVideoSettingsPanel(node) {
   panel.className = "video-settings-panel";
   panel.innerHTML = `
     <div class="video-settings-grid">
-      <label>
-        <span>生成模式</span>
-        <select data-video-setting="videoMode">
-          ${Object.entries(videoModeLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
-        </select>
-      </label>
       <label>
         <span>时长</span>
         <input data-video-setting="videoDuration" type="number" min="1" max="30" step="1" value="${escapeHtml(node.dataset.videoDuration || "5")}">
@@ -2624,7 +3385,6 @@ function renderVideoSettingsPanel(node) {
     </div>
   `;
   imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
-  panel.querySelector('[data-video-setting="videoMode"]').value = normalizeVideoModeValue(node.dataset.videoMode);
   panel.querySelector('[data-video-setting="videoAspectRatio"]').value = node.dataset.videoAspectRatio || "16:9";
   panel.querySelector('[data-video-setting="videoResolution"]').value = node.dataset.videoResolution || "1080p";
   panel.querySelector('[data-video-setting="videoGenerateAudio"]').checked = node.dataset.videoGenerateAudio === "true";
@@ -2660,7 +3420,6 @@ function persistVideoSettingsFromPanel(node) {
     }
   });
   ensureVideoDefaults(node);
-  setVideoMode(node, normalizeVideoModeValue(node.dataset.videoMode));
   syncVideoOptionsSummary(node);
 }
 
@@ -2713,141 +3472,26 @@ function loadImageOptions() {
 function normalizeImageModel(value) {
   const model = String(value || "").trim();
   if (model === "gemini-3-pro-image-preview") return "gemini-3-pro-image-preview";
-  if (/^(midjourney|mj)$/i.test(model)) return "midjourney";
-  if (isRhartImageModel(model)) return normalizeRhartImageModel(model);
+  if (model === "rhart-image-n-g31-flash/image-to-image" || model === "/rhart-image-n-g31-flash/image-to-image") return "gpt-image-2";
   if (model === "GPT Image 2" || model === "GPT图像2" || model === "gpt-image-2") return "gpt-image-2";
   return "gpt-image-2-official";
 }
 
-function normalizeRhartImageModel(value) {
-  const model = String(value || "").trim().replace(/^\/+/, "");
-  if (model === "rhart-image-g-2/image-to-image" || model === "rhart-g2" || model === "g-2" || model === "g2") return "rhart-image-g-2/image-to-image";
-  if (model === "rhart-image-g-2-official/image-to-image" || model === "rhart-g2-official" || model === "g-2-official" || model === "g2-official") return "rhart-image-g-2-official/image-to-image";
-  return "rhart-image-n-g31-flash/image-to-image";
-}
-
-function isRhartImageModel(value) {
-  const model = String(value || "").trim().replace(/^\/+/, "");
-  return model.startsWith("rhart-image-") || ["rhart-g2", "g-2", "g2", "rhart-g2-official", "g-2-official", "g2-official"].includes(model);
-}
-
-function normalizeRayinAiProvider(value) {
-  const model = String(value || "").trim().toLowerCase();
-  if (["rayinai:mumu", "mumu", "木木"].includes(model)) return "rayinai:mumu";
-  if (["rayinai:tiancai", "tiancai", "甜菜"].includes(model)) return "rayinai:tiancai";
-  if (["rayinai:kaihua", "kaihua", "开花"].includes(model)) return "rayinai:kaihua";
-  if (["rayinai:haizhe", "haizhe", "海蜇"].includes(model)) return "rayinai:haizhe";
-  return "rayinai:bunana";
-}
-
-function isRayinAiProvider(value) {
-  const model = String(value || "").trim().toLowerCase();
-  return model.startsWith("rayinai:") || ["bunana", "不拿拿", "mumu", "木木", "tiancai", "甜菜", "kaihua", "开花", "haizhe", "海蜇"].includes(model);
-}
-
-function getDefaultImageModelForProvider(provider) {
-  const normalizedProvider = normalizeImageProvider(provider);
-  if (normalizedProvider === "rhart") return "rhart-image-n-g31-flash/image-to-image";
-  return "gpt-image-2-official";
-}
-
-function normalizeProviderImageModel(provider, value) {
-  const normalizedProvider = normalizeImageProvider(provider);
-  if (normalizedProvider === "rhart") return normalizeRhartImageModel(value);
-  return normalizeImageModel(value || "gpt-image-2-official");
-}
-
-function getGenerationModelForProvider(provider, value) {
-  return normalizeProviderImageModel(provider, value);
+function inferImageProviderFromModel(model) {
+  return String(model || "").includes("rhart-image-n-g31-flash") ? "rhart" : "apimart";
 }
 
 function normalizeImageProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
-  if (provider === "aihubmix" || provider === "ai-hub-mix" || provider === "aihub") return "aihubmix";
-  if (provider === "rhart" || provider === "rhart-g31" || isRhartImageModel(provider)) return "rhart";
-  if (provider === "rayinai" || provider === "rayincode" || isRayinAiProvider(provider)) return normalizeRayinAiProvider(provider);
-  return "apimart";
+  if (provider === "rhart" || provider === "rhart-g31" || provider === "rhart-image-n-g31-flash/image-to-image") return "rhart";
+  return provider === "rayinai" || provider === "rayincode" ? "rayinai" : "apimart";
 }
 
 function getImageProviderLabel(value) {
   const provider = normalizeImageProvider(value);
-  if (provider === "aihubmix") return "AIHubMix";
-  if (isRayinAiProvider(provider)) return rayinAiProviderOptions.find(([key]) => key === provider)?.[1] || "RayinAI";
-  if (provider === "rhart") return "RHarT";
+  if (provider === "rayinai") return "RayinAI";
+  if (provider === "rhart") return "RHarT G31";
   return "ApiMart";
-}
-
-function ensureImageProviderOptions() {
-  if (!imageProviderSelect) return;
-  const options = [
-    ["apimart", "ApiMart"],
-    ["aihubmix", "AIHubMix"],
-    ["rhart", "RHarT"],
-    ...rayinAiProviderOptions,
-  ];
-  const current = normalizeImageProvider(imageProviderSelect.value || "apimart");
-  options.forEach(([value, label], index) => {
-    if (imageProviderSelect.querySelector(`option[value="${value}"]`)) return;
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    imageProviderSelect.insertBefore(option, imageProviderSelect.options[index] || null);
-  });
-  imageProviderSelect.value = current;
-}
-
-function setImageModelOptionsForProvider(provider, selectedValue = "") {
-  if (!imageModelSelect) return;
-  const normalizedProvider = normalizeImageProvider(provider);
-  const options = normalizedProvider === "rhart"
-    ? rhartImageModelOptions
-    : normalizedProvider === "apimart"
-      ? apiMartImageModelOptions
-      : defaultImageModelOptions;
-  imageModelSelect.innerHTML = options
-    .map(([value, label], index) => `<option value="${value}"${index === 0 ? " selected" : ""}>${label}</option>`)
-    .join("");
-  const selected = normalizeProviderImageModel(normalizedProvider, selectedValue || getDefaultImageModelForProvider(normalizedProvider));
-  imageModelSelect.value = selected;
-  if (imageModelSelect.value !== selected) {
-    imageModelSelect.value = options[0]?.[0] || "";
-  }
-}
-
-function normalizeImageQualityForModel(quality, model) {
-  const value = String(quality || "high").trim().toLowerCase();
-  if (normalizeImageModel(model) === "gpt-image-2" || isRhartImageModel(model)) {
-    if (value === "low" || value === "standard" || value === "1k") return "1k";
-    if (value === "medium" || value === "hd" || value === "2k") return "2k";
-    if (value === "high" || value === "4k") return "4k";
-    return value;
-  }
-  if (value === "medium") return "standard";
-  if (["low", "standard", "hd", "high", "1k", "2k", "4k", "ultra"].includes(value)) return value;
-  return "high";
-}
-
-function shouldSendImageSize(model) {
-  const normalized = normalizeImageModel(model);
-  return normalized !== "gemini-3-pro-image-preview";
-}
-
-function addModelSpecificImageRules(prompt, model, requestedSize, referencePlan) {
-  const normalized = normalizeImageModel(model);
-  if (normalized !== "gpt-image-2" && !isRhartImageModel(model)) return prompt;
-  const hasStructure = Number(referencePlan?.editBaseCount || 0) > 0 || Number(referencePlan?.structureCount || 0) > 0;
-  return [
-    prompt,
-    "GPT Image 2 binding rules:",
-    requestedSize
-      ? `- Output canvas must use the exact requested size ${requestedSize} unless the API rejects it. Match the structure reference's pixel aspect ratio and visible framing.`
-      : "- Keep the output canvas aspect ratio aligned with the structure reference whenever a structure reference is attached.",
-    hasStructure
-      ? "- The structure reference is the geometry authority: preserve its crop, framing, camera angle, perspective grid, major silhouettes, object placement, and scene proportions."
-      : "- If no structure reference is attached, follow the user's requested framing and avoid arbitrary crop changes.",
-    "- The style reference is the palette authority only: transfer its color temperature, contrast curve, saturation level, atmospheric haze, shadow tint, highlight color, material finish, and render texture.",
-    "- Do not let the style reference override the structure reference's composition, camera, crop, geometry, or scene layout.",
-  ].join("\n");
 }
 
 function renderReferencePicker() {
@@ -2885,23 +3529,17 @@ function renderConfigInputThumbnails(node) {
       ].filter(Boolean)
     : [];
 
-  const sourcePreviewItems = getConnectedInputNodes(node)
-    .flatMap((sourceNode) => {
-      const title = sourceNode.querySelector(".node-title strong")?.textContent || "输入节点";
-      const role = sourceNode.dataset.type === "image" ? sourceNode.dataset.imageRole || inferImageRole(sourceNode) : "";
-      return [
-        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image", role })),
-        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video", role: "" })),
-      ];
-    })
-    .filter((item) => item.src);
-  const imageRolePriority = { structure: 0, editBase: 1, style: 2, general: 3, output: 4 };
-  const orderedPreviewItems = sourcePreviewItems
-    .map((item, index) => ({ ...item, index }))
-    .sort((a, b) => (imageRolePriority[a.role] ?? 5) - (imageRolePriority[b.role] ?? 5) || a.index - b.index);
   const inputs = [
     ...ownVideoAssets,
-    ...orderedPreviewItems,
+    ...getConnectedInputNodes(node)
+    .flatMap((sourceNode) => {
+      const title = sourceNode.querySelector(".node-title strong")?.textContent || "输入节点";
+      return [
+        ...getNodeImageSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "image" })),
+        ...getNodeVideoSources(sourceNode).slice(0, 1).map((src) => ({ title, src, kind: "video" })),
+      ];
+    })
+    .filter((item) => item.src),
   ];
 
   if (!inputs.length) return;
@@ -2952,25 +3590,8 @@ function getIncomingReferenceImages(node) {
   return getConnectedInputNodes(node).map(getNodeImageSource).filter(Boolean);
 }
 
-function getReferenceSourceNodes(node) {
-  const root = node;
-  const visited = new Set([root?.id].filter(Boolean));
-  const ordered = [];
-  const walk = (current, depth = 0) => {
-    if (!current || depth > 4) return;
-    getIncomingNodes(current).forEach((sourceNode) => {
-      if (!sourceNode?.id || visited.has(sourceNode.id)) return;
-      visited.add(sourceNode.id);
-      ordered.push(sourceNode);
-      walk(sourceNode, depth + 1);
-    });
-  };
-  walk(root);
-  return ordered;
-}
-
 function buildPromptWithIncomingText(node, ownPrompt) {
-  const textInputs = getReferenceSourceNodes(node)
+  const textInputs = getConnectedInputNodes(node)
     .filter((sourceNode) => sourceNode.dataset.type === "text")
     .map(getNodeContent)
     .filter(Boolean);
@@ -2978,80 +3599,44 @@ function buildPromptWithIncomingText(node, ownPrompt) {
 }
 
 function collectRoleReferenceImages(node) {
-  const ownRole = node.dataset.imageRole || "output";
-  const ownImages = ownRole === "output" || ownRole === "editBase"
-    ? getNodeImageSources(node)
-    : getNodeUploadedImageSources(node);
-  const ownApiMartImages = ownRole === "output" || ownRole === "editBase"
-    ? getNodeImageSources(node, { preferData: true })
-    : getNodeUploadedImageSources(node, { preferData: true });
-  const incomingNodes = getReferenceSourceNodes(node);
+  const ownImages = getNodeImageSources(node);
+  const incomingNodes = getConnectedInputNodes(node);
   const editBaseImages = [];
   const structureImages = [];
   const styleImages = [];
   const generalImages = [];
-  const apimartEditBaseImages = [];
-  const apimartStructureImages = [];
-  const apimartStyleImages = [];
-  const apimartGeneralImages = [];
   const imageDimensions = {};
-  const roleTitles = {
-    editBase: [],
-    structure: [],
-    style: [],
-    general: [],
-  };
 
-  const rememberDimensions = (url, sourceNode, aliases = []) => {
+  const rememberDimensions = (url, sourceNode) => {
     if (!url || !sourceNode) return;
-    const domDimensions = getPreviewImageDimensions(sourceNode, url) || aliases.map((alias) => getPreviewImageDimensions(sourceNode, alias)).find(Boolean);
+    const domDimensions = getPreviewImageDimensions(sourceNode, url);
     const width = Number(sourceNode.dataset.imageNaturalWidth || sourceNode.dataset.generatedImageNaturalWidth || domDimensions?.width || 0);
     const height = Number(sourceNode.dataset.imageNaturalHeight || sourceNode.dataset.generatedImageNaturalHeight || domDimensions?.height || 0);
-    if (width > 0 && height > 0) {
-      [url, ...aliases].filter(Boolean).forEach((key) => {
-        imageDimensions[key] = { width, height };
-      });
-    }
+    if (width > 0 && height > 0) imageDimensions[url] = { width, height };
   };
 
-  if (ownRole === "editBase" && ownImages.length) {
+  if ((node.dataset.imageRole || "output") === "editBase" && ownImages.length) {
     editBaseImages.push(...ownImages);
-    apimartEditBaseImages.push(...ownApiMartImages);
-    roleTitles.editBase.push(getNodeTitle(node));
-    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
-  } else if (ownRole !== "output" && ownImages.length) {
+    ownImages.forEach((url) => rememberDimensions(url, node));
+  } else if ((node.dataset.imageRole || "output") !== "output" && ownImages.length) {
     structureImages.push(...ownImages);
-    apimartStructureImages.push(...ownApiMartImages);
-    roleTitles.structure.push(getNodeTitle(node));
-    ownImages.forEach((url, index) => rememberDimensions(url, node, [ownApiMartImages[index]]));
+    ownImages.forEach((url) => rememberDimensions(url, node));
   }
 
   incomingNodes.forEach((sourceNode) => {
+    const images = getNodeImageSources(sourceNode).filter(isRemoteImageUrl);
     const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
-    const useGenerated = role === "output" || role === "editBase";
-    const images = (useGenerated ? getNodeImageSources(sourceNode) : getNodeUploadedImageSources(sourceNode)).filter(isRemoteImageUrl);
-    const apiMartImages = (useGenerated ? getNodeImageSources(sourceNode, { preferData: true }) : getNodeUploadedImageSources(sourceNode, { preferData: true })).filter(isImageReferenceValue);
-    images.forEach((url, index) => rememberDimensions(url, sourceNode, [apiMartImages[index]]));
+    images.forEach((url) => rememberDimensions(url, sourceNode));
     if (role === "editBase") {
       editBaseImages.push(...images);
-      apimartEditBaseImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
     } else if (role === "structure") {
       structureImages.push(...images);
-      apimartStructureImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.structure.push(getNodeTitle(sourceNode));
     } else if (role === "style") {
       styleImages.push(...images);
-      apimartStyleImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.style.push(getNodeTitle(sourceNode));
     } else if (role === "output") {
       editBaseImages.push(...images);
-      apimartEditBaseImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.editBase.push(getNodeTitle(sourceNode));
     } else if (role !== "output") {
       generalImages.push(...images);
-      apimartGeneralImages.push(...apiMartImages);
-      if (images.length || apiMartImages.length) roleTitles.general.push(getNodeTitle(sourceNode));
     }
   });
 
@@ -3060,22 +3645,8 @@ function collectRoleReferenceImages(node) {
     structure: uniqueValues(structureImages.filter(isRemoteImageUrl)),
     style: uniqueValues(styleImages.filter(isRemoteImageUrl)),
     general: uniqueValues(generalImages.filter(isRemoteImageUrl)),
-    apimartEditBase: uniqueValues(apimartEditBaseImages.filter(isImageReferenceValue)),
-    apimartStructure: uniqueValues(apimartStructureImages.filter(isImageReferenceValue)),
-    apimartStyle: uniqueValues(apimartStyleImages.filter(isImageReferenceValue)),
-    apimartGeneral: uniqueValues(apimartGeneralImages.filter(isImageReferenceValue)),
     dimensions: imageDimensions,
-    titles: {
-      editBase: uniqueValues(roleTitles.editBase),
-      structure: uniqueValues(roleTitles.structure),
-      style: uniqueValues(roleTitles.style),
-      general: uniqueValues(roleTitles.general),
-    },
   };
-}
-
-function getNodeTitle(node) {
-  return node?.querySelector(".node-title strong")?.textContent || "未命名节点";
 }
 
 function inferImageRole(node) {
@@ -3086,55 +3657,34 @@ function inferImageRole(node) {
   return "general";
 }
 
-function getPreviewImageDimensions(node, url = "") {
-  if (!node) return null;
-  const images = [...node.querySelectorAll(".upload-preview img")];
-  const image = images.find((item) => !url || item.src === url || item.currentSrc === url) || images[0];
-  if (!image?.naturalWidth || !image?.naturalHeight) return null;
-  return { width: image.naturalWidth, height: image.naturalHeight };
+function selectReferenceImagesForMode(mode, roleImages) {
+  return buildReferencePlan(mode, roleImages).images;
 }
 
-function selectReferenceImagesForMode(mode, roleImages, provider = "apimart") {
-  return buildReferencePlan(mode, roleImages, provider).images;
-}
-
-function getProviderRoleImages(roleImages, provider = "apimart") {
-  const normalizedProvider = normalizeImageProvider(provider);
-  if (!["apimart", "aihubmix", "rhart"].includes(normalizedProvider) && !isRayinAiProvider(normalizedProvider)) return roleImages;
-  return {
-    ...roleImages,
-    editBase: roleImages.apimartEditBase?.length ? roleImages.apimartEditBase : roleImages.editBase,
-    structure: roleImages.apimartStructure?.length ? roleImages.apimartStructure : roleImages.structure,
-    style: roleImages.apimartStyle?.length ? roleImages.apimartStyle : roleImages.style,
-    general: roleImages.apimartGeneral?.length ? roleImages.apimartGeneral : roleImages.general,
-  };
-}
-
-function buildReferencePlan(mode, roleImages, provider = "apimart") {
-  const providerImages = getProviderRoleImages(roleImages, provider);
-  const editBase = providerImages.editBase?.[0] || "";
-  const explicitStructure = providerImages.structure[0] || "";
-  const fallbackStructure = providerImages.general[0] || "";
+function buildReferencePlan(mode, roleImages) {
+  const editBase = roleImages.editBase?.[0] || "";
+  const explicitStructure = roleImages.structure[0] || "";
+  const fallbackStructure = roleImages.general[0] || "";
   const structure = mode === "structureStyle"
     ? explicitStructure || fallbackStructure || editBase || ""
     : editBase || explicitStructure || fallbackStructure || "";
   const structureDimensions = roleImages.dimensions?.[structure] || null;
-  const remainingGeneral = structure ? providerImages.general.filter((url) => url !== structure) : providerImages.general;
+  const remainingGeneral = structure ? roleImages.general.filter((url) => url !== structure) : roleImages.general;
 
   if (mode === "structureStyle") {
-    const styles = (providerImages.style.length ? providerImages.style : remainingGeneral)
+    const styles = (roleImages.style.length ? roleImages.style : remainingGeneral)
       .filter((url) => url !== structure)
       .slice(0, 1);
     const generalFallback = structure && styles.length ? [] : remainingGeneral.slice(0, 1);
-    const images = uniqueValues(structure
+    const images = structure
       ? [structure, ...styles, ...generalFallback].filter(Boolean).slice(0, 4)
-      : [...styles, ...generalFallback].filter(Boolean).slice(0, 2));
+      : uniqueValues([...styles, ...generalFallback].filter(Boolean)).slice(0, 2);
     return {
       images,
-      editBaseImages: [],
+      editBaseImages: editBase && editBase === structure ? [editBase] : [],
       structureImages: structure ? [structure] : [],
       styleImages: styles,
-      editBaseCount: 0,
+      editBaseCount: editBase && editBase === structure ? 1 : 0,
       structureCount: structure ? 1 : 0,
       hasExplicitStructure: Boolean(explicitStructure || fallbackStructure || editBase),
       styleCount: styles.length,
@@ -3143,7 +3693,7 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
     };
   }
   if (mode === "strict") {
-    const images = uniqueValues([structure, ...providerImages.structure, ...providerImages.general, ...providerImages.style].filter(Boolean)).slice(0, 1);
+    const images = uniqueValues([structure, ...roleImages.structure, ...roleImages.general, ...roleImages.style].filter(Boolean)).slice(0, 1);
     return {
       images,
       editBaseImages: editBase && images.length ? [editBase] : [],
@@ -3157,7 +3707,7 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
     };
   }
 
-  const styles = uniqueValues([...providerImages.style, ...providerImages.general, ...providerImages.structure]).slice(0, 4);
+  const styles = uniqueValues([...roleImages.style, ...roleImages.general, ...roleImages.structure]).slice(0, 4);
   return {
     images: styles,
     editBaseImages: [],
@@ -3170,142 +3720,23 @@ function buildReferencePlan(mode, roleImages, provider = "apimart") {
   };
 }
 
-function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "structureStyle") {
-  return plan;
-}
-
-async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
-  const normalizedProvider = normalizeImageProvider(provider);
-  const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
-  const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
-  if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
-    return buildSubmissionReferencePlan(plan, provider, mode);
-  }
-
-  const styleSwatches = await Promise.all(
-    plan.styleImages.map((url) => makeStyleReferenceSwatch(url).catch(() => url)),
-  );
-  const nextStyleImages = uniqueValues(styleSwatches.filter(isImageReferenceValue));
-  const nextImages = uniqueValues([
-    ...(plan.editBaseImages || []),
-    ...(plan.structureImages || []),
-    ...nextStyleImages,
-  ]).slice(0, 4);
-
-  return buildSubmissionReferencePlan({
-    ...plan,
-    images: nextImages,
-    styleImages: nextStyleImages,
-    styleCount: nextStyleImages.length,
-    styleSwatchMode: true,
-  }, provider, mode);
-}
-
-function makeStyleReferenceSwatch(src) {
-  return new Promise((resolve, reject) => {
-    if (!src || !isImageReferenceValue(src)) {
-      reject(new Error("Invalid style reference"));
-      return;
-    }
-
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      try {
-        const sampleSize = 24;
-        const outputSize = 512;
-        const sourceCanvas = document.createElement("canvas");
-        const sourceContext = sourceCanvas.getContext("2d");
-        sourceCanvas.width = sampleSize;
-        sourceCanvas.height = sampleSize;
-        sourceContext.drawImage(image, 0, 0, sampleSize, sampleSize);
-        const pixels = sourceContext.getImageData(0, 0, sampleSize, sampleSize).data;
-        const palette = [];
-        let redDominantCount = 0;
-        const step = 4 * 12;
-        for (let index = 0; index < pixels.length; index += step) {
-          const color = [pixels[index], pixels[index + 1], pixels[index + 2]];
-          if (isRedEmissiveColor(color)) redDominantCount += 1;
-          palette.push(color);
-        }
-        const redRatio = palette.length ? redDominantCount / palette.length : 0;
-        const stylePalette = redRatio > 0 && redRatio < 0.35
-          ? palette.filter((color) => !isRedEmissiveColor(color))
-          : palette;
-
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-        canvas.width = outputSize;
-        canvas.height = outputSize;
-        const gradient = context.createLinearGradient(0, 0, outputSize, outputSize);
-        const stops = stylePalette.length ? stylePalette : palette.length ? palette : [[24, 28, 36], [120, 100, 80], [210, 190, 150]];
-        stops.slice(0, 18).forEach((color, index) => {
-          gradient.addColorStop(index / Math.max(1, Math.min(stops.length, 18) - 1), `rgb(${color[0]}, ${color[1]}, ${color[2]})`);
-        });
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, outputSize, outputSize);
-        context.globalAlpha = 0.28;
-        for (let y = 0; y < 4; y += 1) {
-          for (let x = 0; x < 4; x += 1) {
-            const color = stops[(x + y * 4) % stops.length];
-            context.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-            context.fillRect(x * 128, y * 128, 128, 128);
-          }
-        }
-        context.globalAlpha = 1;
-        resolve(canvas.toDataURL("image/jpeg", 0.9));
-      } catch (error) {
-        reject(error);
-      }
-    };
-    image.onerror = () => reject(new Error("Style reference load failed"));
-    image.src = src;
-  });
-}
-
-function isRedEmissiveColor(color) {
-  const [red, green, blue] = color.map((value) => Number(value || 0));
-  const max = Math.max(red, green, blue);
-  const min = Math.min(red, green, blue);
-  const saturation = max ? (max - min) / max : 0;
-  return red > 80 && saturation > 0.32 && red > green * 1.28 && red > blue * 1.12;
-}
-
-function formatReferencePlan(plan) {
-  const parts = [];
-  if (plan.editBaseCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
-  if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
-  if (plan.styleCount) parts.push(plan.styleSwatchMode ? `${plan.styleCount} 张风格色板` : `${plan.styleCount} 张风格图`);
-  if (plan.structureLocked && plan.lockedStyleCount) parts.push(`已启用结构锁，${plan.lockedStyleCount} 张风格图不作为构图输入`);
-  if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
-  if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
-  return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
-}
-
-function formatReferenceSourceTitles(roleImages) {
-  const structure = roleImages?.titles?.structure?.[0] || roleImages?.titles?.editBase?.[0] || "";
-  const style = roleImages?.titles?.style?.[0] || "";
-  const parts = [];
-  if (structure) parts.push(`结构源：${structure}`);
-  if (style) parts.push(`风格源：${style}`);
-  return parts.join("，");
+function getPreviewImageDimensions(node, url = "") {
+  if (!node) return null;
+  const images = [...node.querySelectorAll(".upload-preview img")];
+  const image = images.find((item) => !url || item.src === url || item.currentSrc === url) || images[0];
+  if (!image?.naturalWidth || !image?.naturalHeight) return null;
+  return { width: image.naturalWidth, height: image.naturalHeight };
 }
 
 function buildReferenceBindingPrompt(plan) {
   const imageCount = Array.isArray(plan?.images) ? plan.images.length : 0;
   if (!imageCount) return "";
 
-  const structureCount = Number(plan.structureCount || 0);
-  const styleCount = Number(plan.styleCount || 0);
-  const editBaseCount = Number(plan.editBaseCount || 0);
-  const hasStructure = structureCount > 0 || editBaseCount > 0;
+  const hasStructure = Number(plan.structureCount || 0) > 0 || Number(plan.editBaseCount || 0) > 0;
   const structureSize = plan.structureDimensions?.width && plan.structureDimensions?.height
     ? `${Math.round(plan.structureDimensions.width)}x${Math.round(plan.structureDimensions.height)}`
     : "";
-
-  const lines = [
-    "Reference binding tags:",
-  ];
+  const lines = ["Reference binding tags:"];
 
   if (hasStructure) {
     lines.push(
@@ -3314,86 +3745,47 @@ function buildReferenceBindingPrompt(plan) {
     );
   }
 
-  if (styleCount > 0) {
+  if (Number(plan.styleCount || 0) > 0) {
     const start = hasStructure ? 2 : 1;
-    const end = start + styleCount - 1;
-    const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
+    const end = start + Number(plan.styleCount || 0) - 1;
     lines.push(
-      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
+      `@风格参考图 = input image ${plan.styleCount === 1 ? start : `${start}-${end}`}.`,
       "@风格参考图 controls only palette, color temperature, material color, lighting mood, atmosphere, texture, and render finish.",
-      plan.styleSwatchMode ? "@风格参考图 is a non-spatial color/material swatch." : "",
     );
   }
 
-  if (hasStructure && styleCount > 0) {
+  if (hasStructure && Number(plan.styleCount || 0) > 0) {
     lines.push(
       "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
       "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
-      "Red light rule: red must remain localized to visible lamps, warning glows, signs, or original red materials only. Do not spread red into the overall color temperature, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
     );
   }
 
   return lines.join("\n");
 }
 
+function formatReferencePlan(plan) {
+  const parts = [];
+  if (plan.structureCount) parts.push(`${plan.structureCount} 张结构图`);
+  if (plan.styleCount) parts.push(`${plan.styleCount} 张风格图`);
+  if (plan.editBaseCount && !plan.structureCount) parts.push(`${plan.editBaseCount} 张编辑底图`);
+  if (plan.generalCount) parts.push(`${plan.generalCount} 张普通参考图`);
+  if (!plan.editBaseCount && !plan.structureCount && plan.styleCount) parts.push("无结构图");
+  return parts.length ? `已附带 ${parts.join("、")}` : `已附带 ${plan.images.length} 张参考图`;
+}
+
 function getNodeImageSource(node) {
   return getNodeImageSources(node)[0] || "";
 }
 
-function getNodeImageSources(node, options = {}) {
+function getNodeImageSources(node) {
   if (!node) return [];
-  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
-  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
-  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
-  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
-  const primaryImageData = node.dataset.imageDataInlineUrl || "";
-  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
-  const persistent = [
-    node.dataset.generatedImageUrl,
-    ...parseJsonArray(node.dataset.generatedImageUrls),
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ];
-  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
   return uniqueValues([
     node.dataset.generatedImageUrl,
     ...parseJsonArray(node.dataset.generatedImageUrls),
-    ...uploadedDataUrls,
-    primaryImageData,
-    ...uploadedUrls,
+    ...parseJsonArray(node.dataset.imageUrls),
     node.dataset.imageDataUrl,
-    ...referenceDataUrls,
-    primaryReferenceData,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ].filter(Boolean));
-}
-
-function getNodeUploadedImageSources(node, options = {}) {
-  if (!node) return [];
-  const uploadedUrls = parseJsonArray(node.dataset.imageUrls);
-  const uploadedDataUrls = parseJsonArray(node.dataset.imageDataUrls);
-  const referenceUrls = parseJsonArray(node.dataset.referenceImageUrls);
-  const referenceDataUrls = parseJsonArray(node.dataset.referenceImageDataUrls);
-  const primaryImageData = node.dataset.imageDataInlineUrl || "";
-  const primaryReferenceData = node.dataset.referenceImageDataInlineUrl || "";
-  const persistent = [
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceUrls,
-    node.dataset.referenceImageDataUrl,
-  ];
-  if (!options.preferData) return uniqueValues(persistent.filter(Boolean));
-  return uniqueValues([
-    ...uploadedDataUrls,
-    primaryImageData,
-    ...uploadedUrls,
-    node.dataset.imageDataUrl,
-    ...referenceDataUrls,
-    primaryReferenceData,
-    ...referenceUrls,
+    ...parseJsonArray(node.dataset.referenceImageUrls),
     node.dataset.referenceImageDataUrl,
   ].filter(Boolean));
 }
@@ -3425,14 +3817,6 @@ function isRemoteImageUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
-function isDataImageUrl(value) {
-  return typeof value === "string" && /^data:image\//i.test(value);
-}
-
-function isImageReferenceValue(value) {
-  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
-}
-
 function uniqueValues(values) {
   return [...new Set(values)];
 }
@@ -3445,10 +3829,6 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
-}
-
-function compactImageUrlsForLocalStorage(values, limit = 6) {
-  return uniqueValues(arrayOrEmpty(values).filter((url) => !isDataImageUrl(url))).slice(0, limit);
 }
 
 function parseTextNodeFields(value = "") {
@@ -3520,20 +3900,13 @@ function duplicateNode(node) {
     imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
     apimartChannel: "b",
     fileName: node.dataset.fileName || "",
-    imageNaturalWidth: node.dataset.imageNaturalWidth || "",
-    imageNaturalHeight: node.dataset.imageNaturalHeight || "",
     imageUrls: parseJsonArray(node.dataset.imageUrls),
-    imageDataKey: node.dataset.imageDataKey || "",
-    imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
-    imageDataUrl: isDataImageUrl(node.dataset.imageDataUrl) ? "" : node.dataset.imageDataUrl || "",
+    imageDataUrl: node.dataset.imageDataUrl || "",
     referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
-    referenceImageDataUrl: isDataImageUrl(node.dataset.referenceImageDataUrl) ? "" : node.dataset.referenceImageDataUrl || "",
+    referenceImageDataUrl: node.dataset.referenceImageDataUrl || "",
     referenceFileName: node.dataset.referenceFileName || "",
-    generatedImageUrl: isDataImageUrl(node.dataset.generatedImageUrl) ? "" : node.dataset.generatedImageUrl || "",
-    generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls)),
-    imageGenerationRecords: getImageGenerationRecords(node),
-    generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
-    generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
+    generatedImageUrl: node.dataset.generatedImageUrl || "",
+    generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
     videoUrls: parseJsonArray(node.dataset.videoUrls),
     videoDataUrl: node.dataset.videoDataUrl || "",
     referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
@@ -3605,10 +3978,8 @@ function ungroupFolderNode(folderNode) {
     node.dataset.referenceMode = saved.referenceMode || "structureStyle";
     node.dataset.imageRole = saved.imageRole || "general";
     node.dataset.imageQuality = saved.imageQuality || "high";
+    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
-      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
-      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.apimartChannel = "b";
     if (saved.tone) node.dataset.tone = saved.tone;
     if (Array.isArray(saved.folderNodes)) node.dataset.folderNodes = JSON.stringify(saved.folderNodes);
@@ -3701,16 +4072,18 @@ function exitFolder() {
 
 function saveActiveFolder() {
   if (!activeFolder || !currentProject) return;
-  const root = readCachedProjectData(currentProject, { nodes: [], connections: [], memories: conversationMemories });
+  const root = readJson(projectKey(currentProject), { nodes: [], connections: [], memories: conversationMemories });
   const folder = root.nodes?.find((node) => node.id === activeFolder.id);
   if (!folder) return;
   const data = serializeCanvasData();
   folder.folderNodes = data.nodes;
   folder.folderConnections = data.connections;
   folder.content = `文件夹内包含 ${data.nodes.length} 个节点。`;
-  rememberProjectData(currentProject, root);
-  storeProjectRecord(currentProject, root);
-  writeProjectStub(currentProject);
+  try {
+    localStorage.setItem(projectKey(currentProject), JSON.stringify(root));
+  } catch (error) {
+    console.error("Folder save failed", error);
+  }
 }
 
 function syncFolderUi() {
@@ -3748,7 +4121,7 @@ function runNode(node) {
   }
   status.textContent =
     node.dataset.type === "image"
-      ? `正在提交 ${getImageProviderLabel(node.dataset.imageProvider || "apimart")} ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
+      ? `正在提交 ApiMart ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
       : node.dataset.type === "video"
         ? `正在提交 ApiMart ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || "Seedance2"} 视频项目...`
         : "正在处理文本对话...";
@@ -3854,36 +4227,37 @@ async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
 
 async function runImageGeneration(node) {
   if (imageGenerationControllers.has(node.id)) {
+    const startedAt = Number(node.dataset.imageGenerationStartedAt || 0);
+    if (startedAt && Date.now() - startedAt < 1200) return;
     cancelImageGeneration(node);
     return;
   }
 
   const controller = new AbortController();
   imageGenerationControllers.set(node.id, controller);
+  node.dataset.imageGenerationStartedAt = String(Date.now());
   syncImageSubmitButton(node);
 
   const prompt = buildPromptWithIncomingText(node, node.querySelector(".node-description")?.textContent || "");
-  const generationMemory = buildGenerationMemoryPrompt(node);
   const preview = node.querySelector(".upload-preview");
   const uploadName = node.dataset.fileName || "";
   const status = ensureNodeStatus(node);
   const referenceMode = node.dataset.referenceMode || "structureStyle";
-  const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || "apimart");
-  const selectedModel = getGenerationModelForProvider(selectedProvider, node.dataset.imageModel || imageModelSelect?.value);
+  const selectedModel = normalizeImageModel(node.dataset.imageModel || imageModelSelect?.value || "gpt-image-2-official");
+  const selectedProvider = normalizeImageProvider(node.dataset.imageProvider || imageProviderSelect?.value || inferImageProviderFromModel(selectedModel));
   const roleImages = collectRoleReferenceImages(node);
-  const rawReferencePlan = buildReferencePlan(referenceMode, roleImages, selectedProvider);
-  const referencePlan = await prepareReferencePlanForGeneration(rawReferencePlan, selectedProvider, referenceMode);
+  const referencePlan = buildReferencePlan(referenceMode, roleImages);
   const referenceImages = referencePlan.images;
-  const requestedSize = shouldSendImageSize(selectedModel) ? await resolveGenerationSize(prompt, referencePlan, selectedModel) : "";
+  const requestedSize = selectedModel === "gemini-3-pro-image-preview" ? "" : await resolveGenerationSize(prompt, referencePlan);
   const brokenReferenceCount = [...node.querySelectorAll(".broken-image-placeholder")].length;
   const referenceBindings = buildReferenceBindingPrompt(referencePlan);
-  const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
-    [generationMemory, referenceBindings, prompt].filter(Boolean).join("\n\n"),
+  const enhancedPrompt = sanitizeGenerationPrompt(buildImageEditPrompt(
+    [referenceBindings, prompt].filter(Boolean).join("\n\n"),
     referenceMode,
     roleImages,
     referencePlan,
     node.dataset.imagePurpose || imageOptions.purpose,
-  ), selectedModel, requestedSize, referencePlan));
+  ));
 
   node.classList.add("running");
   status.textContent = brokenReferenceCount
@@ -3893,7 +4267,7 @@ async function runImageGeneration(node) {
     const payload = {
       model: selectedModel,
       prompt: enhancedPrompt,
-      imageName: safeAsciiFileName(uploadName, "image.png"),
+      imageName: uploadName,
       imageDataUrls: referenceImages,
       structureImageUrls: referencePlan.structureImages || [],
       styleImageUrls: referencePlan.styleImages || [],
@@ -3901,7 +4275,7 @@ async function runImageGeneration(node) {
       referenceBindings,
       purpose: node.dataset.imagePurpose || imageOptions.purpose,
       referenceMode: node.dataset.referenceMode || imageOptions.referenceMode,
-      quality: normalizeImageQualityForModel(node.dataset.imageQuality || imageOptions.quality, selectedModel),
+      quality: node.dataset.imageQuality || imageOptions.quality,
       size: requestedSize,
       provider: selectedProvider,
       apimartChannel: "b",
@@ -3925,20 +4299,12 @@ async function runImageGeneration(node) {
       ...getConnectedInputNodes(node).flatMap(getNodeImageSources),
     ].some((value) => value && !isRemoteImageUrl(value));
 
-    const sizeStatus = requestedSize || (referenceImages.length ? "按结构图/自动" : "自动");
-    const sourceStatus = formatReferenceSourceTitles(roleImages);
     status.textContent = referenceImages.length
-      ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，${formatReferencePlan(referencePlan)}${sourceStatus ? `，${sourceStatus}` : ""}，${referenceBindings ? "已绑定 @渲染结构图/@风格参考图，" : ""}尺寸 ${sizeStatus}...`
+      ? `正在提交后端 /api/generate-image，${formatReferencePlan(referencePlan)}，尺寸 ${requestedSize || "自动"}...`
       : hasLocalOnlyReferences
-        ? `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，旧本地图片需重新上传后才能作为参考图...`
-      : `正在提交 ${getImageProviderLabel(selectedProvider)} /api/generate-image，未检测到参考图，尺寸 ${sizeStatus}...`;
-    node.dataset.lastImagePayload = JSON.stringify({
-      ...payload,
-      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
-      structureImageUrls: Array.isArray(payload.structureImageUrls) ? payload.structureImageUrls.map((value) => summarizeImageSource(value)) : [],
-      styleImageUrls: Array.isArray(payload.styleImageUrls) ? payload.styleImageUrls.map((value) => summarizeImageSource(value)) : [],
-      editBaseImageUrls: Array.isArray(payload.editBaseImageUrls) ? payload.editBaseImageUrls.map((value) => summarizeImageSource(value)) : [],
-    });
+        ? "正在提交后端 /api/generate-image，旧本地图片需重新上传后才能作为参考图..."
+      : `正在提交后端 /api/generate-image，未检测到参考图，尺寸 ${requestedSize || "自动"}...`;
+    node.dataset.lastImagePayload = JSON.stringify(payload);
 
     const finalResult = await submitAndPollImageTask(payload, status, preview, node, controller.signal);
     if (!finalResult.imageUrl) {
@@ -3946,59 +4312,28 @@ async function runImageGeneration(node) {
     }
 
     if (preview) {
-      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('a'), {className:'broken-image-placeholder', textContent:'图片链接失效，点开查看原因', href:this.src, target:'_blank', rel:'noreferrer'}))">`;
+      preview.innerHTML = `<img src="${finalResult.imageUrl}" alt="">`;
     }
     node.dataset.generatedImageUrl = finalResult.imageUrl;
     node.dataset.generatedImageUrls = JSON.stringify(addGeneratedImageHistory(node, finalResult.imageUrl));
-    addImageGenerationRecord(node, finalResult.imageUrl, {
-      userPrompt: prompt,
-      referenceBindings,
-      finalPrompt: enhancedPrompt,
-      referencePlan,
-      payload,
-    });
-    getImageDimensions(finalResult.imageUrl).then((dimensions) => {
-      if (!dimensions) return;
-      node.dataset.generatedImageNaturalWidth = String(dimensions.width);
-      node.dataset.generatedImageNaturalHeight = String(dimensions.height);
-      saveCurrentProject({ silent: selectedProvider === "rhart" });
-    });
     renderNodeImagePreview(node);
     status.textContent = "图片生成完成。";
   } catch (error) {
-    if (isAbortError(error)) {
+    if (isAbortError(error) && controller.signal.aborted) {
       status.textContent = "生成已取消，可以修改后重新提交。";
     } else {
       status.textContent = `生成失败：${error instanceof Error ? error.message : "请确认已部署后端并配置 APIMART_API_KEY。"}`;
     }
     if (preview && !preview.innerHTML.trim()) {
-      const message = error instanceof Error ? error.message : String(error || "");
-      const placeholder = /fetch|network|Failed to fetch|后端未连接|Load failed/i.test(message)
-        ? "后端未连接"
-        : "上游返回失败";
-      preview.innerHTML = `<div class="generated-placeholder">${escapeHtml(placeholder)}</div>`;
+      preview.innerHTML = '<div class="generated-placeholder">后端未连接</div>';
     }
   } finally {
     imageGenerationControllers.delete(node.id);
+    delete node.dataset.imageGenerationStartedAt;
     syncImageSubmitButton(node);
     node.classList.remove("running");
-    saveCurrentProject({ silent: selectedProvider === "rhart" });
+    saveCurrentProject();
   }
-}
-
-function buildGenerationMemoryPrompt(node) {
-  const favorites = getImageGenerationRecords(node).filter((record) => record.favorite).slice(0, 3);
-  if (!favorites.length) return "";
-  const lines = favorites.map((record, index) => {
-    const prompt = String(record.userPrompt || record.finalPrompt || "").replace(/\s+/g, " ").slice(0, 360);
-    const meta = [record.provider, record.model, record.referenceSummary].filter(Boolean).join(" / ");
-    return `Favorite ${index + 1}: ${meta}${prompt ? `; prompt direction: ${prompt}` : ""}`;
-  });
-  return [
-    "Quality memory from user-selected excellent previous generations:",
-    ...lines,
-    "Use these favorites as direction for quality, composition discipline, material finish, lighting taste, and style consistency. Do not copy them exactly; keep the current structure reference and current user request authoritative.",
-  ].join("\n");
 }
 
 function exposeImagePromptDebug(node, debug) {
@@ -4085,18 +4420,14 @@ async function pollImageTask(taskId, statusEl, signal, apimartChannel = "b", pro
     lastStatus = result.status || lastStatus;
     if (statusEl) {
       const minutes = Math.floor((attempts * 5) / 60);
-      const endpointHint = result.rayinEndpoint
-        ? "，RayinAI扩展接口"
-        : result.rhartEndpoint
-          ? "，RHarT查询接口"
-          : "";
+      const endpointHint = result.rayinEndpoint ? "，RayinAI扩展接口" : "";
       statusEl.textContent = `生成中：${lastStatus}${endpointHint}，已等待约 ${minutes} 分钟`;
     }
     if (result.imageUrl) {
       return result;
     }
     if (["failed", "error", "cancelled"].includes(lastStatus)) {
-      throw new Error(formatApiError(result, `ApiMart 任务失败：${lastStatus}`));
+      throw new Error(formatApiError(result, `${getImageProviderLabel(provider)} 任务失败：${lastStatus}`));
     }
   }
 
@@ -4116,26 +4447,30 @@ async function submitAndPollImageTask(payload, status, preview, node, signal) {
       imageDataUrls: [],
       imageName: "",
     };
-    node.dataset.lastImagePayload = JSON.stringify({
-      ...saferPayload,
-      imageDataUrls: [],
-    });
+    node.dataset.lastImagePayload = JSON.stringify(saferPayload);
     return submitAndPollImageTaskOnce(saferPayload, status, preview, node, signal);
   }
 }
 
 async function submitAndPollImageTaskOnce(payload, status, preview, node, signal) {
-  let response = await fetchImageGenerationApi(payload, signal);
+  let response = await fetch("/api/generate-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
 
   let result = await readResponseJson(response);
   if (!response.ok && shouldRetryWithSaferPrompt(result)) {
     status.textContent = "提示词触发上游拦截，正在安全改写后重试提交...";
     payload.prompt = makePromptSafer(payload.prompt);
-    node.dataset.lastImagePayload = JSON.stringify({
-      ...payload,
-      imageDataUrls: Array.isArray(payload.imageDataUrls) ? payload.imageDataUrls.map((value) => summarizeImageSource(value)) : [],
+    node.dataset.lastImagePayload = JSON.stringify(payload);
+    response = await fetch("/api/generate-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
     });
-    response = await fetchImageGenerationApi(payload, signal);
     result = await readResponseJson(response);
   }
   if (!response.ok) {
@@ -4145,14 +4480,12 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
     status.textContent = result.provider === "rayinai"
       ? "RayinAI 已直接返回图片。"
       : result.provider === "rhart"
-        ? "RHarT 图片生成完成。"
-        : result.provider === "aihubmix"
-          ? "AIHubMix 图片生成完成。"
+        ? "RHarT G31 图片生成完成。"
         : "图片生成完成。";
     return result;
   }
   if (!result.taskId) {
-    throw new Error(formatApiError(result, "后端没有返回 taskId"));
+    throw new Error("后端没有返回 taskId");
   }
 
   node.dataset.lastImageTaskId = result.taskId;
@@ -4164,23 +4497,11 @@ async function submitAndPollImageTaskOnce(payload, status, preview, node, signal
   return pollImageTask(result.taskId, status, signal, payload.apimartChannel, result.provider);
 }
 
-async function fetchImageGenerationApi(payload, signal) {
-  try {
-    return await fetch("/api/generate-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    });
-  } catch (error) {
-    if (isAbortError(error)) throw error;
-    throw new Error(`前端到 /api/generate-image 连接失败：${error instanceof Error ? error.message : String(error)}。可能是 Vercel 函数超时、部署正在重启，或网络请求被中断。`);
-  }
-}
-
 function cancelImageGeneration(node) {
   const controller = imageGenerationControllers.get(node.id);
   if (!controller) return;
+  const startedAt = Number(node.dataset.imageGenerationStartedAt || 0);
+  if (startedAt && Date.now() - startedAt < 1200) return;
   controller.abort();
   const status = ensureNodeStatus(node);
   status.textContent = "正在取消生成...";
@@ -4528,22 +4849,22 @@ function sanitizeDownloadName(value) {
   return String(value || "download").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 60) || "download";
 }
 
-async function resolveGenerationSize(prompt, referencePlan, model = "") {
-  const explicit = parseExplicitSize(prompt, model);
+async function resolveGenerationSize(prompt, referencePlan) {
+  const explicit = parseExplicitSize(prompt);
   if (explicit) return explicit;
   if (referencePlan?.structureDimensions?.width && referencePlan?.structureDimensions?.height) {
-    return sizeFromDimensions(referencePlan.structureDimensions.width, referencePlan.structureDimensions.height, model);
+    return sizeFromDimensions(referencePlan.structureDimensions.width, referencePlan.structureDimensions.height);
   }
   const structureImage = referencePlan?.images?.[0] || "";
   const dimensions = await getImageDimensions(structureImage);
-  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height, model);
+  if (dimensions) return sizeFromDimensions(dimensions.width, dimensions.height);
   return "";
 }
 
-function parseExplicitSize(prompt, model = "") {
+function parseExplicitSize(prompt) {
   const text = String(prompt || "");
   const sizeMatch = text.match(/(\d{3,5})\s*(?:x|\*|×|X)\s*(\d{3,5})/);
-  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]), model);
+  if (sizeMatch) return normalizeGenerationSize(Number(sizeMatch[1]), Number(sizeMatch[2]));
   const ratioMatch = text.match(/(?:比例|画幅|aspect\s*ratio)?\s*(\d{1,2})\s*[:：]\s*(\d{1,2})/i);
   if (!ratioMatch) return "";
   const width = Number(ratioMatch[1]);
@@ -4567,67 +4888,17 @@ function getImageDimensions(src) {
   });
 }
 
-function getImageFileDimensions(file) {
-  return new Promise((resolve) => {
-    if (!file || !file.type?.startsWith("image/")) {
-      resolve(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-    image.src = url;
-  });
+function sizeFromDimensions(width, height) {
+  return normalizeGenerationSize(width, height);
 }
 
-function sizeFromDimensions(width, height, model = "") {
-  return normalizeGenerationSize(width, height, model);
-}
-
-function normalizeGenerationSize(width, height, model = "") {
+function normalizeGenerationSize(width, height) {
   if (!width || !height) return "";
-  if (isRhartImageModel(model)) return closestRhartAspectRatio(width, height);
   const maxEdge = Math.max(width, height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
   const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
   const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
   return `${nextWidth}x${nextHeight}`;
-}
-
-function closestRhartAspectRatio(width, height) {
-  const ratio = Number(width) / Number(height);
-  if (!Number.isFinite(ratio) || ratio <= 0) return "";
-  const allowed = [
-    ["1:1", 1],
-    ["16:9", 16 / 9],
-    ["9:16", 9 / 16],
-    ["4:3", 4 / 3],
-    ["3:4", 3 / 4],
-    ["3:2", 3 / 2],
-    ["2:3", 2 / 3],
-    ["5:4", 5 / 4],
-    ["4:5", 4 / 5],
-    ["21:9", 21 / 9],
-    ["1:4", 1 / 4],
-    ["4:1", 4],
-    ["1:8", 1 / 8],
-    ["8:1", 8],
-  ];
-  return allowed.reduce((best, item) => {
-    const distance = Math.abs(Math.log(ratio / item[1]));
-    return distance < best.distance ? { value: item[0], distance } : best;
-  }, { value: "16:9", distance: Infinity }).value;
-}
-
-function roundUpToMultiple(value, multiple) {
-  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
 }
 
 async function readResponseJson(response) {
@@ -4647,8 +4918,7 @@ function formatApiError(result, fallback) {
   if (!result) return fallback;
   if (typeof result === "string") return result;
   const message = extractApiErrorMessage(result);
-  const diagnostic = formatApiErrorDiagnostic(result);
-  if (message) return diagnostic ? `${message}（${diagnostic}）` : message;
+  if (message) return message;
   try {
     return JSON.stringify(result);
   } catch {
@@ -4656,59 +4926,15 @@ function formatApiError(result, fallback) {
   }
 }
 
-function formatApiErrorDiagnostic(result) {
-  const request = result?.request;
-  const parts = [];
-  if (request && typeof request === "object") {
-    if (request.rayinEndpoint) parts.push(`endpoint: ${request.rayinEndpoint}`);
-    if (request.rayinResponsesModel) parts.push(`model: ${request.rayinResponsesModel}`);
-    if (request.rayinRequestType) parts.push(`type: ${request.rayinRequestType}`);
-    if (request.rhartEndpoint) parts.push(`endpoint: ${request.rhartEndpoint}`);
-    if (request.rhartKeyHint) parts.push(`key: ${request.rhartKeyHint}`);
-    if (request.upstreamStatus) parts.push(`status: ${request.upstreamStatus}`);
-    if (request.upstreamMessage) parts.push(`upstream: ${String(request.upstreamMessage).slice(0, 160)}`);
-    if (Number.isFinite(Number(request.referenceCount))) parts.push(`refs: ${request.referenceCount}`);
-  }
-  const upstream = result?.upstream;
-  if (upstream && typeof upstream === "object") {
-    if (upstream.errorCode || upstream.code) parts.push(`code: ${upstream.errorCode || upstream.code}`);
-    if (upstream.rhartQueryShape) parts.push(`query: ${upstream.rhartQueryShape}`);
-    if (upstream.rhartEndpoint) parts.push(`endpoint: ${upstream.rhartEndpoint}`);
-    if (Array.isArray(upstream.uploadAttempts) && upstream.uploadAttempts.length) {
-      parts.push(`upload: ${formatUploadAttemptSummary(upstream.uploadAttempts)}`);
-    }
-  }
-  if (Array.isArray(result?.uploadAttempts) && result.uploadAttempts.length) {
-    parts.push(`upload: ${formatUploadAttemptSummary(result.uploadAttempts)}`);
-  }
-  return parts.join("，");
-}
-
-function formatUploadAttemptSummary(attempts) {
-  return attempts.slice(0, 2).map((attempt, index) => {
-    const fields = [`#${index + 1}`];
-    if (attempt.status) fields.push(`status ${attempt.status}`);
-    if (attempt.code !== undefined && attempt.code !== null) fields.push(`code ${attempt.code}`);
-    if (attempt.message) fields.push(String(attempt.message).slice(0, 80));
-    if (attempt.url) fields.push("url ok");
-    if (attempt.filename) fields.push(`filename ${String(attempt.filename).slice(0, 80)}`);
-    if (Array.isArray(attempt.dataKeys) && attempt.dataKeys.length) fields.push(`keys ${attempt.dataKeys.join("|")}`);
-    return fields.join(" / ");
-  }).join("; ");
-}
-
 function extractApiErrorMessage(value, seen = new Set()) {
   if (!value) return "";
   if (typeof value === "string") {
-    if (/Access Denied.*Standard Model API.*Enterprise-Shared API Keys|标准模型API权限|企业级.*共享API Key|Enterprise-Shared API Keys/i.test(value)) {
-      return "RHarT 调用被 RunningHub 拒绝：当前 API Key 没有该接口权限。请确认 RunningHub 后台 key 权限，或确认所选 RHarT 接口已对你的 key 开通。";
-    }
     if (/internal server error|server_error/i.test(value)) return "上游图片生成服务内部错误，请稍后重试，或切换 ApiMart 通道后再试。";
     return value;
   }
   if (typeof value !== "object" || seen.has(value)) return "";
   seen.add(value);
-  const direct = value.errorMessage || value.failedReason || value.promptTips || value.message || value.error || value.detail || value.code || value.errorCode;
+  const direct = value.message || value.error || value.detail || value.code;
   const directMessage = extractApiErrorMessage(direct, seen);
   if (directMessage) return directMessage;
   for (const item of Object.values(value)) {
@@ -4741,10 +4967,8 @@ function makePromptSafer(prompt) {
 
 async function fileToDataUrl(file) {
   if (file.type.startsWith("image/")) {
-    if (file.size <= 1.8 * 1024 * 1024) {
-      return readFileAsDataUrl(file);
-    }
-    return compressImageFile(file, 3.2 * 1024 * 1024);
+    const aligned = await normalizeImageFileForApiMart(file, 3.2 * 1024 * 1024);
+    if (aligned) return aligned;
   }
 
   return readFileAsDataUrl(file);
@@ -4759,37 +4983,94 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function normalizeImageFileForApiMart(file, targetBytes = 3.2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const sourceWidth = image.naturalWidth;
+      const sourceHeight = image.naturalHeight;
+      if (!sourceWidth || !sourceHeight) {
+        resolve(null);
+        return;
+      }
+
+      const needsResize = file.size > targetBytes;
+      const scale = needsResize ? Math.min(1, 3072 / Math.max(sourceWidth, sourceHeight)) : 1;
+      const scaledWidth = Math.max(1, Math.round(sourceWidth * scale));
+      const scaledHeight = Math.max(1, Math.round(sourceHeight * scale));
+      const width = roundUpToMultiple(scaledWidth, 16);
+      const height = roundUpToMultiple(scaledHeight, 16);
+      const needsPadding = width !== sourceWidth || height !== sourceHeight;
+
+      if (!needsResize && !needsPadding && file.size <= 1.8 * 1024 * 1024) {
+        resolve(null);
+        return;
+      }
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      canvas.width = width;
+      canvas.height = height;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, scaledWidth, scaledHeight);
+      if (width > scaledWidth) {
+        context.drawImage(canvas, scaledWidth - 1, 0, 1, scaledHeight, scaledWidth, 0, width - scaledWidth, scaledHeight);
+      }
+      if (height > scaledHeight) {
+        context.drawImage(canvas, 0, scaledHeight - 1, width, 1, 0, scaledHeight, width, height - scaledHeight);
+      }
+
+      const outputType = file.type === "image/png" || /transparency|alpha/i.test(file.name || "") ? "image/png" : "image/jpeg";
+      let output = canvas.toDataURL(outputType, 0.94);
+      if (estimateDataUrlBytes(output) > targetBytes && outputType !== "image/jpeg") {
+        output = canvas.toDataURL("image/jpeg", 0.92);
+      }
+      resolve(output);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("图片预处理失败"));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(Number(value || 0) / multiple) * multiple);
+}
+
 async function uploadImageFile(file) {
-  return uploadMediaFile(file);
+  return uploadApiMartAssetFile(file);
 }
 
 async function uploadMediaFile(file) {
-  const imageDataUrl = await fileToDataUrl(file);
-  const response = await fetch("/api/upload-image", {
+  return uploadApiMartAssetFile(file);
+}
+
+async function uploadApiMartAssetFile(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const response = await fetch("/api/upload-apimart-asset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      fileName: safeAsciiFileName(file.name, file.type.startsWith("video/") ? "media.mp4" : "image.png"),
-      imageDataUrl,
+      fileName: file.name,
+      dataUrl,
+      apimartChannel: "b",
     }),
   });
   const result = await readResponseJson(response);
   if (!response.ok) {
-    const message = formatApiError(result, `HTTP ${response.status}`);
-    if (file.type.startsWith("image/") && isBlobStorageQuotaError(message)) {
-      console.warn("Vercel Blob quota exceeded; using inline image reference instead.", message);
-      return imageDataUrl;
-    }
-    throw new Error(message);
+    throw new Error(formatApiError(result, `HTTP ${response.status}`));
   }
   if (!result.url) {
-    throw new Error("上传接口没有返回图片 URL");
+    throw new Error("APIMart 上传接口没有返回素材 URL");
   }
   return result.url;
-}
-
-function isBlobStorageQuotaError(message) {
-  return /vercel blob|storage quota|quota exceeded|1gb maximum|blob.*quota/i.test(String(message || ""));
 }
 
 function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
@@ -4882,6 +5163,16 @@ function buildImageEditPrompt(
   }
 
   if (hasEditBase) {
+    if (hasStructureReference && mode === "structureStyle") {
+      return [
+      ...baseRules,
+      "Image reference roles:",
+      "- Input image 1 is the structure reference: keep its camera, perspective, layout, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
+      `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, lighting mood, material feel, atmosphere, texture, and finish.`,
+      "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
+      "- User request decides the intended content. Structure decides geometry. Style decides look.",
+      ].join("\n");
+    }
     return [
       ...baseRules,
       "Multimodal edit mode:",
@@ -4907,9 +5198,7 @@ function buildImageEditPrompt(
       "- Input image 1 is the structure reference: keep its camera, perspective, layout, scale, object placement, canvas ratio, local red lights, markings, and inherent object/material colors.",
       `- The next ${Math.max(0, styleCount)} input image(s) are style references: use their palette, color temperature, lighting mood, material feel, atmosphere, texture, and render finish.`,
       "- Keep structure colors local. Do not let structure colors override the global color grade, ambient light, shadows, fog, contrast, or mood from the style references.",
-      "- Red light must stay local: preserve red lamps, warning light spills, signs, and original red markings only where they physically exist. Do not turn the full scene, fog, shadows, walls, floor, or neutral materials reddish unless the style reference is globally red.",
       "- User request decides the intended content. Structure decides geometry. Style decides look.",
-      "- Keep the structure reference's scene, camera, crop, and layout skeleton, but re-render surfaces, lighting, materials, edge definition, and fine details instead of copying pixels.",
       "- Do not copy composition from style references.",
     ].join("\n");
   }
@@ -4944,30 +5233,6 @@ function ensureNodeStatus(node) {
   return status;
 }
 
-function storeImageDataUrlsForNode(node, dataUrls, slotPrefix = "upload") {
-  if (!node || !currentProject) return [];
-  return arrayOrEmpty(dataUrls)
-    .filter(isDataImageUrl)
-    .map((dataUrl, index) => {
-      const key = projectImageKey(currentProject, node.id, `${slotPrefix}-${index}`);
-      storeProjectImage(key, dataUrl);
-      return key;
-    });
-}
-
-function restoreImageDataKeys(node, keys) {
-  const safeKeys = arrayOrEmpty(keys);
-  if (!node || !safeKeys.length) return;
-  Promise.all(safeKeys.map((key) => loadProjectImage(key))).then((values) => {
-    const dataUrls = values.filter(isDataImageUrl);
-    if (!dataUrls.length) return;
-    node.dataset.imageDataUrls = JSON.stringify(dataUrls);
-    node.dataset.imageDataInlineUrl = dataUrls[0];
-    if (!node.dataset.imageDataUrl) node.dataset.imageDataUrl = dataUrls[0];
-    renderNodeImagePreview(node);
-  });
-}
-
 function uploadFilesToImageNode(node, files) {
   const imageFiles = files.filter((file) => file.type.startsWith("image/"));
   if (!node || !imageFiles.length) return;
@@ -4981,32 +5246,24 @@ function uploadFilesToImageNode(node, files) {
   status.textContent = `正在上传 ${imageFiles.length} 张图片...`;
   if (preview) {
     preview.innerHTML = imageFiles.map((file) => `<img src="${URL.createObjectURL(file)}" alt="">`).join("");
+    const firstPreviewImage = preview.querySelector("img");
+    if (firstPreviewImage) {
+      firstPreviewImage.addEventListener("load", () => {
+        if (firstPreviewImage.naturalWidth && firstPreviewImage.naturalHeight) {
+          node.dataset.imageNaturalWidth = String(firstPreviewImage.naturalWidth);
+          node.dataset.imageNaturalHeight = String(firstPreviewImage.naturalHeight);
+          saveCurrentProject();
+        }
+      }, { once: true });
+    }
   }
 
-  getImageFileDimensions(imageFiles[0]).then((dimensions) => {
-    if (!dimensions) return;
-    node.dataset.imageNaturalWidth = String(dimensions.width);
-    node.dataset.imageNaturalHeight = String(dimensions.height);
-    saveCurrentProject();
-  });
-
-  Promise.all([
-    Promise.all(imageFiles.map(uploadImageFile)),
-    Promise.all(imageFiles.map((file) => fileToDataUrl(file))),
-  ])
-    .then(([uploadedUrls, inlineDataUrls]) => {
-      const remoteUrls = uploadedUrls.filter(Boolean);
-      const inlineKeys = storeImageDataUrlsForNode(node, inlineDataUrls, "upload");
-      node.dataset.imageUrls = JSON.stringify(remoteUrls);
-      node.dataset.imageDataUrl = remoteUrls[0] || "";
-      node.dataset.imageDataKeys = JSON.stringify(inlineKeys);
-      node.dataset.imageDataUrls = JSON.stringify(inlineDataUrls);
-      node.dataset.imageDataInlineUrl = inlineDataUrls[0] || "";
+  Promise.all(imageFiles.map(uploadImageFile))
+    .then((uploadedUrls) => {
+      node.dataset.imageUrls = JSON.stringify(uploadedUrls);
+      node.dataset.imageDataUrl = uploadedUrls[0] || "";
       renderNodeImagePreview(node);
-      const remoteCount = remoteUrls.filter(isRemoteImageUrl).length;
-      status.textContent = remoteCount
-        ? `${remoteCount} 张图片已上传并保存。`
-        : `${inlineDataUrls.length} 张图片已作为本地引用使用。`;
+      status.textContent = `${uploadedUrls.length} 张图片已上传并保存。`;
       saveCurrentProject();
     })
     .catch((error) => {
@@ -5039,27 +5296,8 @@ function getVideoFilesFromDataTransfer(dataTransfer) {
   return [...(dataTransfer?.files || [])].filter((file) => file.type.startsWith("video/"));
 }
 
-function askCanvasUploadImageRole() {
-  const choices = [
-    ["general", "普通图"],
-    ["editBase", "编辑底图"],
-    ["structure", "渲染结构图"],
-    ["style", "风格参考图"],
-    ["output", "输出图"],
-  ];
-  const answer = window.prompt(
-    ["选择上传图片角色：", ...choices.map(([, label], index) => `${index + 1}. ${label}`)].join("\n"),
-    "1",
-  );
-  if (answer === null) return "";
-  const trimmed = answer.trim();
-  const index = Number(trimmed);
-  if (Number.isInteger(index) && index >= 1 && index <= choices.length) return choices[index - 1][0];
-  const found = choices.find(([value, label]) => value === trimmed || label === trimmed);
-  return found?.[0] || "general";
-}
-
-function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general") {
+function createImageInputNodeFromDrop(files, clientX, clientY) {
+  const point = clientPointToWorldPoint(clientX, clientY);
   const title = files.length === 1 ? stripFileExtension(files[0].name) : `${files.length} 张上传图片`;
   const node = createNode({
     type: "image",
@@ -5068,23 +5306,13 @@ function createImageInputNodeFromFilesAtPoint(files, point, imageRole = "general
     x: point.x - 129,
     y: point.y - 70,
     fileName: files.length === 1 ? files[0].name : `${files.length} 张图片`,
-    imageRole,
+    imageRole: "general",
     imagePurpose: "自定义",
     referenceMode: "structureStyle",
   });
   selectNode(node);
   uploadFilesToImageNode(node, files);
   saveCurrentProject();
-  return node;
-}
-
-function createImageInputNodeFromDrop(files, clientX, clientY) {
-  const point = clientPointToWorldPoint(clientX, clientY);
-  if (files.length > 1) {
-    createImageNodesFromFilesAtPoint(files, point);
-    return;
-  }
-  createImageInputNodeFromFilesAtPoint(files, point);
 }
 
 function uploadFilesToVideoNode(node, files) {
@@ -5145,19 +5373,6 @@ function clientPointToWorldPoint(clientX, clientY) {
 
 function stripFileExtension(fileName) {
   return String(fileName || "上传图片").replace(/\.[^.]+$/, "") || "上传图片";
-}
-
-function safeAsciiFileName(name, fallback = "file") {
-  const cleaned = String(name || fallback)
-    .normalize("NFKD")
-    .replace(/[^\x20-\x7E]/g, "")
-    .replace(/[/\\?%*:|"<>]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
-  return cleaned || fallback;
 }
 
 function moveNode(node, x, y) {
@@ -5338,7 +5553,7 @@ function updateConnections() {
   });
 }
 
-function saveCurrentProject(options = {}) {
+function saveCurrentProject() {
   if (!currentProject || isRestoring) return;
   if (activeFolder) {
     saveActiveFolder();
@@ -5346,84 +5561,19 @@ function saveCurrentProject(options = {}) {
   }
   const data = serializeCanvasData();
   if (!shouldSaveProjectData(currentProject, data)) return;
-  const saved = writeProjectDataWithFallback(currentProject, data, options);
-  if (!saved) return;
+  try {
+    localStorage.setItem(projectKey(currentProject), JSON.stringify(data));
+  } catch (error) {
+    console.error("Project save failed", error);
+  }
   updateProjectCardThumbnail(currentProject, data);
-}
-
-function writeProjectDataWithFallback(name, data, options = {}) {
-  rememberProjectData(name, data);
-  storeProjectRecord(name, data).then((saved) => {
-    if (!saved) notifyProjectSaveIssue("项目保存失败：IndexedDB 写入失败。请导出备份后刷新重试。", options);
-  });
-  writeProjectStub(name);
-  return true;
-}
-
-function cleanupLocalStorageForProjectSave(activeName) {
-  const removable = [];
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (!key) continue;
-    if (key.endsWith(".backup")) {
-      removable.push(key);
-      continue;
-    }
-    if (key.startsWith("aivideobox.project.v2:") && key !== projectKey(activeName)) {
-      const value = localStorage.getItem(key) || "";
-      if (value.includes("data:image/")) removable.push(key);
-    }
-  }
-  removable.forEach((key) => {
-    try {
-      localStorage.removeItem(key);
-    } catch (error) {
-      console.warn("Failed to remove old localStorage entry", key, error);
-    }
-  });
-}
-
-function slimProjectDataForLocalStorage(data) {
-  return {
-    ...data,
-    nodes: (data.nodes || []).map((node) => ({
-      ...node,
-      imageDataUrl: isDataImageUrl(node.imageDataUrl) ? "" : node.imageDataUrl,
-      imageDataUrls: undefined,
-      imageDataInlineUrl: undefined,
-      referenceImageDataUrl: isDataImageUrl(node.referenceImageDataUrl) ? "" : node.referenceImageDataUrl,
-      referenceImageDataUrls: undefined,
-      referenceImageDataInlineUrl: undefined,
-      generatedImageUrl: isDataImageUrl(node.generatedImageUrl) ? "" : node.generatedImageUrl,
-      generatedImageUrls: compactImageUrlsForLocalStorage(node.generatedImageUrls, 3),
-      imageGenerationRecords: compactImageGenerationRecords(node.imageGenerationRecords, 8),
-      folderNodes: Array.isArray(node.folderNodes) ? slimProjectDataForLocalStorage({ nodes: node.folderNodes }).nodes : node.folderNodes,
-    })),
-  };
-}
-
-function notifyProjectSaveIssue(message, options = {}) {
-  if (options.silent) {
-    console.warn(message);
-    return;
-  }
-  const target = selectedNode || [...canvasContent.querySelectorAll(".node")].at(-1);
-  if (target?.classList.contains("running")) {
-    console.warn(message);
-    return;
-  }
-  if (target) {
-    ensureNodeStatus(target).textContent = message;
-    return;
-  }
-  console.warn(message);
 }
 
 function shouldSaveProjectData(name, nextData) {
   const nextNodeCount = Array.isArray(nextData?.nodes) ? nextData.nodes.length : 0;
   if (nextNodeCount > 0) return true;
-  const existing = readCachedProjectData(name, null);
-  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  const existing = readJson(projectKey(name), null);
+  const backup = readJson(`${projectKey(name)}.backup`, null);
   const existingNodeCount = Array.isArray(existing?.nodes) ? existing.nodes.length : 0;
   const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
   if (existingNodeCount > 0 || backupNodeCount > 0) {
@@ -5477,43 +5627,50 @@ async function makeNodeImagesShareable(node) {
 }
 
 async function uploadDataUrlAsSharedImage(imageDataUrl, fileName) {
-  const response = await fetch("/api/upload-image", {
+  const response = await fetch("/api/upload-apimart-asset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: safeAsciiFileName(fileName, "image.png"), imageDataUrl }),
+    body: JSON.stringify({ fileName, dataUrl: imageDataUrl, apimartChannel: "b" }),
   });
   const result = await readResponseJson(response);
   if (!response.ok || !result.url) throw new Error(formatApiError(result, `HTTP ${response.status}`));
   return result.url;
 }
 
-async function saveSharedProject(code, name, data) {
-  if (!code || !hasProjectNodes(data)) return;
-  const response = await fetch(SHARED_PROJECTS_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      code: normalizeProjectCode(code),
-      name,
-      data: stripLocalImageKeysFromProject(data),
-    }),
-  });
-  if (!response.ok) {
-    const result = await readResponseJson(response);
-    throw new Error(formatApiError(result, `HTTP ${response.status}`));
+async function saveSharedProject(name, data) {
+  if (!hasProjectNodes(data)) return;
+  try {
+    await fetch(SHARED_PROJECTS_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "project", name, data: stripLocalImageKeysFromProject(data) }),
+    });
+  } catch (error) {
+    console.warn("Shared project save failed", error);
   }
 }
 
-async function loadSharedProjectByCode(code) {
-  try {
-    const response = await fetch(`${SHARED_PROJECTS_API}?code=${encodeURIComponent(normalizeProjectCode(code))}`, { cache: "no-store" });
-    const result = await readResponseJson(response);
-    if (!response.ok || !result?.data) return null;
-    return result;
-  } catch (error) {
-    console.warn("Project code load failed", error);
-    return null;
-  }
+async function publishProjectToPlatform(name) {
+  if (!name) return false;
+  const data = readJson(projectKey(name), null);
+  if (!hasProjectNodes(data)) return false;
+  const card = projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`);
+  const code = card?.dataset.code || readProjectCodeForName(name);
+  const shareableData = await ensureSharedProjectImages(name, data);
+  await saveSharedProject(name, shareableData || data);
+  await saveSharedProjectList([
+    {
+      name,
+      date: card?.querySelector(".project-row span")?.textContent || new Date().toLocaleDateString("zh-CN"),
+      code,
+    },
+  ]);
+  return true;
+}
+
+function readProjectCodeForName(name) {
+  const found = Object.entries(readProjectCodeIndex()).find(([, projectName]) => projectName === name);
+  return found?.[0] || "";
 }
 
 function hasProjectNodes(data) {
@@ -5535,7 +5692,13 @@ function stripLocalImageKeysFromNode(node) {
   return clean;
 }
 
-async function deleteSharedProject(name) { return; }
+async function deleteSharedProject(name) {
+  try {
+    await fetch(`${SHARED_PROJECTS_API}?name=${encodeURIComponent(name)}`, { method: "DELETE" });
+  } catch (error) {
+    console.warn("Shared project delete failed", error);
+  }
+}
 
 function serializeCanvasData() {
   const nodes = serializeNodes([...canvasContent.querySelectorAll(".node")]);
@@ -5545,16 +5708,13 @@ function serializeCanvasData() {
 
 function serializeNodes(nodes) {
   return nodes.map((node) => {
-    const imageIsData = isDataImageUrl(node.dataset.imageDataUrl);
+    const imageIsData = node.dataset.imageDataUrl?.startsWith("data:image/");
     const imageDataKey = imageIsData ? projectImageKey(currentProject, node.id, "upload") : "";
-    const referenceIsData = isDataImageUrl(node.dataset.referenceImageDataUrl);
+    const referenceIsData = node.dataset.referenceImageDataUrl?.startsWith("data:image/");
     const referenceImageDataKey = referenceIsData ? projectImageKey(currentProject, node.id, "reference") : "";
-    const generatedIsData = isDataImageUrl(node.dataset.generatedImageUrl);
-    const generatedImageDataKey = generatedIsData ? projectImageKey(currentProject, node.id, "generated") : "";
 
     if (imageDataKey) storeProjectImage(imageDataKey, node.dataset.imageDataUrl);
     if (referenceImageDataKey) storeProjectImage(referenceImageDataKey, node.dataset.referenceImageDataUrl);
-    if (generatedImageDataKey) storeProjectImage(generatedImageDataKey, node.dataset.generatedImageUrl);
 
     return {
       id: node.id,
@@ -5564,28 +5724,21 @@ function serializeNodes(nodes) {
       content: getNodeContent(node),
       imagePurpose: node.dataset.imagePurpose || "自定义",
       referenceMode: node.dataset.referenceMode || "structureStyle",
-    imageRole: node.dataset.imageRole || "general",
-    imageQuality: node.dataset.imageQuality || "high",
-    imageModel: node.dataset.imageModel || "gpt-image-2-official",
-    imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
-    apimartChannel: "b",
+      imageRole: node.dataset.imageRole || "general",
+      imageQuality: node.dataset.imageQuality || "high",
+      imageModel: node.dataset.imageModel || "gpt-image-2-official",
+      imageProvider: normalizeImageProvider(node.dataset.imageProvider || "apimart"),
+      apimartChannel: "b",
       fileName: node.dataset.fileName || "",
-      imageNaturalWidth: node.dataset.imageNaturalWidth || "",
-      imageNaturalHeight: node.dataset.imageNaturalHeight || "",
       imageUrls: parseJsonArray(node.dataset.imageUrls),
-      imageDataKeys: parseJsonArray(node.dataset.imageDataKeys),
       imageDataKey,
       imageDataUrl: imageDataKey ? "" : node.dataset.imageDataUrl || "",
       referenceImageUrls: parseJsonArray(node.dataset.referenceImageUrls),
       referenceImageDataKey,
       referenceImageDataUrl: referenceImageDataKey ? "" : node.dataset.referenceImageDataUrl || "",
       referenceFileName: node.dataset.referenceFileName || "",
-      generatedImageDataKey,
-      generatedImageUrl: generatedImageDataKey ? "" : node.dataset.generatedImageUrl || "",
-      generatedImageUrls: compactImageUrlsForLocalStorage(parseJsonArray(node.dataset.generatedImageUrls), 6),
-      imageGenerationRecords: compactImageGenerationRecords(getImageGenerationRecords(node)),
-      generatedImageNaturalWidth: node.dataset.generatedImageNaturalWidth || "",
-      generatedImageNaturalHeight: node.dataset.generatedImageNaturalHeight || "",
+      generatedImageUrl: node.dataset.generatedImageUrl || "",
+      generatedImageUrls: parseJsonArray(node.dataset.generatedImageUrls),
       videoUrls: parseJsonArray(node.dataset.videoUrls),
       videoDataUrl: node.dataset.videoDataUrl || "",
       referenceVideoUrls: parseJsonArray(node.dataset.referenceVideoUrls),
@@ -5629,27 +5782,48 @@ function restoreProject(name) {
   loadGlobalMemories();
   renderConversationMemories();
   restoreCanvasData(data);
+  loadSharedProject(name);
 }
 
 function readProjectDataWithBackup(name) {
-  const data = readCachedProjectData(name, { nodes: [], connections: [], memories: [] });
-  const backup = projectDataCache.get(`${name}::backup`) || readJson(`${projectKey(name)}.backup`, null);
+  const data = readJson(projectKey(name), { nodes: [], connections: [], memories: [] });
+  const backup = readJson(`${projectKey(name)}.backup`, null);
   const dataNodeCount = Array.isArray(data?.nodes) ? data.nodes.length : 0;
   const backupNodeCount = Array.isArray(backup?.nodes) ? backup.nodes.length : 0;
   if (dataNodeCount === 0 && backupNodeCount > 0) {
-    rememberProjectData(name, backup);
-    storeProjectRecord(name, backup);
-    writeProjectStub(name);
-    console.warn(`Restored ${name} from local backup`);
+    try {
+      localStorage.setItem(projectKey(name), JSON.stringify(backup));
+      console.warn(`Restored ${name} from local backup`);
+    } catch (error) {
+      console.warn("Project backup restore save failed", error);
+    }
     return backup;
   }
   return data;
 }
 
-async function loadSharedProject(name) { return; }
+async function loadSharedProject(name) {
+  try {
+    const response = await fetch(`${SHARED_PROJECTS_API}?name=${encodeURIComponent(name)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    const data = result.data;
+    if (!data || !Array.isArray(data.nodes)) return;
+    if (!shouldUseSharedProjectData(name, data)) return;
+    localStorage.setItem(projectKey(name), JSON.stringify(data));
+    updateProjectCardThumbnail(name, data);
+    if (currentProject !== name || activeFolder) return;
+    clearCanvas();
+    restoreCanvasData(data);
+    syncFolderUi();
+    refreshConnectionsSoon();
+  } catch (error) {
+    console.warn("Shared project load failed", error);
+  }
+}
 
 function shouldUseSharedProjectData(name, sharedData) {
-  const localData = readCachedProjectData(name, null);
+  const localData = readJson(projectKey(name), null);
   const localNodeCount = Array.isArray(localData?.nodes) ? localData.nodes.length : 0;
   const sharedNodeCount = Array.isArray(sharedData?.nodes) ? sharedData.nodes.length : 0;
   if (localNodeCount > 0 && sharedNodeCount < localNodeCount) {
@@ -5661,8 +5835,11 @@ function shouldUseSharedProjectData(name, sharedData) {
 
 function backupProjectData(name, data) {
   if (!name || !data || !Array.isArray(data.nodes) || !data.nodes.length) return;
-  projectDataCache.set(`${name}::backup`, data);
-  storeProjectRecord(name, data, PROJECT_BACKUP_STORE_NAME);
+  try {
+    localStorage.setItem(`${projectKey(name)}.backup`, JSON.stringify(data));
+  } catch (error) {
+    console.warn("Project backup failed", error);
+  }
 }
 
 function restoreCanvasData(data) {
@@ -5684,47 +5861,17 @@ function restoreCanvasData(data) {
     delete node.dataset.imageRatio;
     delete node.dataset.imageResolution;
     node.dataset.imageQuality = saved.imageQuality || "high";
+    node.dataset.imageModel = normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.imageProvider = normalizeImageProvider(saved.imageProvider || "apimart");
-    node.dataset.imageModel = node.dataset.imageProvider === "rhart"
-      ? normalizeRhartImageModel(saved.imageModel || "rhart-image-n-g31-flash/image-to-image")
-      : normalizeImageModel(saved.imageModel || "gpt-image-2-official");
     node.dataset.apimartChannel = "b";
     if (saved.fileName) node.dataset.fileName = saved.fileName;
-    if (saved.imageNaturalWidth) node.dataset.imageNaturalWidth = saved.imageNaturalWidth;
-    if (saved.imageNaturalHeight) node.dataset.imageNaturalHeight = saved.imageNaturalHeight;
     if (Array.isArray(saved.imageUrls)) node.dataset.imageUrls = JSON.stringify(saved.imageUrls);
-    if (Array.isArray(saved.imageDataKeys)) {
-      node.dataset.imageDataKeys = JSON.stringify(saved.imageDataKeys);
-      restoreImageDataKeys(node, saved.imageDataKeys);
-    }
     if (saved.imageDataUrl) node.dataset.imageDataUrl = saved.imageDataUrl;
-    if (Array.isArray(saved.imageDataUrls)) {
-      const safeInlineUrls = saved.imageDataUrls.filter(isDataImageUrl);
-      if (safeInlineUrls.length) {
-        node.dataset.imageDataUrls = JSON.stringify(safeInlineUrls);
-        node.dataset.imageDataInlineUrl = safeInlineUrls[0];
-        const storedKeys = storeImageDataUrlsForNode(node, safeInlineUrls, "upload");
-        if (storedKeys.length) node.dataset.imageDataKeys = JSON.stringify(storedKeys);
-      }
-    }
-    if (saved.imageDataInlineUrl && isDataImageUrl(saved.imageDataInlineUrl)) node.dataset.imageDataInlineUrl = saved.imageDataInlineUrl;
     if (Array.isArray(saved.referenceImageUrls)) node.dataset.referenceImageUrls = JSON.stringify(saved.referenceImageUrls);
     if (saved.referenceImageDataUrl) node.dataset.referenceImageDataUrl = saved.referenceImageDataUrl;
-    if (Array.isArray(saved.referenceImageDataUrls)) node.dataset.referenceImageDataUrls = JSON.stringify(saved.referenceImageDataUrls);
-    if (saved.referenceImageDataInlineUrl) node.dataset.referenceImageDataInlineUrl = saved.referenceImageDataInlineUrl;
     if (saved.referenceFileName) node.dataset.referenceFileName = saved.referenceFileName;
     if (saved.generatedImageUrl) node.dataset.generatedImageUrl = saved.generatedImageUrl;
-    if (saved.generatedImageDataKey) {
-      loadProjectImage(saved.generatedImageDataKey).then((value) => {
-        if (!value) return;
-        node.dataset.generatedImageUrl = value;
-        renderNodeImagePreview(node);
-      });
-    }
-    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(compactImageUrlsForLocalStorage(saved.generatedImageUrls));
-    if (Array.isArray(saved.imageGenerationRecords)) node.dataset.imageGenerationRecords = JSON.stringify(compactImageGenerationRecords(saved.imageGenerationRecords));
-    if (saved.generatedImageNaturalWidth) node.dataset.generatedImageNaturalWidth = saved.generatedImageNaturalWidth;
-    if (saved.generatedImageNaturalHeight) node.dataset.generatedImageNaturalHeight = saved.generatedImageNaturalHeight;
+    if (Array.isArray(saved.generatedImageUrls)) node.dataset.generatedImageUrls = JSON.stringify(saved.generatedImageUrls);
     if (Array.isArray(saved.videoUrls)) node.dataset.videoUrls = JSON.stringify(saved.videoUrls);
     if (saved.videoDataUrl) node.dataset.videoDataUrl = saved.videoDataUrl;
     if (Array.isArray(saved.referenceVideoUrls)) node.dataset.referenceVideoUrls = JSON.stringify(saved.referenceVideoUrls);
@@ -5933,12 +6080,18 @@ function showMenu(menu, x, y) {
 function hideMenus() {
   canvasContextMenu.classList.remove("show");
   nodeContextMenu.classList.remove("show");
+  assetContextMenu?.classList.remove("show");
+  document.querySelector("#templateContextMenu")?.classList.remove("show");
   imageUploadContextMenu?.classList.remove("show");
   portConnectionContextMenu?.classList.remove("show");
   canvasContextMenu.setAttribute("aria-hidden", "true");
   nodeContextMenu.setAttribute("aria-hidden", "true");
+  assetContextMenu?.setAttribute("aria-hidden", "true");
+  document.querySelector("#templateContextMenu")?.setAttribute("aria-hidden", "true");
   imageUploadContextMenu?.setAttribute("aria-hidden", "true");
   portConnectionContextMenu?.setAttribute("aria-hidden", "true");
+  contextAssetId = "";
+  contextTemplateId = "";
   contextUploadNode = null;
   contextPort = null;
 }
@@ -6015,89 +6168,6 @@ function projectKey(name) {
 
 function projectImageKey(projectName, nodeId, slot) {
   return `${projectName}::${nodeId}::${slot}`;
-}
-
-function openProjectDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(PROJECT_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(PROJECT_STORE_NAME)) db.createObjectStore(PROJECT_STORE_NAME);
-      if (!db.objectStoreNames.contains(PROJECT_BACKUP_STORE_NAME)) db.createObjectStore(PROJECT_BACKUP_STORE_NAME);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function storeProjectRecord(name, data, storeName = PROJECT_STORE_NAME) {
-  if (!name || !data) return false;
-  try {
-    const db = await openProjectDb();
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, "readwrite");
-      transaction.objectStore(storeName).put(data, name);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    });
-    db.close();
-    return true;
-  } catch (error) {
-    console.error("Project IndexedDB save failed", error);
-    return false;
-  }
-}
-
-async function loadProjectRecord(name, storeName = PROJECT_STORE_NAME) {
-  if (!name) return null;
-  try {
-    const db = await openProjectDb();
-    const value = await new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, "readonly");
-      const request = transaction.objectStore(storeName).get(name);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return value;
-  } catch (error) {
-    console.error("Project IndexedDB load failed", error);
-    return null;
-  }
-}
-
-async function deleteProjectRecord(name) {
-  if (!name) return;
-  try {
-    const db = await openProjectDb();
-    await Promise.all([PROJECT_STORE_NAME, PROJECT_BACKUP_STORE_NAME].map((storeName) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, "readwrite");
-      transaction.objectStore(storeName).delete(name);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    })));
-    db.close();
-  } catch (error) {
-    console.error("Project IndexedDB delete failed", error);
-  }
-}
-
-function rememberProjectData(name, data) {
-  if (!name || !data) return data;
-  projectDataCache.set(name, data);
-  return data;
-}
-
-function readCachedProjectData(name, fallback = null) {
-  return projectDataCache.get(name) || readJson(projectKey(name), fallback);
-}
-
-function writeProjectStub(name) {
-  try {
-    localStorage.setItem(projectKey(name), JSON.stringify({ nodes: [], connections: [], storedInIndexedDB: true }));
-  } catch (error) {
-    console.warn("Project stub save failed", error);
-  }
 }
 
 function openImageDb() {
@@ -6209,7 +6279,12 @@ window.aivideoboxRestoreBackups = function aivideoboxRestoreBackups() {
 window.aivideoboxExportFullBackup = async function aivideoboxExportFullBackup() {
   const local = Object.fromEntries(
     Object.keys(localStorage)
-      .filter((key) => key.startsWith("aivideobox.project.v2:") || key === PROJECT_LIST_KEY)
+      .filter((key) =>
+        key.startsWith("aivideobox.project.v2:") ||
+        key === PROJECT_LIST_KEY ||
+        key === GLOBAL_MEMORY_KEY ||
+        key === LOCAL_ASSETS_KEY ||
+        key === TEMPLATE_LIBRARY_KEY)
       .map((key) => [key, localStorage.getItem(key)]),
   );
   const images = await exportImageDb();
@@ -6363,9 +6438,10 @@ function escapeHtml(value = "") {
   });
 }
 
-ensureImageProviderOptions();
 loadImageOptions();
+loadGlobalMemories();
+loadTemplates();
 loadProjectList();
+renderAssetsPage();
+renderTemplatesPage();
 showPage("home");
-startSharedProjectAutoRefresh();
-
