@@ -116,6 +116,26 @@ function getRayinAiBaseUrl(route = "bunana") {
   return normalized || RAYINAI_DEFAULT_BASE;
 }
 
+function getRayinAiBaseUrls(route = "bunana") {
+  const primary = getRayinAiBaseUrl(route);
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_FALLBACK_BASE_URLS || "https://code-bak.rayinai.com,https://code1.rayinai.com")
+    .split(/[,\s;]+/)
+    .map((value) => normalizeRayinBaseUrl(value))
+    .filter(Boolean);
+  return uniqueValues([primary, ...configured]);
+}
+
+function normalizeRayinBaseUrl(value) {
+  const withoutName = sanitizeHeaderValue(value || "").replace(/^(?:RAYINAI(?:_[A-Z]+)?_BASE_URL)\s*=\s*/i, "");
+  const normalized = withoutName
+    .replace(/\/v1\/responses\/?$/i, "")
+    .replace(/\/responses\/?$/i, "")
+    .replace(/\/v1\/?$/i, "")
+    .replace(/\/+$/, "");
+  if (!normalized || isLegacyRayinAiBaseUrl(normalized)) return "";
+  return normalized;
+}
+
 function isLegacyRayinAiBaseUrl(value) {
   return /^(?:https?:\/\/)?(?:www\.)?240423\.xyz(?:[/:?#]|$)/i.test(String(value || "").trim());
 }
@@ -1473,36 +1493,36 @@ async function getRayinTask(apiKey, taskId, route = "bunana") {
 
 async function submitRayinImageTask(apiKey, submitBody) {
   const rayinRoute = normalizeRayinRoute(submitBody.rayin_route || submitBody.model);
-  const baseUrl = getRayinAiBaseUrl(rayinRoute);
-  const baseHeaders = {
-    Authorization: `Bearer ${apiKey}`,
-    Accept: "*/*",
-    Host: new URL(baseUrl).host,
-    Connection: "keep-alive",
-  };
-  const jsonHeaders = {
-    ...baseHeaders,
-    "Content-Type": "application/json",
-  };
   const imageBody = {
     ...submitBody,
     model: normalizeRayinModel(submitBody.model),
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
-  const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = [];
-  for (const model of models) {
-    const responsesAttempt = {
-      url: `${baseUrl}/v1/responses`,
-      body: buildRayinResponsesBody(rayinImageBody, model),
-      type: "responses",
-    };
-    attempts.push(responsesAttempt);
+  for (const baseUrl of getRayinAiBaseUrls(rayinRoute)) {
+    for (const model of models) {
+      attempts.push({
+        url: `${baseUrl}/v1/responses`,
+        body: buildRayinResponsesBody(rayinImageBody, model),
+        type: "responses",
+        baseUrl,
+      });
+    }
   }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
   for (const attempt of attempts) {
+    const baseHeaders = {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "*/*",
+      Host: new URL(attempt.baseUrl).host,
+      Connection: "keep-alive",
+    };
+    const jsonHeaders = {
+      ...baseHeaders,
+      "Content-Type": "application/json",
+    };
     const { response, payload } = await fetchRayinWithRetry(
       attempt.url,
       attempt.multipart ? baseHeaders : jsonHeaders,
@@ -1535,7 +1555,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
     const hasNextRayinAttempt = attempts.indexOf(attempt) < attempts.length - 1;
     const canTryNextRayinModel = hasNextRayinAttempt && [400, 404, 422].includes(response.status);
-    const canFallbackToNextRayinEndpoint = false;
+    const canFallbackToNextRayinEndpoint = hasNextRayinAttempt && ([502, 503, 504, 524].includes(response.status) || retryableRayinMessage);
     if (!canTryNextRayinModel && !canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
   }
 
