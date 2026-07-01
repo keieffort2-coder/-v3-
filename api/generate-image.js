@@ -73,16 +73,16 @@ function getRayinAiKeyId(route = "bunana") {
 }
 
 function getRayinAiResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
+  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
 }
 
 function getRayinAiResponsesModels() {
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-image-2");
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODELS || process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
   const models = configured
     .split(/[,\s;]+/)
     .map((value) => value.trim())
     .filter(Boolean);
-  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-image-2"];
+  return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
 }
 
 function getRayinAiRetryAttempts() {
@@ -1497,52 +1497,12 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const models = getRayinAiResponsesModels();
   const attempts = [];
   for (const model of models) {
-    const editsAttempt = hasReferences
-      ? {
-          url: `${baseUrl}/v1/images/edits`,
-          body: await buildRayinImagesEditForm(rayinImageBody, model),
-          debugBody: buildRayinImagesEditDebugBody(rayinImageBody, model),
-          type: "images-edits",
-          multipart: true,
-        }
-      : null;
     const responsesAttempt = {
       url: `${baseUrl}/v1/responses`,
       body: buildRayinResponsesBody(rayinImageBody, model),
       type: "responses",
     };
-    const imagesAttempt = {
-      url: `${baseUrl}/v1/images/generations`,
-      body: buildRayinImagesBody(rayinImageBody, model, { minimal: true }),
-      type: "images-web-like",
-    };
-    const compatImagesAttempt = {
-      url: `${baseUrl}/v1/images/generations`,
-      body: buildRayinImagesBody(rayinImageBody, model),
-      type: "images",
-    };
-    if (rayinRoute !== "bunana" && getRayinRoutePath(rayinRoute)) {
-      const routePath = getRayinRoutePath(rayinRoute);
-      const routeUrl = buildRayinRouteUrl(baseUrl, rayinRoute, hasReferences ? "/v1/images/edits" : "/v1/images/generations");
-      const routeBody = hasReferences
-        ? await buildRayinImagesEditForm(rayinImageBody, model)
-        : buildRayinImagesBody(rayinImageBody, model, { minimal: true });
-      attempts.push({
-        url: routeUrl,
-        body: routeBody,
-        debugBody: hasReferences ? buildRayinImagesEditDebugBody(rayinImageBody, model) : routeBody,
-        type: `route-${rayinRoute}`,
-        multipart: hasReferences,
-        route: rayinRoute,
-        configuredPath: routePath || "",
-      });
-    } else if (hasStructureStyleReferences) {
-      attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
-    } else if (hasReferences) {
-      attempts.push(...[editsAttempt, responsesAttempt, imagesAttempt, compatImagesAttempt].filter(Boolean));
-    } else {
-      attempts.push(imagesAttempt, responsesAttempt, compatImagesAttempt);
-    }
+    attempts.push(responsesAttempt);
   }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
@@ -1577,7 +1537,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    const canFallbackToNextRayinEndpoint = ["images-edits", "responses"].includes(attempt.type) && [400, 404, 405, 415, 422, 524].includes(response.status);
+    const canFallbackToNextRayinEndpoint = false;
     if (!canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
   }
 
@@ -1771,20 +1731,10 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
     content.push({ type: "input_text", text: getRayinReferenceLabel(submitBody, url, index) });
     content.push({ type: "input_image", image_url: url });
   });
-  const body = {
+  return {
     model,
-    tools: [{
-      type: "image_generation",
-      quality: submitBody.quality || "auto",
-      size: submitBody.size || "auto",
-      output_format: submitBody.output_format || "png",
-    }],
     input: [{ type: "message", role: "user", content }],
-    quality: submitBody.quality || "auto",
-    size: submitBody.size || "auto",
-    output_format: submitBody.output_format || "png",
   };
-  return body;
 }
 
 async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesModel()) {
