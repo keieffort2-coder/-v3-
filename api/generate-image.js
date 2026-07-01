@@ -385,7 +385,6 @@ module.exports = async function handler(req, res) {
       size,
       provider,
     });
-
     if (preferredProvider === "aihubmix") {
       const aiHubMixSubmitBody = buildAiHubMixSubmitBody(requestContext);
       const aiHubMixResult = await submitAiHubMixImageTask(aiHubMixKey, aiHubMixSubmitBody);
@@ -480,35 +479,33 @@ module.exports = async function handler(req, res) {
         return;
       }
 
-      if (!apiKey || preferredProvider === "rayinai") {
-        const rayinEndpoint = rayinResult.payload?.rayinEndpoint || rayinResult.payload?.endpoint || "";
-        res.status(rayinResult.status || 502).json({
-          error: "RayinAI submit failed",
-          message: formatUpstreamError(rayinResult.payload),
-          upstream: rayinResult.payload,
-          request: {
-            rayinResponsesModel: rayinResult.payload?.rayinRequest?.model || getRayinAiResponsesModel(),
-            rayinRequestType: rayinResult.payload?.rayinRequest?.type || "",
-            size: rayinSubmitBody.size,
-            quality: rayinSubmitBody.quality,
-            output_format: rayinSubmitBody.output_format,
-            rayinEndpoint,
-            rayinBaseUrl: getRayinAiBaseUrl(rayinSubmitBody.rayin_route),
-            rayinApiKeyConfigured: Boolean(rayinAiKey),
-            rayinRoute: rayinSubmitBody.rayin_route,
-            referenceCount: rayinSubmitBody.image_urls?.length || 0,
-            upstreamStatus: rayinResult.status || "",
-            upstreamMessage: findMessage(rayinResult.payload),
-          },
-        });
-        return;
-      }
+      const rayinEndpoint = rayinResult.payload?.rayinEndpoint || rayinResult.payload?.endpoint || "";
+      res.status(rayinResult.status || 502).json({
+        error: "RayinAI submit failed",
+        message: formatUpstreamError(rayinResult.payload),
+        upstream: rayinResult.payload,
+        request: {
+          rayinResponsesModel: rayinResult.payload?.rayinRequest?.model || getRayinAiResponsesModel(),
+          rayinRequestType: rayinResult.payload?.rayinRequest?.type || "",
+          size: rayinSubmitBody.size,
+          quality: rayinSubmitBody.quality,
+          output_format: rayinSubmitBody.output_format,
+          rayinEndpoint,
+          rayinBaseUrl: getRayinAiBaseUrl(rayinSubmitBody.rayin_route),
+          rayinApiKeyConfigured: Boolean(rayinAiKey),
+          rayinRoute: rayinSubmitBody.rayin_route,
+          referenceCount: rayinSubmitBody.image_urls?.length || 0,
+          upstreamStatus: rayinResult.status || "",
+          upstreamMessage: findMessage(rayinResult.payload),
+        },
+      });
+      return;
     }
 
     if (!apiKey) {
       res.status(500).json({
         error: "APIMART_API_KEY_2 is not configured",
-        message: "RayinAI did not return a usable image, and APIMART_API_KEY_2 is not configured for fallback.",
+        message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
     }
