@@ -1165,7 +1165,7 @@ function formatUpstreamError(payload) {
       : "上游图片生成服务内部错误，请稍后重试或切换通道。";
   }
   if (/RayinAI structure-style references unsupported/i.test(message)) {
-    return "RayinAI 公开 API 当前无法稳定处理“结构图 + 风格图”双参考图，请改用单结构图生成、分两步生成，或切换到更稳定的图生图通道。";
+    return "RayinAI 多参考图请求失败：请查看 endpoint、model、refs 和 upstream 详情。";
   }
   return message || "Image generation request failed.";
 }
@@ -1498,10 +1498,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const hasReferences = Array.isArray(rayinImageBody.image_urls) && rayinImageBody.image_urls.length > 0;
-  const hasStructureStyleReferences = Array.isArray(rayinImageBody.structure_image_urls)
-    && rayinImageBody.structure_image_urls.length > 0
-    && Array.isArray(rayinImageBody.style_image_urls)
-    && rayinImageBody.style_image_urls.length > 0;
   const models = getRayinAiResponsesModels();
   const attempts = [];
   for (const model of models) {
@@ -1552,10 +1548,6 @@ async function submitRayinImageTask(apiKey, submitBody) {
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
-    if (hasStructureStyleReferences) {
-      last.payload.message = last.payload.message || "RayinAI structure-style references unsupported";
-      last.payload.reason = last.payload.reason || "RayinAI public API did not return a reliable structure/style reference edit result.";
-    }
   }
   return last;
 }
@@ -1609,6 +1601,12 @@ function getRayinRetryDelay(attempt) {
 }
 
 function getRayinAttemptReferenceCount(body) {
+  if (Array.isArray(body?.input)) {
+    return body.input.reduce((total, message) => {
+      const content = Array.isArray(message?.content) ? message.content : [];
+      return total + content.filter((item) => item?.type === "input_image").length;
+    }, 0);
+  }
   if (Array.isArray(body?.input_images)) {
     return body.input_images.reduce((total, group) => total + (Array.isArray(group) ? group.length : 1), 0);
   }
@@ -1618,6 +1616,20 @@ function getRayinAttemptReferenceCount(body) {
 }
 
 function getRayinAttemptInputRoles(body) {
+  if (Array.isArray(body?.input)) {
+    return body.input.flatMap((message) => {
+      const content = Array.isArray(message?.content) ? message.content : [];
+      return content
+        .filter((item) => item?.type === "input_text" && /^Input image \d+:/i.test(String(item?.text || "")))
+        .map((item) => {
+          const text = String(item.text || "");
+          if (/STRUCTURE/i.test(text)) return "structure";
+          if (/STYLE/i.test(text)) return "style";
+          if (/EDIT BASE/i.test(text)) return "edit_base";
+          return "reference";
+        });
+    });
+  }
   if (Array.isArray(body?.input_images)) {
     return body.input_images.map((_, index) => {
       if (index === 0) return "structure";
@@ -1720,15 +1732,18 @@ function uniqueArray(values) {
 }
 
 function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel()) {
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
+  const imageUrls = getRayinOrderedImageUrls(submitBody);
+  const styleUrls = getRayinStyleUrls(submitBody);
   const prompt = imageUrls.length
     ? [
         "You must use the attached input images as visual references.",
         "Reference roles are strict and must not be swapped.",
         "STRUCTURE reference controls scene content, architecture, camera, layout, perspective, scale, object placement, crop, and canvas ratio.",
-        "STYLE reference controls only palette, color temperature, brushwork, material finish, lighting mood, atmosphere, texture quality, and render style.",
-        "Do not copy the STYLE reference composition, objects, camera, perspective, or scene layout.",
-        "Do not let the STYLE reference replace or reinterpret the STRUCTURE reference content.",
+        styleUrls.length
+          ? "STYLE reference controls only palette, color temperature, brushwork, material finish, lighting mood, atmosphere, texture quality, and render style."
+          : "",
+        styleUrls.length ? "Do not copy the STYLE reference composition, objects, camera, perspective, or scene layout." : "",
+        styleUrls.length ? "Do not let the STYLE reference replace or reinterpret the STRUCTURE reference content." : "",
         "Do not create an unrelated scene.",
         "Generate the final image and return the resulting image URL or base64 image data when available.",
         submitBody.prompt,
