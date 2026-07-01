@@ -73,7 +73,7 @@ function getRayinAiKeyId(route = "bunana") {
 }
 
 function getRayinAiResponsesModel() {
-  return sanitizeHeaderValue(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
+  return normalizeRayinResponsesModel(process.env.RAYINAI_RESPONSES_MODEL || "gpt-5.4");
 }
 
 function getRayinAiResponsesModels() {
@@ -81,8 +81,16 @@ function getRayinAiResponsesModels() {
   const models = configured
     .split(/[,\s;]+/)
     .map((value) => value.trim())
+    .map(normalizeRayinResponsesModel)
     .filter(Boolean);
   return uniqueValues(models).length ? uniqueValues(models) : ["gpt-5.4"];
+}
+
+function normalizeRayinResponsesModel(model) {
+  const value = sanitizeHeaderValue(model || "").trim();
+  if (!value) return "gpt-5.4";
+  if (/^gpt-image-2(?:-official)?$/i.test(value)) return "gpt-5.4";
+  return value;
 }
 
 function getRayinAiRetryAttempts() {
