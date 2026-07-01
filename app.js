@@ -148,6 +148,7 @@ let imageOptions = {
 let isRestoring = false;
 let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
 const projectDataCache = new Map();
+let pendingDimensionSaveTimer = null;
 
 connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
 ensureMemoryUi();
@@ -2198,13 +2199,19 @@ function bindPreviewDimensionCapture(node, preview) {
     const capture = () => {
       if (!image.naturalWidth || !image.naturalHeight) return;
       if (node.dataset.generatedImageUrl && image.src === node.dataset.generatedImageUrl) {
+        const sameSize = node.dataset.generatedImageNaturalWidth === String(image.naturalWidth)
+          && node.dataset.generatedImageNaturalHeight === String(image.naturalHeight);
+        if (sameSize) return;
         node.dataset.generatedImageNaturalWidth = String(image.naturalWidth);
         node.dataset.generatedImageNaturalHeight = String(image.naturalHeight);
       } else {
+        const sameSize = node.dataset.imageNaturalWidth === String(image.naturalWidth)
+          && node.dataset.imageNaturalHeight === String(image.naturalHeight);
+        if (sameSize) return;
         node.dataset.imageNaturalWidth = String(image.naturalWidth);
         node.dataset.imageNaturalHeight = String(image.naturalHeight);
       }
-      saveCurrentProject();
+      scheduleDimensionSave();
     };
     if (image.complete) {
       capture();
@@ -2212,6 +2219,14 @@ function bindPreviewDimensionCapture(node, preview) {
       image.addEventListener("load", capture, { once: true });
     }
   });
+}
+
+function scheduleDimensionSave() {
+  clearTimeout(pendingDimensionSaveTimer);
+  pendingDimensionSaveTimer = setTimeout(() => {
+    pendingDimensionSaveTimer = null;
+    saveCurrentProject({ silent: true });
+  }, 900);
 }
 
 function renderNodeVideoPreview(node) {
@@ -2320,11 +2335,12 @@ function renderImageGenerationRecords(records) {
     .map((record) => {
       const rawId = String(record.id || record.imageUrl || "");
       const id = escapeHtml(rawId);
+      const imageUrl = escapeHtml(record.imageUrl || "");
       const prompt = escapeHtml(record.userPrompt || record.finalPrompt || "");
       const meta = escapeHtml([record.provider, record.model, record.referenceSummary].filter(Boolean).join(" / "));
       return `
         <div class="generation-record ${record.favorite ? "favorite" : ""}">
-          <img src="${record.imageUrl}" alt="">
+          <img data-src="${imageUrl}" alt="" loading="lazy">
           <button class="generation-favorite-button" type="button" data-generation-favorite="${id}">${record.favorite ? "已优选" : "优选"}</button>
           <small>${meta || "生成记录"}</small>
           ${prompt ? `<p>${prompt}</p>` : ""}
@@ -2376,6 +2392,7 @@ function toggleOutputHistory(node) {
   if (wasOpen) return;
   const isOpen = popover.classList.toggle("show");
   popover.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  if (isOpen) hydrateOutputHistoryImages(popover);
 }
 
 function closeOutputHistoryPopovers() {
@@ -2383,6 +2400,16 @@ function closeOutputHistoryPopovers() {
     popover.classList.remove("show");
     popover.setAttribute("aria-hidden", "true");
   });
+}
+
+function hydrateOutputHistoryImages(popover) {
+  popover.querySelectorAll("img[data-src]").forEach((image) => {
+    const src = image.dataset.src;
+    if (!src) return;
+    image.src = src;
+    image.removeAttribute("data-src");
+  });
+  refreshConnectionsAfterImages(popover);
 }
 
 function refreshConnectionsAfterImages(scope) {
