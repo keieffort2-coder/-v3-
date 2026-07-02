@@ -92,9 +92,9 @@ function getRayinAiRetryAttempts() {
 }
 
 function getRayinFetchTimeoutMs() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "60000"));
-  if (!Number.isFinite(value)) return 60000;
-  return Math.min(90000, Math.max(8000, Math.floor(value)));
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "180000"));
+  if (!Number.isFinite(value)) return 180000;
+  return Math.min(300000, Math.max(8000, Math.floor(value)));
 }
 
 function getRayinAiBaseUrl(route = "bunana") {
@@ -118,7 +118,7 @@ function getRayinAiBaseUrl(route = "bunana") {
 
 function getRayinAiBaseUrls(route = "bunana") {
   const primary = getRayinAiBaseUrl(route);
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_FALLBACK_BASE_URLS || "https://code-bak.rayinai.com,https://code1.rayinai.com,https://code2.rayinai.com")
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_FALLBACK_BASE_URLS || "https://code-bak.rayinai.com,https://code1.rayinai.com")
     .split(/[,\s;]+/)
     .map((value) => normalizeRayinBaseUrl(value))
     .filter(Boolean);
