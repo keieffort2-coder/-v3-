@@ -1496,16 +1496,29 @@ async function submitRayinImageTask(apiKey, submitBody) {
   };
   const rayinImageBody = normalizeRayinImageBody(imageBody);
   const models = getRayinAiResponsesModels();
+  const referenceImages = getRayinOrderedImageUrls(rayinImageBody).slice(0, 16);
+  const hasReferenceImages = referenceImages.length > 0;
   const attempts = [];
   for (const baseUrl of getRayinAiBaseUrls(rayinRoute)) {
     for (const model of models) {
-      attempts.push({
-        url: `${baseUrl}/v1/images/generations`,
-        body: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
-        debugBody: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
-        type: "images-generations",
-        baseUrl,
-      });
+      if (hasReferenceImages) {
+        attempts.push({
+          url: `${baseUrl}/v1/images/edits`,
+          body: await buildRayinImagesEditForm(rayinImageBody, model),
+          debugBody: buildRayinImagesEditDebugBody(rayinImageBody, model),
+          type: "images-edits",
+          baseUrl,
+          multipart: true,
+        });
+      } else {
+        attempts.push({
+          url: `${baseUrl}/v1/images/generations`,
+          body: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
+          debugBody: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
+          type: "images-generations",
+          baseUrl,
+        });
+      }
     }
   }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
@@ -1774,7 +1787,8 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
 }
 
 function buildRayinOpenAiImagesGenerationBody(submitBody, model = getRayinAiResponsesModel()) {
-  return {
+  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
+  const body = {
     model,
     prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
     size: submitBody.size || "2048x1152",
@@ -1783,6 +1797,12 @@ function buildRayinOpenAiImagesGenerationBody(submitBody, model = getRayinAiResp
     moderation: "low",
     stream: true,
   };
+  if (images.length) {
+    body.image_urls = images;
+    body.images = images.map((url) => ({ image_url: url }));
+    body.input_images = images.map(toRayinTaskInputImage);
+  }
+  return body;
 }
 
 function buildRayinOpenAiImagesDebugBody(submitBody, model = getRayinAiResponsesModel()) {
@@ -1803,12 +1823,11 @@ async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesM
   const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
   form.set("model", model);
   form.set("prompt", buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length));
-  form.set("n", String(submitBody.n || 1));
-  form.set("size", submitBody.size || "auto");
-  form.set("quality", submitBody.quality || "auto");
-  form.set("output_format", submitBody.output_format || "png");
-  form.set("provider", "gpt");
-  form.set("operation", images.length ? "edit" : "generation");
+  form.set("size", submitBody.size || "2048x1152");
+  form.set("quality", "low");
+  form.set("output_format", "jpeg");
+  form.set("input_fidelity", "high");
+  form.set("stream", "true");
   for (let index = 0; index < images.length; index += 1) {
     const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
     form.append(images.length > 1 ? "image[]" : "image", blob, filename);
@@ -1821,9 +1840,11 @@ function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesMo
   return {
     model,
     prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
-    size: submitBody.size || "auto",
-    quality: submitBody.quality || "auto",
-    output_format: submitBody.output_format || "png",
+    size: submitBody.size || "2048x1152",
+    quality: "low",
+    output_format: "jpeg",
+    input_fidelity: "high",
+    stream: true,
     image_urls: images,
     input_images: images.map(toRayinTaskInputImage),
     inputs: buildRayinRoleInputs(submitBody, images),
