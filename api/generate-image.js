@@ -86,14 +86,14 @@ function getRayinAiResponsesModels() {
 }
 
 function getRayinAiRetryAttempts() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "2"));
-  if (!Number.isFinite(value)) return 2;
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_RETRY_ATTEMPTS || "1"));
+  if (!Number.isFinite(value)) return 1;
   return Math.min(4, Math.max(1, Math.floor(value)));
 }
 
 function getRayinFetchTimeoutMs() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "45000"));
-  if (!Number.isFinite(value)) return 45000;
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "15000"));
+  if (!Number.isFinite(value)) return 15000;
   return Math.min(90000, Math.max(8000, Math.floor(value)));
 }
 
@@ -1559,6 +1559,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
   if (last?.payload && typeof last.payload === "object" && !Array.isArray(last.payload)) {
     last.payload.endpoint = attempts[attempts.length - 1]?.url;
     last.payload.status = last.status;
+    last.payload.attemptedEndpoints = attempts.map((attempt) => attempt.url);
   }
   return last;
 }
