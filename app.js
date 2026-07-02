@@ -3176,6 +3176,10 @@ function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "struct
 
 async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
   const normalizedProvider = normalizeImageProvider(provider);
+  if (isRayinAiProvider(normalizedProvider)) {
+    return compressReferencePlanForProvider(plan, provider, 1.8 * 1024 * 1024);
+  }
+
   const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
   const hasStyle = Array.isArray(plan?.styleImages) && plan.styleImages.length > 0;
   if (normalizedProvider !== "apimart" || mode !== "structureStyle" || !hasStructure || !hasStyle) {
@@ -3199,6 +3203,35 @@ async function prepareReferencePlanForGeneration(plan, provider = "apimart", mod
     styleCount: nextStyleImages.length,
     styleSwatchMode: true,
   }, provider, mode);
+}
+
+async function compressReferencePlanForProvider(plan, provider = "apimart", targetBytes = 1.8 * 1024 * 1024) {
+  const next = buildSubmissionReferencePlan(plan, provider);
+  const sourceToCompressed = new Map();
+  const compressList = async (values = []) => Promise.all(
+    arrayOrEmpty(values).map(async (value) => {
+      if (!isImageReferenceValue(value)) return value;
+      if (!sourceToCompressed.has(value)) {
+        sourceToCompressed.set(value, compressImageReference(value, targetBytes).catch(() => value));
+      }
+      return sourceToCompressed.get(value);
+    }),
+  );
+
+  const images = uniqueValues(await compressList(next.images || []));
+  const structureImages = uniqueValues(await compressList(next.structureImages || []));
+  const styleImages = uniqueValues(await compressList(next.styleImages || []));
+  const editBaseImages = uniqueValues(await compressList(next.editBaseImages || []));
+
+  return buildSubmissionReferencePlan({
+    ...next,
+    images,
+    structureImages,
+    styleImages,
+    editBaseImages,
+    structureCount: structureImages.length || next.structureCount || 0,
+    styleCount: styleImages.length || next.styleCount || 0,
+  }, provider);
 }
 
 function makeStyleReferenceSwatch(src) {
@@ -4843,6 +4876,54 @@ function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
     };
 
     image.src = objectUrl;
+  });
+}
+
+function compressImageReference(src, targetBytes = 1.8 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    if (!src || !isImageReferenceValue(src)) {
+      reject(new Error("Invalid image reference"));
+      return;
+    }
+
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        const sourceMaxSide = Math.max(image.naturalWidth, image.naturalHeight);
+        const candidates = [
+          { maxSide: 1600, quality: 0.86 },
+          { maxSide: 1400, quality: 0.82 },
+          { maxSide: 1200, quality: 0.78 },
+          { maxSide: 1024, quality: 0.74 },
+          { maxSide: 896, quality: 0.7 },
+        ];
+
+        let best = "";
+        for (const candidate of candidates) {
+          const scale = Math.min(1, candidate.maxSide / sourceMaxSide);
+          const width = Math.max(1, Math.round(image.naturalWidth * scale));
+          const height = Math.max(1, Math.round(image.naturalHeight * scale));
+          canvas.width = width;
+          canvas.height = height;
+          context.clearRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+          const output = canvas.toDataURL("image/jpeg", candidate.quality);
+          best = output;
+          if (estimateDataUrlBytes(output) <= targetBytes) {
+            resolve(output);
+            return;
+          }
+        }
+        resolve(best || src);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = () => reject(new Error("参考图压缩失败"));
+    image.src = src;
   });
 }
 
