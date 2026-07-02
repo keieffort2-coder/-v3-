@@ -92,8 +92,8 @@ function getRayinAiRetryAttempts() {
 }
 
 function getRayinFetchTimeoutMs() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "30000"));
-  if (!Number.isFinite(value)) return 30000;
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "60000"));
+  if (!Number.isFinite(value)) return 60000;
   return Math.min(90000, Math.max(8000, Math.floor(value)));
 }
 
@@ -1502,7 +1502,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
       attempts.push({
         url: `${baseUrl}/v1/images/generations`,
         body: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
-        debugBody: buildRayinOpenAiImagesDebugBody(rayinImageBody, model),
+        debugBody: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
         type: "images-generations",
         baseUrl,
       });
@@ -1774,15 +1774,15 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
 }
 
 function buildRayinOpenAiImagesGenerationBody(submitBody, model = getRayinAiResponsesModel()) {
-  const body = {
+  return {
     model,
     prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
-    n: 1,
-    output_format: submitBody.output_format || "png",
+    size: submitBody.size || "2048x1152",
+    quality: "low",
+    output_format: "jpeg",
+    moderation: "low",
+    stream: true,
   };
-  if (submitBody.size) body.size = submitBody.size;
-  if (submitBody.quality) body.quality = submitBody.quality;
-  return body;
 }
 
 function buildRayinOpenAiImagesDebugBody(submitBody, model = getRayinAiResponsesModel()) {
