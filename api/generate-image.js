@@ -92,8 +92,8 @@ function getRayinAiRetryAttempts() {
 }
 
 function getRayinFetchTimeoutMs() {
-  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "15000"));
-  if (!Number.isFinite(value)) return 15000;
+  const value = Number(sanitizeHeaderValue(process.env.RAYINAI_FETCH_TIMEOUT_MS || "30000"));
+  if (!Number.isFinite(value)) return 30000;
   return Math.min(90000, Math.max(8000, Math.floor(value)));
 }
 
