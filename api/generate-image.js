@@ -1498,27 +1498,32 @@ async function submitRayinImageTask(apiKey, submitBody) {
   const models = getRayinAiResponsesModels();
   const referenceImages = getRayinOrderedImageUrls(rayinImageBody).slice(0, 16);
   const hasReferenceImages = referenceImages.length > 0;
+  if (!hasReferenceImages) {
+    return {
+      ok: false,
+      status: 400,
+      payload: {
+        error: "RayinAI image edit requires at least one reference image",
+        message: "RayinAI 当前按 OpenAI Images Edits 图生图格式提交，请先上传至少一张参考图。",
+        rayinRequest: {
+          model: models[0] || getRayinAiResponsesModel(),
+          type: "images-edits",
+          referenceCount: 0,
+        },
+      },
+    };
+  }
   const attempts = [];
   for (const baseUrl of getRayinAiBaseUrls(rayinRoute)) {
     for (const model of models) {
-      if (hasReferenceImages) {
-        attempts.push({
-          url: `${baseUrl}/v1/images/edits`,
-          body: await buildRayinImagesEditForm(rayinImageBody, model),
-          debugBody: buildRayinImagesEditDebugBody(rayinImageBody, model),
-          type: "images-edits",
-          baseUrl,
-          multipart: true,
-        });
-      } else {
-        attempts.push({
-          url: `${baseUrl}/v1/images/generations`,
-          body: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
-          debugBody: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
-          type: "images-generations",
-          baseUrl,
-        });
-      }
+      attempts.push({
+        url: `${baseUrl}/v1/images/edits`,
+        body: await buildRayinImagesEditForm(rayinImageBody, model),
+        debugBody: buildRayinImagesEditDebugBody(rayinImageBody, model),
+        type: "images-edits",
+        baseUrl,
+        multipart: true,
+      });
     }
   }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
@@ -1827,7 +1832,6 @@ async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesM
   form.set("quality", "low");
   form.set("output_format", "jpeg");
   form.set("input_fidelity", "high");
-  form.set("stream", "true");
   for (let index = 0; index < images.length; index += 1) {
     const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
     form.append(images.length > 1 ? "image[]" : "image", blob, filename);
@@ -1844,7 +1848,7 @@ function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesMo
     quality: "low",
     output_format: "jpeg",
     input_fidelity: "high",
-    stream: true,
+    stream: false,
     image_urls: images,
     input_images: images.map(toRayinTaskInputImage),
     inputs: buildRayinRoleInputs(submitBody, images),
