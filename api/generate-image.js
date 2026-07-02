@@ -2051,8 +2051,40 @@ async function readJson(response) {
   try {
     return JSON.parse(text);
   } catch {
+    const eventPayload = parseEventStreamPayload(text);
+    if (eventPayload) return eventPayload;
     return { raw: text };
   }
+}
+
+function parseEventStreamPayload(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const events = [];
+  let currentEvent = "";
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      currentEvent = line.slice(6).trim();
+      continue;
+    }
+    if (!line.startsWith("data:")) continue;
+    const rawData = line.slice(5).trim();
+    if (!rawData || rawData === "[DONE]") continue;
+    try {
+      const data = JSON.parse(rawData);
+      events.push({ event: currentEvent || data.type || "", data });
+    } catch {
+      events.push({ event: currentEvent || "", data: rawData });
+    }
+  }
+  if (!events.length) return null;
+  const imageEvent = [...events].reverse().find((item) => extractResultUrl(item.data));
+  const lastEvent = events[events.length - 1];
+  return {
+    event: imageEvent?.event || lastEvent.event || "event_stream",
+    data: imageEvent?.data || lastEvent.data,
+    events,
+    raw: text.slice(0, 2000),
+  };
 }
 
 function extractTaskId(payload) {
@@ -2261,7 +2293,7 @@ function normalizeImageValue(value) {
   if (/^data:image\//i.test(value)) return value;
   if (/^https?:\/\//i.test(value)) return value;
   if (/^[A-Za-z0-9+/=]+$/.test(value) && value.length > 500) {
-    return `data:image/png;base64,${value}`;
+    return `data:image/jpeg;base64,${value}`;
   }
   return null;
 }
