@@ -118,7 +118,7 @@ function getRayinAiBaseUrl(route = "bunana") {
 
 function getRayinAiBaseUrls(route = "bunana") {
   const primary = getRayinAiBaseUrl(route);
-  const configured = sanitizeHeaderValue(process.env.RAYINAI_FALLBACK_BASE_URLS || "https://code-bak.rayinai.com,https://code1.rayinai.com")
+  const configured = sanitizeHeaderValue(process.env.RAYINAI_FALLBACK_BASE_URLS || "https://code-bak.rayinai.com,https://code1.rayinai.com,https://code2.rayinai.com")
     .split(/[,\s;]+/)
     .map((value) => normalizeRayinBaseUrl(value))
     .filter(Boolean);
