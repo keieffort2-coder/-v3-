@@ -1500,9 +1500,10 @@ async function submitRayinImageTask(apiKey, submitBody) {
   for (const baseUrl of getRayinAiBaseUrls(rayinRoute)) {
     for (const model of models) {
       attempts.push({
-        url: `${baseUrl}/v1/responses`,
-        body: buildRayinResponsesBody(rayinImageBody, model),
-        type: "responses",
+        url: `${baseUrl}/v1/images/generations`,
+        body: buildRayinOpenAiImagesGenerationBody(rayinImageBody, model),
+        debugBody: buildRayinOpenAiImagesDebugBody(rayinImageBody, model),
+        type: "images-generations",
         baseUrl,
       });
     }
@@ -1769,6 +1770,31 @@ function buildRayinResponsesBody(submitBody, model = getRayinAiResponsesModel())
   return {
     model,
     input: [{ type: "message", role: "user", content }],
+  };
+}
+
+function buildRayinOpenAiImagesGenerationBody(submitBody, model = getRayinAiResponsesModel()) {
+  const body = {
+    model,
+    prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
+    n: 1,
+    output_format: submitBody.output_format || "png",
+  };
+  if (submitBody.size) body.size = submitBody.size;
+  if (submitBody.quality) body.quality = submitBody.quality;
+  return body;
+}
+
+function buildRayinOpenAiImagesDebugBody(submitBody, model = getRayinAiResponsesModel()) {
+  const images = getRayinOrderedImageUrls(submitBody).slice(0, 16);
+  return {
+    model,
+    prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
+    size: submitBody.size || "",
+    quality: submitBody.quality || "",
+    output_format: submitBody.output_format || "png",
+    image_urls: images,
+    inputs: buildRayinRoleInputs(submitBody, images),
   };
 }
 
