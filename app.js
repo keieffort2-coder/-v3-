@@ -4350,6 +4350,7 @@ function collectGeneratedImageExportItems() {
   const seen = new Set();
   nodes.forEach((node) => {
     const title = node.querySelector(".node-title strong")?.textContent || "图片节点";
+    const structureTitle = getExportStructureSourceTitle(node) || title;
     const history = getGeneratedImageHistory(node);
     history.forEach((url, index) => {
       if (!url || seen.has(url)) return;
@@ -4360,18 +4361,44 @@ function collectGeneratedImageExportItems() {
         title,
         index,
         latest: index === 0,
-        fileName: buildExportImageFileName(title, index, url, items.length),
+        fileName: buildExportImageFileName(structureTitle, index, items.length),
       });
     });
   });
   return items;
 }
 
-function buildExportImageFileName(title, index, url, globalIndex = 0) {
-  const safeTitle = String(title || "image").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 48) || "image";
-  const extension = getImageExtensionFromUrl(url);
-  const suffix = index === 0 ? "latest" : `history-${index + 1}`;
-  return `${String(globalIndex + 1).padStart(3, "0")}-${safeTitle}-${suffix}.${extension}`;
+function getExportStructureSourceTitle(node) {
+  const sources = getReferenceSourceNodes(node);
+  const preferred = sources.find((sourceNode) => {
+    if (sourceNode?.dataset.type !== "image") return false;
+    const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
+    return role === "structure" && getNodeUploadedImageSources(sourceNode).length;
+  }) || sources.find((sourceNode) => {
+    if (sourceNode?.dataset.type !== "image") return false;
+    const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
+    return role === "editBase" && getNodeImageSources(sourceNode).length;
+  }) || sources.find((sourceNode) => {
+    if (sourceNode?.dataset.type !== "image") return false;
+    const role = sourceNode.dataset.imageRole || inferImageRole(sourceNode);
+    return role === "structure" || role === "editBase";
+  });
+  return preferred ? getNodeTitle(preferred) : "";
+}
+
+function buildExportImageFileName(title, index, globalIndex = 0) {
+  const cleanTitle = cleanStructureExportTitle(title);
+  const safeTitle = String(cleanTitle || "image").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_").slice(0, 48) || "image";
+  const suffix = index === 0 ? "转绘" : `转绘-${index + 1}`;
+  return `${String(globalIndex + 1).padStart(3, "0")}-${safeTitle}-${suffix}.png`;
+}
+
+function cleanStructureExportTitle(title) {
+  return String(title || "")
+    .replace(/(?:^|[_\-\s])(?:渲染)?结构图(?:$|[_\-\s])/g, "_")
+    .replace(/(?:^|[_\-\s])(?:风格参考图|编辑底图|输出图|图片节点)(?:$|[_\-\s])/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_\-\s]+|[_\-\s]+$/g, "");
 }
 
 function getImageExtensionFromUrl(url) {
@@ -4468,7 +4495,10 @@ async function exportSelectedGeneratedImages(modal) {
       const bytes = await readImageAsPngUint8Array(item.url);
       files.push({ name: forcePngFileName(item.fileName), bytes });
     } catch (error) {
-      failures.push(item);
+      failures.push({
+        ...item,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   if (!files.length) {
@@ -4486,7 +4516,10 @@ async function exportSelectedGeneratedImages(modal) {
     const zipBlob = createZipBlob(files);
     downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
   }
-  if (status) status.textContent = failures.length ? `已保存 ${files.length} 张 PNG，${failures.length} 张读取失败` : `已保存 ${files.length} 张 PNG`;
+  if (status) {
+    const detail = failures[0] ? `：${failures[0].title || "图片"} ${failures[0].reason || ""}` : "";
+    status.textContent = failures.length ? `已保存 ${files.length} 张 PNG，${failures.length} 张读取失败${detail}` : `已保存 ${files.length} 张 PNG`;
+  }
   if (button) button.disabled = false;
 }
 
@@ -4532,14 +4565,23 @@ async function readImageAsUint8Array(url) {
 }
 
 async function readImageAsPngUint8Array(url) {
-  const pngDataUrl = await convertImageUrlToPngDataUrl(url);
-  if (!isDataImageUrl(pngDataUrl)) return readImageAsUint8Array(url);
-  return readImageAsUint8Array(pngDataUrl);
+  const direct = await convertImageUrlToPngDataUrl(url);
+  if (isDataImageUrl(direct)) return readImageAsUint8Array(direct);
+  const proxyUrl = buildImageReadProxyUrl(url);
+  const proxied = await convertImageUrlToPngDataUrl(proxyUrl);
+  if (isDataImageUrl(proxied)) return readImageAsUint8Array(proxied);
+  throw new Error("图片无法读取或转换为 PNG");
 }
 
 function forcePngFileName(fileName) {
   const base = sanitizeDownloadName(String(fileName || "generated-image").replace(/\.[^.]+$/, ""));
   return `${base || "generated-image"}.png`;
+}
+
+function buildImageReadProxyUrl(url) {
+  if (!url || isDataImageUrl(url)) return url;
+  const query = new URLSearchParams({ image: "1", src: url });
+  return `/api/generate-image?${query.toString()}`;
 }
 
 function createZipBlob(files) {
