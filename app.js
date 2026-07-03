@@ -33,6 +33,7 @@ const addLocalReference = document.querySelector("#addLocalReference");
 const imageViewer = document.querySelector("#imageViewer");
 const imageViewerImg = document.querySelector("#imageViewerImg");
 const closeImageViewer = document.querySelector("#closeImageViewer");
+const saveImageViewerPng = document.querySelector("#saveImageViewerPng");
 const arrangeCanvasNodes = document.querySelector("#arrangeCanvasNodes");
 const createFolderFromSelection = document.querySelector("#createFolderFromSelection");
 const exitFolderCanvas = document.querySelector("#exitFolderCanvas");
@@ -465,6 +466,7 @@ document.addEventListener("click", (event) => {
 });
 
 closeImageViewer?.addEventListener("click", closeImageViewerPanel);
+saveImageViewerPng?.addEventListener("click", saveCurrentViewerImageAsPng);
 
 exportGeneratedImagesButton?.addEventListener("click", () => {
   openGeneratedImageExportPanel();
@@ -4289,6 +4291,41 @@ function stepImageViewer(direction) {
   imageViewerIndex = (imageViewerIndex + direction + imageViewerSources.length) % imageViewerSources.length;
   imageViewerImg.src = imageViewerSources[imageViewerIndex];
   setImageViewerScale(1);
+}
+
+async function saveCurrentViewerImageAsPng() {
+  const src = imageViewerSources[imageViewerIndex] || imageViewerImg?.src || "";
+  if (!src) return;
+  if (!window.showDirectoryPicker) {
+    alert("当前浏览器不支持直接选择本地文件夹，请使用 Chrome / Edge。");
+    return;
+  }
+  try {
+    const directoryHandle = await window.showDirectoryPicker({
+      id: "aivideobox-single-image",
+      mode: "readwrite",
+      startIn: "pictures",
+    });
+    const bytes = await readImageAsPngUint8Array(src);
+    const fileName = forcePngFileName(buildSingleViewerImageFileName(src));
+    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(new Blob([bytes], { type: "image/png" }));
+    await writable.close();
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    alert(`保存 PNG 失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function buildSingleViewerImageFileName(src) {
+  const node = [...canvasContent.querySelectorAll(".node")]
+    .find((item) => getGeneratedImageHistory(item).includes(src) || getNodeImageSources(item).includes(src));
+  if (node?.dataset.type === "image") {
+    const title = getExportStructureSourceTitle(node) || getNodeTitle(node);
+    return buildExportImageFileName(title, 0, 0);
+  }
+  return "image-转绘.png";
 }
 
 function getViewerSourcesForImage(image) {
