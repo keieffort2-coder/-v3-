@@ -3177,7 +3177,7 @@ function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "struct
 async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
   const normalizedProvider = normalizeImageProvider(provider);
   if (isRayinAiProvider(normalizedProvider)) {
-    return compressReferencePlanForProvider(plan, provider, 1.8 * 1024 * 1024);
+    return compressReferencePlanForProvider(plan, provider, 3.5 * 1024 * 1024);
   }
 
   const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
@@ -4987,7 +4987,7 @@ function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
   });
 }
 
-function compressImageReference(src, targetBytes = 1.8 * 1024 * 1024) {
+function compressImageReference(src, targetBytes = 3.5 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     if (!src || !isImageReferenceValue(src)) {
       reject(new Error("Invalid image reference"));
@@ -5002,11 +5002,12 @@ function compressImageReference(src, targetBytes = 1.8 * 1024 * 1024) {
         const context = canvas.getContext("2d");
         const sourceMaxSide = Math.max(image.naturalWidth, image.naturalHeight);
         const candidates = [
-          { maxSide: 1600, quality: 0.86 },
-          { maxSide: 1400, quality: 0.82 },
-          { maxSide: 1200, quality: 0.78 },
-          { maxSide: 1024, quality: 0.74 },
-          { maxSide: 896, quality: 0.7 },
+          { maxSide: 2560, quality: 0.94 },
+          { maxSide: 2208, quality: 0.92 },
+          { maxSide: 1920, quality: 0.9 },
+          { maxSide: 1600, quality: 0.88 },
+          { maxSide: 1400, quality: 0.84 },
+          { maxSide: 1200, quality: 0.8 },
         ];
 
         let best = "";
