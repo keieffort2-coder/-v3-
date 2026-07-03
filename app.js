@@ -3179,7 +3179,7 @@ function buildSubmissionReferencePlan(plan, provider = "apimart", mode = "struct
 async function prepareReferencePlanForGeneration(plan, provider = "apimart", mode = "structureStyle") {
   const normalizedProvider = normalizeImageProvider(provider);
   if (isRayinAiProvider(normalizedProvider)) {
-    return compressReferencePlanForProvider(plan, provider, 3.5 * 1024 * 1024);
+    return compressReferencePlanForProvider(plan, provider);
   }
 
   const hasStructure = Array.isArray(plan?.structureImages) && plan.structureImages.length > 0;
@@ -3207,14 +3207,24 @@ async function prepareReferencePlanForGeneration(plan, provider = "apimart", mod
   }, provider, mode);
 }
 
-async function compressReferencePlanForProvider(plan, provider = "apimart", targetBytes = 1.8 * 1024 * 1024) {
+async function compressReferencePlanForProvider(plan, provider = "apimart", targetBytes = null) {
   const next = buildSubmissionReferencePlan(plan, provider);
   const sourceToCompressed = new Map();
+  const uniqueReferenceCount = uniqueValues([
+    ...(next.images || []),
+    ...(next.structureImages || []),
+    ...(next.styleImages || []),
+    ...(next.editBaseImages || []),
+  ].filter(isImageReferenceValue)).length || 1;
+  const perImageTargetBytes = targetBytes || Math.max(
+    1.2 * 1024 * 1024,
+    Math.min(3 * 1024 * 1024, Math.floor((4.5 * 1024 * 1024) / uniqueReferenceCount)),
+  );
   const compressList = async (values = []) => Promise.all(
     arrayOrEmpty(values).map(async (value) => {
       if (!isImageReferenceValue(value)) return value;
       if (!sourceToCompressed.has(value)) {
-        sourceToCompressed.set(value, compressImageReference(value, targetBytes).catch(() => value));
+        sourceToCompressed.set(value, compressImageReference(value, perImageTargetBytes).catch(() => value));
       }
       return sourceToCompressed.get(value);
     }),
@@ -5024,7 +5034,7 @@ function compressImageFile(file, targetBytes = 3.2 * 1024 * 1024) {
   });
 }
 
-function compressImageReference(src, targetBytes = 3.5 * 1024 * 1024) {
+function compressImageReference(src, targetBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     if (!src || !isImageReferenceValue(src)) {
       reject(new Error("Invalid image reference"));
@@ -5039,12 +5049,12 @@ function compressImageReference(src, targetBytes = 3.5 * 1024 * 1024) {
         const context = canvas.getContext("2d");
         const sourceMaxSide = Math.max(image.naturalWidth, image.naturalHeight);
         const candidates = [
-          { maxSide: 2560, quality: 0.94 },
           { maxSide: 2208, quality: 0.92 },
           { maxSide: 1920, quality: 0.9 },
           { maxSide: 1600, quality: 0.88 },
           { maxSide: 1400, quality: 0.84 },
           { maxSide: 1200, quality: 0.8 },
+          { maxSide: 1024, quality: 0.76 },
         ];
 
         let best = "";
