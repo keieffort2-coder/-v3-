@@ -1829,7 +1829,7 @@ async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesM
   form.set("model", model);
   form.set("prompt", buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length));
   form.set("size", submitBody.size || "2048x1152");
-  form.set("quality", "low");
+  form.set("quality", "medium");
   form.set("output_format", "jpeg");
   form.set("input_fidelity", "high");
   for (let index = 0; index < images.length; index += 1) {
@@ -1845,7 +1845,7 @@ function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesMo
     model,
     prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
     size: submitBody.size || "2048x1152",
-    quality: "low",
+    quality: "medium",
     output_format: "jpeg",
     input_fidelity: "high",
     stream: false,
