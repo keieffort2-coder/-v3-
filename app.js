@@ -4487,43 +4487,24 @@ async function exportSelectedGeneratedImages(modal) {
     return;
   }
   if (button) button.disabled = true;
-  if (status) status.textContent = `正在转换 ${items.length} 张 PNG...`;
-  const files = [];
-  const failures = [];
-  for (const item of items) {
-    try {
-      const bytes = await readImageAsPngUint8Array(item.url);
-      files.push({ name: forcePngFileName(item.fileName), bytes });
-    } catch (error) {
-      failures.push({
-        ...item,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  if (!files.length) {
-    if (status) status.textContent = "导出失败：选中图片都无法读取";
-    if (button) button.disabled = false;
-    return;
-  }
-  const saveResult = await saveGeneratedPngFilesToDirectory(files, status);
+  const saveResult = await saveGeneratedPngItemsToDirectory(items, status);
   if (saveResult === "cancelled") {
     if (button) button.disabled = false;
     return;
   }
   if (!saveResult) {
-    if (status) status.textContent = "当前浏览器不能直接选择文件夹，正在下载 ZIP...";
-    const zipBlob = createZipBlob(files);
-    downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
+    if (status) status.textContent = "当前浏览器不支持选择本地文件夹，请使用 Chrome / Edge 后重试。";
+    if (button) button.disabled = false;
+    return;
   }
   if (status) {
-    const detail = failures[0] ? `：${failures[0].title || "图片"} ${failures[0].reason || ""}` : "";
-    status.textContent = failures.length ? `已保存 ${files.length} 张 PNG，${failures.length} 张读取失败${detail}` : `已保存 ${files.length} 张 PNG`;
+    const detail = saveResult.failures?.[0] ? `：${saveResult.failures[0].title || "图片"} ${saveResult.failures[0].reason || ""}` : "";
+    status.textContent = saveResult.failures?.length ? `已保存 ${saveResult.saved} 张 PNG，${saveResult.failures.length} 张读取失败${detail}` : `已保存 ${saveResult.saved} 张 PNG`;
   }
   if (button) button.disabled = false;
 }
 
-async function saveGeneratedPngFilesToDirectory(files, status) {
+async function saveGeneratedPngItemsToDirectory(items, status) {
   if (!window.showDirectoryPicker) return false;
   let directoryHandle;
   try {
@@ -4540,15 +4521,26 @@ async function saveGeneratedPngFilesToDirectory(files, status) {
     console.warn("Directory picker failed; falling back to ZIP.", error);
     return false;
   }
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
-    if (status) status.textContent = `正在保存 PNG ${index + 1}/${files.length}...`;
-    const fileHandle = await directoryHandle.getFileHandle(file.name, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(new Blob([file.bytes], { type: "image/png" }));
-    await writable.close();
+  let saved = 0;
+  const failures = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (status) status.textContent = `正在转换并保存 PNG ${index + 1}/${items.length}...`;
+    try {
+      const bytes = await readImageAsPngUint8Array(item.url);
+      const fileHandle = await directoryHandle.getFileHandle(forcePngFileName(item.fileName), { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(new Blob([bytes], { type: "image/png" }));
+      await writable.close();
+      saved += 1;
+    } catch (error) {
+      failures.push({
+        ...item,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
-  return true;
+  return { saved, failures };
 }
 
 async function readImageAsUint8Array(url) {
