@@ -1829,8 +1829,8 @@ async function buildRayinImagesEditForm(submitBody, model = getRayinAiResponsesM
   form.set("model", model);
   form.set("prompt", buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length));
   form.set("size", submitBody.size || "2048x1152");
-  form.set("quality", "medium");
-  form.set("output_format", "jpeg");
+  form.set("quality", "high");
+  form.set("output_format", "png");
   form.set("input_fidelity", "high");
   for (let index = 0; index < images.length; index += 1) {
     const { blob, filename } = await imageReferenceToBlob(images[index], `reference-${index + 1}.png`);
@@ -1845,8 +1845,8 @@ function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesMo
     model,
     prompt: buildRayinStrictPrompt(submitBody, getRayinStructureAnchor(submitBody), getRayinStyleUrls(submitBody).length),
     size: submitBody.size || "2048x1152",
-    quality: "medium",
-    output_format: "jpeg",
+    quality: "high",
+    output_format: "png",
     input_fidelity: "high",
     stream: false,
     image_urls: images,
