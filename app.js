@@ -4329,7 +4329,7 @@ function openGeneratedImageExportPanel() {
         <div class="generated-export-grid" data-export-grid></div>
         <footer>
           <span data-export-status></span>
-          <button type="button" data-export-download>导出 ZIP</button>
+          <button type="button" data-export-download>保存 PNG</button>
         </footer>
       </div>
     `;
@@ -4460,7 +4460,7 @@ async function exportSelectedGeneratedImages(modal) {
     return;
   }
   if (button) button.disabled = true;
-  if (status) status.textContent = `正在读取 ${items.length} 张图片...`;
+  if (status) status.textContent = `正在转换 ${items.length} 张 PNG...`;
   const files = [];
   const failures = [];
   for (const item of items) {
@@ -4476,11 +4476,46 @@ async function exportSelectedGeneratedImages(modal) {
     if (button) button.disabled = false;
     return;
   }
-  if (status) status.textContent = "正在打包 ZIP...";
-  const zipBlob = createZipBlob(files);
-  downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
-  if (status) status.textContent = failures.length ? `已导出 ${files.length} 张，${failures.length} 张读取失败` : `已导出 ${files.length} 张`;
+  const saveResult = await saveGeneratedPngFilesToDirectory(files, status);
+  if (saveResult === "cancelled") {
+    if (button) button.disabled = false;
+    return;
+  }
+  if (!saveResult) {
+    if (status) status.textContent = "当前浏览器不能直接选择文件夹，正在下载 ZIP...";
+    const zipBlob = createZipBlob(files);
+    downloadBlob(zipBlob, `${sanitizeDownloadName(currentProject || "aivideobox")}-generated-images.zip`);
+  }
+  if (status) status.textContent = failures.length ? `已保存 ${files.length} 张 PNG，${failures.length} 张读取失败` : `已保存 ${files.length} 张 PNG`;
   if (button) button.disabled = false;
+}
+
+async function saveGeneratedPngFilesToDirectory(files, status) {
+  if (!window.showDirectoryPicker) return false;
+  let directoryHandle;
+  try {
+    directoryHandle = await window.showDirectoryPicker({
+      id: "aivideobox-generated-images",
+      mode: "readwrite",
+      startIn: "pictures",
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      if (status) status.textContent = "已取消保存。";
+      return "cancelled";
+    }
+    console.warn("Directory picker failed; falling back to ZIP.", error);
+    return false;
+  }
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    if (status) status.textContent = `正在保存 PNG ${index + 1}/${files.length}...`;
+    const fileHandle = await directoryHandle.getFileHandle(file.name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(new Blob([file.bytes], { type: "image/png" }));
+    await writable.close();
+  }
+  return true;
 }
 
 async function readImageAsUint8Array(url) {
