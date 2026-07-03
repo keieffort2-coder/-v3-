@@ -4465,8 +4465,8 @@ async function exportSelectedGeneratedImages(modal) {
   const failures = [];
   for (const item of items) {
     try {
-      const bytes = await readImageAsUint8Array(item.url);
-      files.push({ name: item.fileName, bytes });
+      const bytes = await readImageAsPngUint8Array(item.url);
+      files.push({ name: forcePngFileName(item.fileName), bytes });
     } catch (error) {
       failures.push(item);
     }
@@ -4494,6 +4494,17 @@ async function readImageAsUint8Array(url) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return new Uint8Array(await response.arrayBuffer());
+}
+
+async function readImageAsPngUint8Array(url) {
+  const pngDataUrl = await convertImageUrlToPngDataUrl(url);
+  if (!isDataImageUrl(pngDataUrl)) return readImageAsUint8Array(url);
+  return readImageAsUint8Array(pngDataUrl);
+}
+
+function forcePngFileName(fileName) {
+  const base = sanitizeDownloadName(String(fileName || "generated-image").replace(/\.[^.]+$/, ""));
+  return `${base || "generated-image"}.png`;
 }
 
 function createZipBlob(files) {
@@ -4602,6 +4613,34 @@ function getImageDimensions(src) {
     const image = new Image();
     image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
     image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+async function convertImageUrlToPngDataUrl(src) {
+  if (!src) return src;
+  try {
+    const image = await loadImageForCanvas(src);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    if (!canvas.width || !canvas.height) return src;
+    const context = canvas.getContext("2d");
+    if (!context) return src;
+    context.drawImage(image, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch (error) {
+    console.warn("Generated image PNG conversion failed; using original image.", error);
+    return src;
+  }
+}
+
+function loadImageForCanvas(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    if (!isDataImageUrl(src)) image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("图片转换 PNG 失败"));
     image.src = src;
   });
 }
