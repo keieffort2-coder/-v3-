@@ -1848,10 +1848,17 @@ function buildRayinImagesEditDebugBody(submitBody, model = getRayinAiResponsesMo
     quality: "high",
     output_format: "png",
     input_fidelity: "high",
-    stream: false,
-    image_urls: images,
-    input_images: images.map(toRayinTaskInputImage),
-    inputs: buildRayinRoleInputs(submitBody, images),
+    image_field: images.length > 1 ? "image[]" : "image",
+    image_count: images.length,
+    field_names: [
+      "model",
+      "prompt",
+      "size",
+      "quality",
+      "output_format",
+      "input_fidelity",
+      images.length > 1 ? "image[]" : "image",
+    ],
   };
 }
 
