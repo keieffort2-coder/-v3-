@@ -1,11 +1,25 @@
 const { put } = require("@vercel/blob");
 
 const API_BASE = "https://api.apimart.ai/v1";
+const WETOKEN_DEFAULT_TASK_URL = "https://wetoken.lingxixai.com/api/v3/contents/generations/tasks";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
   const key = selected === "a" ? process.env.APIMART_API_KEY || process.env.APIMART_TOKEN : process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
   return sanitizeHeaderValue(key);
+}
+
+function getWeTokenKey() {
+  return sanitizeHeaderValue(process.env.WETOKEN_API_KEY || process.env.WETOKEN_TOKEN || process.env.SEEDANCE_WETOKEN_API_KEY || "");
+}
+
+function getWeTokenTaskUrl() {
+  return sanitizeHeaderValue(process.env.WETOKEN_TASK_URL || process.env.WETOKEN_SEEDANCE_TASK_URL || WETOKEN_DEFAULT_TASK_URL).replace(/\/+$/, "");
+}
+
+function normalizeVideoProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  return provider === "wetoken" ? "wetoken" : "apimart";
 }
 
 function sanitizeHeaderValue(value) {
@@ -15,28 +29,32 @@ function sanitizeHeaderValue(value) {
 module.exports = async function handler(req, res) {
   if (req.method === "GET") {
     const taskId = req.query?.taskId;
+    const provider = normalizeVideoProvider(req.query?.provider);
     if (!taskId) {
       res.status(405).json({ error: "Method not allowed" });
       return;
     }
 
-    const apiKey = getApiMartKey(req.query?.apimartChannel);
+    const apiKey = provider === "wetoken" ? getWeTokenKey() : getApiMartKey(req.query?.apimartChannel);
     if (!apiKey) {
       res.status(500).json({
-        error: "APIMART_API_KEY_2 is not configured",
-        message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
+        error: provider === "wetoken" ? "WETOKEN_API_KEY is not configured" : "APIMART_API_KEY_2 is not configured",
+        message: provider === "wetoken"
+          ? "Please configure WETOKEN_API_KEY in Vercel Environment Variables."
+          : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
       });
       return;
     }
 
     try {
-      const taskPayload = await getTask(apiKey, String(taskId));
+      const taskPayload = provider === "wetoken" ? await getWeTokenTask(apiKey, String(taskId)) : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
       const videoUrl = await persistResultVideo(extractResultVideoUrl(taskPayload), taskId);
       res.status(200).json({
         taskId,
         status,
         videoUrl,
+        provider,
         message: formatUpstreamError(taskPayload),
         payload: videoUrl ? undefined : taskPayload,
       });
@@ -61,6 +79,7 @@ module.exports = async function handler(req, res) {
     duration,
     mode,
     model,
+    provider,
     apimartChannel,
     aspectRatio,
     resolution,
@@ -72,11 +91,14 @@ module.exports = async function handler(req, res) {
     lastFrameUrl,
     referenceAudioUrls,
   } = req.body || {};
-  const apiKey = getApiMartKey(apimartChannel);
+  const normalizedProvider = normalizeVideoProvider(provider);
+  const apiKey = normalizedProvider === "wetoken" ? getWeTokenKey() : getApiMartKey(apimartChannel);
   if (!apiKey) {
     res.status(500).json({
-      error: "APIMART_API_KEY_2 is not configured",
-      message: "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
+      error: normalizedProvider === "wetoken" ? "WETOKEN_API_KEY is not configured" : "APIMART_API_KEY_2 is not configured",
+      message: normalizedProvider === "wetoken"
+        ? "Please configure WETOKEN_API_KEY in Vercel Environment Variables."
+        : "Please configure APIMART_API_KEY_2 in Vercel Environment Variables.",
     });
     return;
   }
@@ -88,7 +110,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const submitBody = {
-      model: normalizeVideoModel(model),
+      model: normalizeVideoModel(model, normalizedProvider),
       prompt: String(prompt),
       mode: normalizeVideoMode(mode),
       duration: normalizeDuration(duration),
@@ -135,14 +157,20 @@ module.exports = async function handler(req, res) {
       submitBody.reference_audio_urls = cleanAudio.slice(0, 4);
     }
 
-    const { response: submit, payload: submitPayload } = await submitVideoTask(apiKey, submitBody);
+    const providerSubmitBody = normalizedProvider === "wetoken"
+      ? buildWeTokenSubmitBody(submitBody)
+      : submitBody;
+    const { response: submit, payload: submitPayload } = normalizedProvider === "wetoken"
+      ? await submitWeTokenVideoTask(apiKey, providerSubmitBody)
+      : await submitVideoTask(apiKey, providerSubmitBody);
     if (!submit.ok) {
       res.status(submit.status).json({
-        error: "APIMart video submit failed",
+        error: normalizedProvider === "wetoken" ? "WeToken video submit failed" : "APIMart video submit failed",
         message: formatUpstreamError(submitPayload),
         upstream: submitPayload,
         request: {
-          model: submitBody.model,
+          provider: normalizedProvider,
+          model: providerSubmitBody.model,
           mode: submitBody.mode,
           duration: submitBody.duration,
           aspectRatio: normalizedAspectRatio,
@@ -171,7 +199,8 @@ module.exports = async function handler(req, res) {
     res.status(202).json({
       taskId,
       status: "submitted",
-      model: submitBody.model,
+      model: providerSubmitBody.model,
+      provider: normalizedProvider,
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
     });
   } catch (error) {
@@ -182,8 +211,9 @@ module.exports = async function handler(req, res) {
   }
 };
 
-function normalizeVideoModel(model) {
+function normalizeVideoModel(model, provider = "apimart") {
   const value = String(model || "").trim();
+  if (normalizeVideoProvider(provider) === "wetoken") return "doubao-seedance-2-0-260128";
   if (value === "kling3" || value === "kling-motion-control") return "kling-motion-control";
   if (value === "happyhorse" || value === "happyhorse-1.0") return "happyhorse-1.0";
   if (value === "doubao-seedance-2.0") return "doubao-seedance-2.0";
@@ -228,6 +258,15 @@ async function getTask(apiKey, taskId) {
   return payload;
 }
 
+async function getWeTokenTask(apiKey, taskId) {
+  const response = await fetch(`${getWeTokenTaskUrl()}/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const payload = await readJson(response);
+  if (!response.ok) throw new Error(JSON.stringify(payload));
+  return payload;
+}
+
 async function submitVideoTask(apiKey, submitBody) {
   const endpoints = ["/videos/generations", "/video/generations"];
   let lastResponse = null;
@@ -251,6 +290,55 @@ async function submitVideoTask(apiKey, submitBody) {
   }
 
   return { response: lastResponse, payload: lastPayload };
+}
+
+async function submitWeTokenVideoTask(apiKey, submitBody) {
+  const response = await fetch(getWeTokenTaskUrl(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(submitBody),
+  });
+  const payload = await readJson(response);
+  return { response, payload };
+}
+
+function buildWeTokenSubmitBody(submitBody) {
+  const content = [{ type: "text", text: submitBody.prompt }];
+  const firstFrame = submitBody.first_frame_url || submitBody.firstFrameUrl || "";
+  const lastFrame = submitBody.last_frame_url || submitBody.lastFrameUrl || "";
+  if (firstFrame) content.push({ type: "image_url", role: "first_frame", image_url: { url: firstFrame } });
+  if (lastFrame) content.push({ type: "image_url", role: "last_frame", image_url: { url: lastFrame } });
+  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
+  imageUrls.slice(0, 8).forEach((url) => {
+    if (url !== firstFrame && url !== lastFrame) {
+      content.push({ type: "image_url", role: "reference_image", image_url: { url } });
+    }
+  });
+  const videoUrls = Array.isArray(submitBody.video_urls) ? submitBody.video_urls : [];
+  videoUrls.slice(0, 4).forEach((url) => {
+    content.push({ type: "video_url", role: "reference_video", video_url: { url } });
+  });
+  const audioUrls = Array.isArray(submitBody.reference_audio_urls) ? submitBody.reference_audio_urls : [];
+  audioUrls.slice(0, 4).forEach((url) => {
+    content.push({ type: "audio_url", role: "reference_audio", audio_url: { url } });
+  });
+  return {
+    model: "doubao-seedance-2-0-260128",
+    content,
+    duration: normalizeDuration(submitBody.duration),
+    ratio: normalizeAspectRatio(submitBody.aspect_ratio || submitBody.aspectRatio),
+    resolution: normalizeWeTokenResolution(submitBody.resolution),
+    watermark: false,
+    generate_audio: Boolean(submitBody.generate_audio || submitBody.generateAudio),
+  };
+}
+
+function normalizeWeTokenResolution(value) {
+  const resolution = normalizeResolution(value);
+  return resolution === "1080p" ? "720p" : resolution;
 }
 
 function getTaskStatus(payload) {
