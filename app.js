@@ -75,9 +75,26 @@ const videoModeLabels = {
 };
 const videoModelLabels = {
   "doubao-seedance-2.0": "Seedance2",
+  "doubao-seedance-2-0-260128": "Seedance2 WeToken",
   "kling-motion-control": "kling3",
   "happyhorse-1.0": "happyhorse",
 };
+const videoProviderLabels = {
+  apimart: "ApiMart",
+  wetoken: "WeToken",
+};
+const videoProviderOptions = [
+  ["apimart", "ApiMart"],
+  ["wetoken", "WeToken"],
+];
+const apiMartVideoModelOptions = [
+  ["doubao-seedance-2.0", "Seedance2"],
+  ["kling-motion-control", "kling3"],
+  ["happyhorse-1.0", "happyhorse"],
+];
+const wetokenVideoModelOptions = [
+  ["doubao-seedance-2-0-260128", "Seedance2 WeToken"],
+];
 const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
 const videoResolutions = ["480p", "720p", "1080p"];
 const defaultImageModelOptions = [
@@ -606,7 +623,8 @@ submitImageConfig?.addEventListener("click", () => {
     const description = configNode.querySelector(".node-description");
     description.textContent = imagePromptInput.value;
     persistVideoSettingsFromPanel(configNode);
-    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect?.value);
+    configNode.dataset.videoProvider = normalizeVideoProvider(configNode.dataset.videoProvider);
+    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect?.value, configNode.dataset.videoProvider);
     saveCurrentProject();
     runVideoGeneration(configNode);
     return;
@@ -650,7 +668,8 @@ imageOptionsPopover?.addEventListener("click", (event) => {
 imageModelSelect?.addEventListener("change", () => {
   if (!configNode) return;
   if (configNode.dataset.type === "video") {
-    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect.value);
+    configNode.dataset.videoProvider = normalizeVideoProvider(configNode.dataset.videoProvider);
+    configNode.dataset.videoModel = normalizeVideoModelValue(imageModelSelect.value, configNode.dataset.videoProvider);
     saveCurrentProject();
     return;
   }
@@ -1837,6 +1856,7 @@ function createNode({
   referenceVideoUrls,
   generatedVideoUrl,
   generatedVideoUrls,
+  videoProvider,
   videoMode,
   videoDuration,
   videoModel,
@@ -1884,9 +1904,10 @@ function createNode({
   if (referenceVideoUrl) node.dataset.referenceVideoUrl = referenceVideoUrl;
   if (generatedVideoUrl) node.dataset.generatedVideoUrl = generatedVideoUrl;
   if (Array.isArray(generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(generatedVideoUrls);
+  if (videoProvider) node.dataset.videoProvider = normalizeVideoProvider(videoProvider);
   if (videoMode) node.dataset.videoMode = videoMode;
   if (videoDuration) node.dataset.videoDuration = videoDuration;
-  if (videoModel) node.dataset.videoModel = videoModel;
+  if (videoModel) node.dataset.videoModel = normalizeVideoModelValue(videoModel, node.dataset.videoProvider);
   if (videoAspectRatio) node.dataset.videoAspectRatio = videoAspectRatio;
   if (videoResolution) node.dataset.videoResolution = videoResolution;
   if (videoSeed) node.dataset.videoSeed = videoSeed;
@@ -2081,11 +2102,31 @@ function normalizeVideoModeValue(value) {
   return videoModeLabels[value] ? value : "image-to-video";
 }
 
-function normalizeVideoModelValue(value) {
+function normalizeVideoProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  return videoProviderLabels[provider] ? provider : "apimart";
+}
+
+function normalizeVideoModelValue(value, provider = "apimart") {
   const model = String(value || "").trim();
+  const normalizedProvider = normalizeVideoProvider(provider);
+  if (normalizedProvider === "wetoken") return "doubao-seedance-2-0-260128";
   if (model === "kling3" || model === "kling-motion-control") return "kling-motion-control";
   if (model === "happyhorse" || model === "happyhorse-1.0") return "happyhorse-1.0";
+  if (model === "doubao-seedance-2-0-260128") return "doubao-seedance-2-0-260128";
   return "doubao-seedance-2.0";
+}
+
+function getVideoModelOptions(provider) {
+  return normalizeVideoProvider(provider) === "wetoken" ? wetokenVideoModelOptions : apiMartVideoModelOptions;
+}
+
+function setVideoModelOptions(provider, selectedModel) {
+  if (!imageModelSelect) return;
+  const normalizedProvider = normalizeVideoProvider(provider);
+  const options = getVideoModelOptions(normalizedProvider);
+  imageModelSelect.innerHTML = options.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  imageModelSelect.value = normalizeVideoModelValue(selectedModel || options[0]?.[0], normalizedProvider);
 }
 
 function setVideoMode(node, mode) {
@@ -2456,11 +2497,7 @@ function openImageConfig(node) {
     : "输入提示词描述...";
   if (imageModelSelect) {
     imageModelSelect.innerHTML = isVideo
-      ? `
-          <option value="doubao-seedance-2.0" selected>Seedance2</option>
-          <option value="kling-motion-control">kling3</option>
-          <option value="happyhorse-1.0">happyhorse</option>
-        `
+      ? ""
       : `
           <option value="gpt-image-2">GPT图像2</option>
           <option value="gpt-image-2-official" selected>gpt-image-2-官方</option>
@@ -2473,7 +2510,8 @@ function openImageConfig(node) {
   removeVideoSettingsPanel();
   if (isVideo) {
     ensureVideoDefaults(node);
-    if (imageModelSelect) imageModelSelect.value = normalizeVideoModelValue(node.dataset.videoModel);
+    setVideoModelOptions(node.dataset.videoProvider, node.dataset.videoModel);
+    node.dataset.videoModel = normalizeVideoModelValue(imageModelSelect?.value || node.dataset.videoModel, node.dataset.videoProvider);
     openImageOptions?.classList.remove("video-config-hidden");
     renderVideoSettingsPanel(node);
     syncVideoOptionsSummary(node);
@@ -2569,9 +2607,10 @@ function syncImageQualityOptionLabels() {
 
 function ensureVideoDefaults(node) {
   if (!node) return;
+  node.dataset.videoProvider = normalizeVideoProvider(node.dataset.videoProvider);
   node.dataset.videoMode = normalizeVideoModeValue(node.dataset.videoMode);
   node.dataset.videoDuration ||= "5";
-  node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel);
+  node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider);
   node.dataset.videoAspectRatio ||= "16:9";
   node.dataset.videoResolution ||= "1080p";
   node.dataset.videoGenerateAudio ||= "false";
@@ -2586,6 +2625,12 @@ function renderVideoSettingsPanel(node) {
   panel.className = "video-settings-panel";
   panel.innerHTML = `
     <div class="video-settings-grid">
+      <label>
+        <span>视频渠道</span>
+        <select data-video-setting="videoProvider">
+          ${videoProviderOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+        </select>
+      </label>
       <label>
         <span>生成模式</span>
         <select data-video-setting="videoMode">
@@ -2626,12 +2671,19 @@ function renderVideoSettingsPanel(node) {
     </div>
   `;
   imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
+  panel.querySelector('[data-video-setting="videoProvider"]').value = normalizeVideoProvider(node.dataset.videoProvider);
   panel.querySelector('[data-video-setting="videoMode"]').value = normalizeVideoModeValue(node.dataset.videoMode);
   panel.querySelector('[data-video-setting="videoAspectRatio"]').value = node.dataset.videoAspectRatio || "16:9";
   panel.querySelector('[data-video-setting="videoResolution"]').value = node.dataset.videoResolution || "1080p";
   panel.querySelector('[data-video-setting="videoGenerateAudio"]').checked = node.dataset.videoGenerateAudio === "true";
   panel.querySelector('[data-video-setting="videoReturnLastFrame"]').checked = node.dataset.videoReturnLastFrame === "true";
   panel.querySelector('[data-video-setting="videoWebSearch"]').checked = node.dataset.videoWebSearch === "true";
+  panel.querySelector('[data-video-setting="videoProvider"]')?.addEventListener("change", (event) => {
+    node.dataset.videoProvider = normalizeVideoProvider(event.target.value);
+    node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider);
+    setVideoModelOptions(node.dataset.videoProvider, node.dataset.videoModel);
+    saveCurrentProject();
+  });
 }
 
 function renderVideoAssetPicker(slot, label, accept, url = "") {
@@ -3349,13 +3401,15 @@ function buildReferenceBindingPrompt(plan) {
     : "";
 
   const lines = [
-    "Reference binding tags:",
+    "INPUT ORDER CONTRACT - FOLLOW BEFORE ALL OTHER TEXT:",
+    `There are exactly ${imageCount} attached input image(s). Interpret them by order, not by visual similarity.`,
   ];
 
   if (hasStructure) {
     lines.push(
-      `@渲染结构图 = input image 1${structureSize ? `, source canvas ${structureSize}` : ""}.`,
-      "@渲染结构图 controls composition, camera, perspective, scale, object placement, scene layout, canvas ratio, and local inherent colors on the original objects.",
+      `INPUT IMAGE 1 = @渲染结构图 / STRUCTURE REFERENCE${structureSize ? ` / source canvas ${structureSize}` : ""}.`,
+      "INPUT IMAGE 1 is the only authority for composition, camera, perspective, crop, scale, object placement, scene layout, canvas ratio, and spatial structure.",
+      "Do not treat any later input image as composition, layout, camera, crop, geometry, or object-placement guidance.",
     );
   }
 
@@ -3364,16 +3418,19 @@ function buildReferenceBindingPrompt(plan) {
     const end = start + styleCount - 1;
     const styleKind = plan.styleSwatchMode ? "STYLE SWATCH image" : "STYLE reference image";
     lines.push(
-      `@风格参考图 = input image ${styleCount === 1 ? start : `${start}-${end}`} (${styleKind}).`,
-      "@风格参考图 controls only palette, color temperature, material color, lighting mood, atmosphere, texture, and render finish.",
-      plan.styleSwatchMode ? "@风格参考图 is a non-spatial color/material swatch." : "",
+      `INPUT IMAGE ${styleCount === 1 ? start : `${start}-${end}`} = @风格参考图 / STYLE REFERENCE (${styleKind}).`,
+      "Style reference images control ONLY palette, color temperature, lighting mood, material finish, atmosphere, texture language, contrast curve, and render style.",
+      "Style reference images must not change the structure reference's layout, camera, crop, object placement, or scene geometry.",
+      plan.styleSwatchMode ? "Style swatches are non-spatial color/material references, not scene references." : "",
     );
   }
 
   if (hasStructure && styleCount > 0) {
     lines.push(
-      "Final image: keep @渲染结构图's spatial structure and apply @风格参考图's visual style. Do not swap these roles.",
-      "Keep local red lights, warning lights, object markings, and inherent material colors from @渲染结构图 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow @风格参考图.",
+      "FINAL OUTPUT RULE: preserve INPUT IMAGE 1's spatial structure exactly, then repaint it using later style reference images.",
+      "Never swap roles: INPUT IMAGE 1 is structure, later input images are style only.",
+      "If the user's text conflicts with this input order contract, this contract wins.",
+      "Keep local red lights, warning lights, object markings, and inherent material colors from INPUT IMAGE 1 where they exist, but the global color grade, ambient light, shadows, fog, contrast, and atmosphere must follow the style references.",
       "Red light rule: red must remain localized to visible lamps, warning glows, signs, or original red materials only. Do not spread red into the overall color temperature, ambient haze, shadows, walls, floor, or neutral materials unless the style reference is globally red.",
     );
   }
@@ -3585,9 +3642,10 @@ function duplicateNode(node) {
     referenceVideoUrl: node.dataset.referenceVideoUrl || "",
     generatedVideoUrl: node.dataset.generatedVideoUrl || "",
     generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
+    videoProvider: normalizeVideoProvider(node.dataset.videoProvider),
     videoMode: normalizeVideoModeValue(node.dataset.videoMode),
     videoDuration: node.dataset.videoDuration || "5",
-    videoModel: normalizeVideoModelValue(node.dataset.videoModel),
+    videoModel: normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider),
     videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
     videoResolution: node.dataset.videoResolution || "1080p",
     videoSeed: node.dataset.videoSeed || "",
@@ -3795,7 +3853,7 @@ function runNode(node) {
     node.dataset.type === "image"
       ? `正在提交 ${getImageProviderLabel(node.dataset.imageProvider || "apimart")} ${normalizeImageModel(node.dataset.imageModel || "gpt-image-2-official")}...`
       : node.dataset.type === "video"
-        ? `正在提交 ApiMart ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel)] || "Seedance2"} 视频项目...`
+        ? `正在提交 ${videoProviderLabels[normalizeVideoProvider(node.dataset.videoProvider)]} ${videoModelLabels[normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider)] || "Seedance2"} 视频项目...`
         : "正在处理文本对话...";
   setTimeout(() => {
     node.classList.remove("running");
@@ -3819,14 +3877,16 @@ async function runVideoGeneration(node) {
   ].filter(isRemoteImageUrl));
 
   node.classList.add("running");
-  status.textContent = "正在提交 ApiMart 视频任务...";
+  const videoProvider = normalizeVideoProvider(node.dataset.videoProvider);
+  status.textContent = `正在提交 ${videoProviderLabels[videoProvider]} 视频任务...`;
   if (preview && !preview.innerHTML.trim()) {
     preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
   }
 
   try {
     const payload = {
-      model: normalizeVideoModelValue(node.dataset.videoModel),
+      provider: videoProvider,
+      model: normalizeVideoModelValue(node.dataset.videoModel, videoProvider),
       mode: normalizeVideoModeValue(node.dataset.videoMode),
       prompt,
       imageUrls,
@@ -3871,10 +3931,10 @@ async function submitAndPollVideoTask(payload, status) {
   if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
   if (!result.taskId) throw new Error("后端没有返回 video taskId");
   status.textContent = "视频任务已提交，正在生成...";
-  return pollVideoTask(result.taskId, status, payload.apimartChannel);
+  return pollVideoTask(result.taskId, status, payload.apimartChannel, result.provider || payload.provider);
 }
 
-async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
+async function pollVideoTask(taskId, statusEl, apimartChannel = "b", provider = "apimart") {
   const deadline = Date.now() + 1800000;
   let lastStatus = "submitted";
   let attempts = 0;
@@ -3882,7 +3942,7 @@ async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
     await sleep(5000);
     attempts += 1;
     const response = await fetch(
-      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}`,
+      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}&provider=${encodeURIComponent(provider)}`,
     );
     const result = await readResponseJson(response);
     if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
@@ -3891,7 +3951,7 @@ async function pollVideoTask(taskId, statusEl, apimartChannel = "b") {
     if (statusEl) statusEl.textContent = `视频生成中：${lastStatus}，已等待约 ${minutes} 分钟`;
     if (result.videoUrl) return result;
     if (["failed", "error", "cancelled"].includes(lastStatus)) {
-      throw new Error(formatApiError(result, `ApiMart 视频任务失败：${lastStatus}`));
+      throw new Error(formatApiError(result, `${videoProviderLabels[normalizeVideoProvider(provider)]} 视频任务失败：${lastStatus}`));
     }
   }
   throw new Error(`等待视频生成超过 30 分钟，最后状态：${lastStatus}`);
@@ -3926,7 +3986,7 @@ async function runImageGeneration(node) {
   const brokenReferenceCount = [...node.querySelectorAll(".broken-image-placeholder")].length;
   const referenceBindings = buildReferenceBindingPrompt(referencePlan);
   const enhancedPrompt = sanitizeGenerationPrompt(addModelSpecificImageRules(buildImageEditPrompt(
-    [generationMemory, referenceBindings, prompt].filter(Boolean).join("\n\n"),
+    [referenceBindings, generationMemory, prompt].filter(Boolean).join("\n\n"),
     referenceMode,
     roleImages,
     referencePlan,
@@ -5850,9 +5910,10 @@ function serializeNodes(nodes) {
       referenceVideoUrl: node.dataset.referenceVideoUrl || "",
       generatedVideoUrl: node.dataset.generatedVideoUrl || "",
       generatedVideoUrls: parseJsonArray(node.dataset.generatedVideoUrls),
+      videoProvider: normalizeVideoProvider(node.dataset.videoProvider),
       videoMode: normalizeVideoModeValue(node.dataset.videoMode),
       videoDuration: node.dataset.videoDuration || "5",
-      videoModel: normalizeVideoModelValue(node.dataset.videoModel),
+      videoModel: normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider),
       videoAspectRatio: node.dataset.videoAspectRatio || "16:9",
       videoResolution: node.dataset.videoResolution || "1080p",
       videoSeed: node.dataset.videoSeed || "",
@@ -5989,9 +6050,10 @@ function restoreCanvasData(data) {
     if (saved.referenceVideoUrl) node.dataset.referenceVideoUrl = saved.referenceVideoUrl;
     if (saved.generatedVideoUrl) node.dataset.generatedVideoUrl = saved.generatedVideoUrl;
     if (Array.isArray(saved.generatedVideoUrls)) node.dataset.generatedVideoUrls = JSON.stringify(saved.generatedVideoUrls);
+    node.dataset.videoProvider = normalizeVideoProvider(saved.videoProvider);
     node.dataset.videoMode = normalizeVideoModeValue(saved.videoMode);
     node.dataset.videoDuration = saved.videoDuration || "5";
-    node.dataset.videoModel = normalizeVideoModelValue(saved.videoModel);
+    node.dataset.videoModel = normalizeVideoModelValue(saved.videoModel, node.dataset.videoProvider);
     node.dataset.videoAspectRatio = saved.videoAspectRatio || "16:9";
     node.dataset.videoResolution = saved.videoResolution || "1080p";
     node.dataset.videoSeed = saved.videoSeed || "";
