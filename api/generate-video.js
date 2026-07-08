@@ -348,6 +348,7 @@ function getTaskStatus(payload) {
 async function persistResultVideo(videoUrl, taskId) {
   if (!videoUrl || typeof videoUrl !== "string") return videoUrl;
   if (/^https?:\/\/[^/]*\.public\.blob\.vercel-storage\.com\//i.test(videoUrl)) return videoUrl;
+  if (!/^(1|true|yes|on)$/i.test(String(process.env.PERSIST_GENERATED_VIDEOS || ""))) return videoUrl;
   if (!process.env.BLOB_READ_WRITE_TOKEN) return videoUrl;
 
   try {
