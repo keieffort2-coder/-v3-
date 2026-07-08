@@ -244,7 +244,7 @@ function normalizeAspectRatio(value) {
 
 function normalizeResolution(value) {
   const resolution = String(value || "").trim();
-  return ["480p", "720p", "1080p"].includes(resolution) ? resolution : "1080p";
+  return ["480p", "720p", "1080p", "4K"].includes(resolution) ? resolution : "1080p";
 }
 
 function normalizeSeed(value) {
@@ -362,7 +362,7 @@ function buildWeTokenPrompt(prompt, { hasFirstFrame, hasLastFrame, usesFrameMode
     rules.push(
       "SEEDANCE FRAME MODE: the uploaded first_frame is the opening frame and the primary visual source.",
       "Keep the first_frame art direction: 2D animation / illustrated linework, clean color blocks, lighting, palette, perspective, camera framing, canvas ratio, street layout, character shapes, character placement, and scene structure.",
-      "Render with crisp edges, stable outlines, readable silhouettes, clean texture boundaries, and high-detail 1080p delivery quality. Keep the image sharp across motion instead of softening or smearing the frame.",
+      "Render with crisp edges, stable outlines, readable silhouettes, clean texture boundaries, and high-detail selected-resolution delivery quality, up to 4K when requested. Keep the image sharp across motion instead of softening or smearing the frame.",
       "Use the written prompt only to add motion, timing, effects, and camera movement on top of that first_frame. The first_frame decides style, composition, environment, and character look.",
     );
   }
