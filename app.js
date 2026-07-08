@@ -96,7 +96,7 @@ const wetokenVideoModelOptions = [
   ["doubao-seedance-2-0-260128", "Seedance2 WeToken"],
 ];
 const videoAspectRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
-const videoResolutions = ["480p", "720p", "1080p"];
+const videoResolutions = ["480p", "720p", "1080p", "4K"];
 const defaultImageModelOptions = [
   ["gpt-image-2", "GPT图像2"],
   ["gpt-image-2-official", "gpt-image-2-官方"],
@@ -3930,7 +3930,9 @@ async function submitAndPollVideoTask(payload, status) {
   const result = await readResponseJson(response);
   if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
   if (!result.taskId) throw new Error("后端没有返回 video taskId");
-  status.textContent = "视频任务已提交，正在生成...";
+  status.textContent = result.firstFrame === false
+    ? "视频任务已提交，但后端未收到首帧图，正在生成..."
+    : "视频任务已提交，正在生成...";
   return pollVideoTask(result.taskId, status, payload.apimartChannel, result.provider || payload.provider);
 }
 
