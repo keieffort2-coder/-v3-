@@ -362,6 +362,7 @@ function buildWeTokenPrompt(prompt, { hasFirstFrame, hasLastFrame, usesFrameMode
     rules.push(
       "SEEDANCE FRAME MODE: the uploaded first_frame is the opening frame and the primary visual source.",
       "Keep the first_frame art direction: 2D animation / illustrated linework, clean color blocks, lighting, palette, perspective, camera framing, canvas ratio, street layout, character shapes, character placement, and scene structure.",
+      "Render with crisp edges, stable outlines, readable silhouettes, clean texture boundaries, and high-detail 1080p delivery quality. Keep the image sharp across motion instead of softening or smearing the frame.",
       "Use the written prompt only to add motion, timing, effects, and camera movement on top of that first_frame. The first_frame decides style, composition, environment, and character look.",
     );
   }
@@ -375,8 +376,7 @@ function buildWeTokenPrompt(prompt, { hasFirstFrame, hasLastFrame, usesFrameMode
 }
 
 function normalizeWeTokenResolution(value) {
-  const resolution = normalizeResolution(value);
-  return resolution === "1080p" ? "720p" : resolution;
+  return normalizeResolution(value);
 }
 
 function getTaskStatus(payload) {
