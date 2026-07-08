@@ -132,7 +132,7 @@ module.exports = async function handler(req, res) {
     submitBody.webSearch = Boolean(webSearch);
 
     const cleanImages = Array.isArray(imageUrls)
-      ? imageUrls.filter((value) => typeof value === "string" && /^https?:\/\//i.test(value))
+      ? imageUrls.filter(isVideoImageReference)
       : [];
     const cleanVideos = Array.isArray(videoUrls)
       ? videoUrls.filter((value) => typeof value === "string" && /^https?:\/\//i.test(value))
@@ -140,8 +140,8 @@ module.exports = async function handler(req, res) {
     const cleanAudio = Array.isArray(referenceAudioUrls)
       ? referenceAudioUrls.filter((value) => typeof value === "string" && /^https?:\/\//i.test(value))
       : [];
-    const cleanFirstFrame = typeof firstFrameUrl === "string" && /^https?:\/\//i.test(firstFrameUrl) ? firstFrameUrl : "";
-    const cleanLastFrame = typeof lastFrameUrl === "string" && /^https?:\/\//i.test(lastFrameUrl) ? lastFrameUrl : "";
+    const cleanFirstFrame = isVideoImageReference(firstFrameUrl) ? firstFrameUrl : "";
+    const cleanLastFrame = isVideoImageReference(lastFrameUrl) ? lastFrameUrl : "";
     if (cleanImages.length) submitBody.image_urls = cleanImages.slice(0, 8);
     if (cleanVideos.length) submitBody.video_urls = cleanVideos.slice(0, 4);
     if (cleanFirstFrame) {
@@ -179,6 +179,8 @@ module.exports = async function handler(req, res) {
           generateAudio: Boolean(generateAudio),
           returnLastFrame: Boolean(returnLastFrame),
           webSearch: Boolean(webSearch),
+          firstFrame: Boolean(cleanFirstFrame),
+          lastFrame: Boolean(cleanLastFrame),
           imageCount: cleanImages.length,
           videoCount: cleanVideos.length,
           audioCount: cleanAudio.length,
@@ -201,6 +203,8 @@ module.exports = async function handler(req, res) {
       status: "submitted",
       model: providerSubmitBody.model,
       provider: normalizedProvider,
+      firstFrame: Boolean(cleanFirstFrame),
+      imageCount: cleanImages.length,
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
     });
   } catch (error) {
@@ -247,6 +251,10 @@ function normalizeSeed(value) {
   if (value === undefined || value === null || value === "") return null;
   const seed = Number(value);
   return Number.isInteger(seed) && seed >= 0 ? seed : null;
+}
+
+function isVideoImageReference(value) {
+  return typeof value === "string" && (/^https?:\/\//i.test(value) || /^data:image\//i.test(value));
 }
 
 async function getTask(apiKey, taskId) {
@@ -306,25 +314,37 @@ async function submitWeTokenVideoTask(apiKey, submitBody) {
 }
 
 function buildWeTokenSubmitBody(submitBody) {
-  const content = [{ type: "text", text: submitBody.prompt }];
   const firstFrame = submitBody.first_frame_url || submitBody.firstFrameUrl || "";
   const lastFrame = submitBody.last_frame_url || submitBody.lastFrameUrl || "";
+  const usesFrameMode = Boolean(firstFrame || lastFrame);
+  const content = [{
+    type: "text",
+    text: buildWeTokenPrompt(submitBody.prompt, {
+      hasFirstFrame: Boolean(firstFrame),
+      hasLastFrame: Boolean(lastFrame),
+      usesFrameMode,
+    }),
+  }];
   if (firstFrame) content.push({ type: "image_url", role: "first_frame", image_url: { url: firstFrame } });
   if (lastFrame) content.push({ type: "image_url", role: "last_frame", image_url: { url: lastFrame } });
-  const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
-  imageUrls.slice(0, 8).forEach((url) => {
-    if (url !== firstFrame && url !== lastFrame) {
+
+  if (!usesFrameMode) {
+    const imageUrls = Array.isArray(submitBody.image_urls) ? submitBody.image_urls : [];
+    imageUrls.slice(0, 9).forEach((url) => {
       content.push({ type: "image_url", role: "reference_image", image_url: { url } });
+    });
+    const videoUrls = Array.isArray(submitBody.video_urls) ? submitBody.video_urls : [];
+    videoUrls.slice(0, 3).forEach((url) => {
+      content.push({ type: "video_url", role: "reference_video", video_url: { url } });
+    });
+    const audioUrls = Array.isArray(submitBody.reference_audio_urls) ? submitBody.reference_audio_urls : [];
+    if ((imageUrls.length || videoUrls.length) && audioUrls.length) {
+      audioUrls.slice(0, 3).forEach((url) => {
+        content.push({ type: "audio_url", role: "reference_audio", audio_url: { url } });
+      });
     }
-  });
-  const videoUrls = Array.isArray(submitBody.video_urls) ? submitBody.video_urls : [];
-  videoUrls.slice(0, 4).forEach((url) => {
-    content.push({ type: "video_url", role: "reference_video", video_url: { url } });
-  });
-  const audioUrls = Array.isArray(submitBody.reference_audio_urls) ? submitBody.reference_audio_urls : [];
-  audioUrls.slice(0, 4).forEach((url) => {
-    content.push({ type: "audio_url", role: "reference_audio", audio_url: { url } });
-  });
+  }
+
   return {
     model: "doubao-seedance-2-0-260128",
     content,
@@ -334,6 +354,24 @@ function buildWeTokenSubmitBody(submitBody) {
     watermark: false,
     generate_audio: Boolean(submitBody.generate_audio || submitBody.generateAudio),
   };
+}
+
+function buildWeTokenPrompt(prompt, { hasFirstFrame, hasLastFrame, usesFrameMode } = {}) {
+  const rules = [];
+  if (hasFirstFrame) {
+    rules.push(
+      "SEEDANCE FRAME MODE: the uploaded first_frame is the opening frame and the primary visual source.",
+      "Keep the first_frame art direction: 2D animation / illustrated linework, clean color blocks, lighting, palette, perspective, camera framing, canvas ratio, street layout, character shapes, character placement, and scene structure.",
+      "Use the written prompt only to add motion, timing, effects, and camera movement on top of that first_frame. The first_frame decides style, composition, environment, and character look.",
+    );
+  }
+  if (hasLastFrame) {
+    rules.push("Use the uploaded last_frame as the ending visual state while keeping the same first_frame style and scene continuity.");
+  }
+  if (usesFrameMode) {
+    rules.push("Media mode note: this request uses Seedance first_frame/last_frame mode only; no reference_image or reference_video media are mixed into the API request.");
+  }
+  return [...rules, String(prompt || "").trim()].filter(Boolean).join("\n\n");
 }
 
 function normalizeWeTokenResolution(value) {
