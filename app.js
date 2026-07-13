@@ -3933,10 +3933,10 @@ async function submitAndPollVideoTask(payload, status) {
   status.textContent = result.firstFrame === false
     ? "视频任务已提交，但后端未收到首帧图，正在生成..."
     : "视频任务已提交，正在生成...";
-  return pollVideoTask(result.taskId, status, payload.apimartChannel, result.provider || payload.provider);
+  return pollVideoTask(result.taskId, status, payload.apimartChannel, result.provider || payload.provider, result.wetokenEndpoint || "");
 }
 
-async function pollVideoTask(taskId, statusEl, apimartChannel = "b", provider = "apimart") {
+async function pollVideoTask(taskId, statusEl, apimartChannel = "b", provider = "apimart", wetokenEndpoint = "") {
   const deadline = Date.now() + 1800000;
   let lastStatus = "submitted";
   let attempts = 0;
@@ -3944,7 +3944,7 @@ async function pollVideoTask(taskId, statusEl, apimartChannel = "b", provider = 
     await sleep(5000);
     attempts += 1;
     const response = await fetch(
-      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}&provider=${encodeURIComponent(provider)}`,
+      `/api/generate-video?taskId=${encodeURIComponent(taskId)}&apimartChannel=${encodeURIComponent(apimartChannel)}&provider=${encodeURIComponent(provider)}&wetokenEndpoint=${encodeURIComponent(wetokenEndpoint)}`,
     );
     const result = await readResponseJson(response);
     if (!response.ok) throw new Error(formatApiError(result, `HTTP ${response.status}`));
