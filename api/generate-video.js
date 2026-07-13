@@ -7,11 +7,18 @@ const WETOKEN_FALLBACK_TASK_URL = "https://wetoken.ai/api/v3/contents/generation
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
   const key = selected === "a" ? process.env.APIMART_API_KEY || process.env.APIMART_TOKEN : process.env.APIMART_API_KEY_2 || process.env.APIMART_TOKEN_2;
-  return sanitizeHeaderValue(key);
+  return sanitizeApiKey(key);
 }
 
 function getWeTokenKey() {
-  return sanitizeHeaderValue(process.env.WETOKEN_API_KEY || process.env.WETOKEN_TOKEN || process.env.SEEDANCE_WETOKEN_API_KEY || "");
+  return sanitizeApiKey(
+    process.env.WETOKEN_API_KEY ||
+    process.env.WETOKEN_TOKEN ||
+    process.env.WETOKEN_KEY ||
+    process.env.WE_TOKEN_API_KEY ||
+    process.env.SEEDANCE_WETOKEN_API_KEY ||
+    "",
+  );
 }
 
 function getWeTokenTaskUrls() {
@@ -41,6 +48,20 @@ function normalizeVideoProvider(value) {
 
 function sanitizeHeaderValue(value) {
   return String(value || "").trim().replace(/[^\x20-\x7E]/g, "");
+}
+
+function sanitizeApiKey(value) {
+  return sanitizeHeaderValue(value)
+    .replace(/^["']|["']$/g, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
+function maskKeyHint(value) {
+  const key = sanitizeApiKey(value);
+  if (!key) return "";
+  if (key.length <= 10) return `${key.slice(0, 2)}...${key.slice(-2)}`;
+  return `${key.slice(0, 6)}...${key.slice(-4)}`;
 }
 
 module.exports = async function handler(req, res) {
@@ -195,6 +216,7 @@ module.exports = async function handler(req, res) {
         request: {
           provider: normalizedProvider,
           wetokenEndpoint: normalizedProvider === "wetoken" ? submitEndpoint : undefined,
+          keyHint: normalizedProvider === "wetoken" ? maskKeyHint(apiKey) : undefined,
           model: providerSubmitBody.model,
           mode: submitBody.mode,
           duration: submitBody.duration,
@@ -240,6 +262,7 @@ module.exports = async function handler(req, res) {
       request: {
         provider: normalizedProvider,
         wetokenEndpoint: normalizedProvider === "wetoken" ? getWeTokenTaskUrl() : undefined,
+        keyHint: normalizedProvider === "wetoken" ? maskKeyHint(apiKey) : undefined,
       },
     });
   }
@@ -562,6 +585,9 @@ async function readJson(response) {
 
 function formatUpstreamError(payload) {
   const message = findMessage(payload);
+  if (/无效的令牌|invalid token|invalid api key|unauthorized|authorization|401/i.test(message)) {
+    return "WeToken API 认证失败：上游返回无效的令牌。请检查 Vercel 的 WETOKEN_API_KEY 是否是 WeToken 后台生成的 API Key；环境变量里只填纯 key，不要带 Bearer 前缀、引号或空格。修改后需要 Redeploy。";
+  }
   if (/internal server error|server_error/i.test(message)) {
     return "APIMart upstream server error. Please retry later or switch API channel.";
   }
