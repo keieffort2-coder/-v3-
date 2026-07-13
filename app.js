@@ -2680,7 +2680,7 @@ function renderVideoSettingsPanel(node) {
     <div class="video-frame-tool">
       <div class="video-frame-tool-head">
         <strong>逐帧提取</strong>
-        <button type="button" data-video-frame-extract>提取为图片节点</button>
+        <button type="button" data-video-frame-extract>保存到本地文件夹</button>
       </div>
       <div class="video-frame-tool-grid">
         <label>
@@ -2700,7 +2700,7 @@ function renderVideoSettingsPanel(node) {
           <input data-video-frame-setting="end" type="number" min="0" step="0.1" placeholder="视频结尾" value="${escapeHtml(node.dataset.videoExtractEnd || "")}">
         </label>
       </div>
-      <small data-video-frame-status>${node.dataset.generatedVideoUrl ? "使用当前生成视频本地抽帧，不上传云端。" : "生成视频完成后可抽帧。"}</small>
+      <small data-video-frame-status>${node.dataset.generatedVideoUrl ? "选择本地文件夹后保存 PNG 单帧，不上传云端。" : "生成视频完成后可抽帧保存。"}</small>
     </div>
   `;
   imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
@@ -2724,7 +2724,7 @@ function renderVideoSettingsPanel(node) {
     });
   });
   panel.querySelector("[data-video-frame-extract]")?.addEventListener("click", () => {
-    extractCurrentVideoFramesToNodes(node);
+    saveCurrentVideoFramesToLocalFolder(node);
   });
 }
 
@@ -2793,7 +2793,7 @@ function syncVideoOptionsSummary(node) {
   ].join(" / ");
 }
 
-async function extractCurrentVideoFramesToNodes(node) {
+async function saveCurrentVideoFramesToLocalFolder(node) {
   if (!node || node.dataset.type !== "video") return;
   persistVideoFrameSettingsFromPanel(node);
   const status = ensureNodeStatus(node);
@@ -2815,7 +2815,14 @@ async function extractCurrentVideoFramesToNodes(node) {
   const requestedEnd = Number(node.dataset.videoExtractEnd || 0) || 0;
 
   try {
+    if (!window.showDirectoryPicker) {
+      throw new Error("当前浏览器不支持直接选择文件夹保存，请使用 Chrome / Edge 最新版。");
+    }
     node.classList.add("running");
+    setStatus("请选择保存单帧的本地文件夹...");
+    const rootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+    const folderName = buildVideoFrameFolderName(node);
+    const folderHandle = await rootHandle.getDirectoryHandle(folderName, { create: true });
     setStatus("正在读取视频...");
     const frames = await extractVideoFrames(videoUrl, {
       fps,
@@ -2828,8 +2835,10 @@ async function extractCurrentVideoFramesToNodes(node) {
       setStatus("没有提取到可用帧。");
       return;
     }
-    createFrameImageNodes(node, frames);
-    setStatus(`已提取 ${frames.length} 张 PNG 单帧。`);
+    await saveVideoFramesToFolder(folderHandle, node, frames, (done, total) => {
+      setStatus(`正在保存 PNG ${done}/${total}...`);
+    });
+    setStatus(`已保存 ${frames.length} 张 PNG 单帧到文件夹：${folderName}`);
     saveCurrentProject();
   } catch (error) {
     setStatus(`抽帧失败：${error instanceof Error ? error.message : String(error)}`);
@@ -2930,27 +2939,35 @@ function seekVideo(video, time) {
   });
 }
 
-function createFrameImageNodes(sourceNode, frames) {
-  const originX = Number(sourceNode.dataset.x || 0);
-  const originY = Number(sourceNode.dataset.y || 0);
-  const sourceTitle = sourceNode.querySelector(".node-title strong")?.textContent || "视频";
-  frames.forEach((frame, index) => {
-    const title = `${sourceTitle}_单帧_${String(index + 1).padStart(3, "0")}`;
-    const frameNode = createNode({
-      id: createNodeId(),
-      type: "image",
-      title,
-      content: `从视频节点提取的第 ${index + 1} 帧，时间 ${frame.time.toFixed(2)} 秒。`,
-      x: originX + 360 + (index % 4) * 250,
-      y: originY + Math.floor(index / 4) * 280,
-      imageDataUrl: frame.imageUrl,
-      fileName: `${safeAsciiFileName(title, "video-frame")}.png`,
-      imageRole: "general",
-    });
-    frameNode.dataset.imageNaturalWidth = String(frame.width || "");
-    frameNode.dataset.imageNaturalHeight = String(frame.height || "");
-    renderNodeImagePreview(frameNode);
-  });
+function buildVideoFrameFolderName(node) {
+  const title = node.querySelector(".node-title strong")?.textContent || "video";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return safeAsciiFileName(`${title}_frames_${stamp}`, "video-frames");
+}
+
+async function saveVideoFramesToFolder(folderHandle, sourceNode, frames, onProgress) {
+  const sourceTitle = sourceNode.querySelector(".node-title strong")?.textContent || "video";
+  const baseName = safeAsciiFileName(sourceTitle, "video-frame");
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    const fileName = `${baseName}_${String(index + 1).padStart(4, "0")}_${frame.time.toFixed(2).replace(".", "s")}.png`;
+    const fileHandle = await folderHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(dataUrlToBlob(frame.imageUrl));
+    await writable.close();
+    onProgress?.(index + 1, frames.length);
+  }
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = String(dataUrl || "").split(",");
+  const mime = header?.match(/data:([^;]+)/)?.[1] || "image/png";
+  const binary = atob(base64 || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mime });
 }
 
 function persistImageConfigOptions() {
