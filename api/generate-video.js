@@ -2,6 +2,7 @@ const { put } = require("@vercel/blob");
 
 const API_BASE = "https://api.apimart.ai/v1";
 const WETOKEN_DEFAULT_TASK_URL = "https://wetoken.lingxixai.com/api/v3/contents/generations/tasks";
+const WETOKEN_FALLBACK_TASK_URL = "https://wetoken.ai/api/v3/contents/generations/tasks";
 
 function getApiMartKey(channel) {
   const selected = String(channel || "b").toLowerCase();
@@ -13,8 +14,24 @@ function getWeTokenKey() {
   return sanitizeHeaderValue(process.env.WETOKEN_API_KEY || process.env.WETOKEN_TOKEN || process.env.SEEDANCE_WETOKEN_API_KEY || "");
 }
 
-function getWeTokenTaskUrl() {
-  return sanitizeHeaderValue(process.env.WETOKEN_TASK_URL || process.env.WETOKEN_SEEDANCE_TASK_URL || WETOKEN_DEFAULT_TASK_URL).replace(/\/+$/, "");
+function getWeTokenTaskUrls() {
+  const configured = [
+    process.env.WETOKEN_TASK_URL,
+    process.env.WETOKEN_SEEDANCE_TASK_URL,
+    ...(process.env.WETOKEN_FALLBACK_TASK_URLS || "").split(/[,\s]+/),
+    WETOKEN_DEFAULT_TASK_URL,
+    WETOKEN_FALLBACK_TASK_URL,
+  ];
+  const urls = configured
+    .map((value) => sanitizeHeaderValue(value).replace(/\/+$/, ""))
+    .filter((value) => /^https:\/\/[^/]+\/api\/v3\/contents\/generations\/tasks$/i.test(value));
+  return [...new Set(urls)];
+}
+
+function getWeTokenTaskUrl(requestedUrl = "") {
+  const urls = getWeTokenTaskUrls();
+  const requested = sanitizeHeaderValue(requestedUrl).replace(/\/+$/, "");
+  return urls.includes(requested) ? requested : urls[0];
 }
 
 function normalizeVideoProvider(value) {
@@ -47,7 +64,8 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-      const taskPayload = provider === "wetoken" ? await getWeTokenTask(apiKey, String(taskId)) : await getTask(apiKey, String(taskId));
+      const wetokenEndpoint = getWeTokenTaskUrl(req.query?.wetokenEndpoint);
+      const taskPayload = provider === "wetoken" ? await getWeTokenTask(apiKey, String(taskId), wetokenEndpoint) : await getTask(apiKey, String(taskId));
       const status = getTaskStatus(taskPayload);
       const videoUrl = await persistResultVideo(extractResultVideoUrl(taskPayload), taskId);
       res.status(200).json({
@@ -55,6 +73,7 @@ module.exports = async function handler(req, res) {
         status,
         videoUrl,
         provider,
+        wetokenEndpoint: provider === "wetoken" ? wetokenEndpoint : undefined,
         message: formatUpstreamError(taskPayload),
         payload: videoUrl ? undefined : taskPayload,
       });
@@ -62,6 +81,11 @@ module.exports = async function handler(req, res) {
       res.status(500).json({
         error: "Video task polling failed",
         message: error instanceof Error ? error.message : String(error),
+        request: {
+          provider,
+          wetokenEndpoint: provider === "wetoken" ? getWeTokenTaskUrl(req.query?.wetokenEndpoint) : undefined,
+          taskId: String(taskId),
+        },
       });
     }
     return;
@@ -160,7 +184,7 @@ module.exports = async function handler(req, res) {
     const providerSubmitBody = normalizedProvider === "wetoken"
       ? buildWeTokenSubmitBody(submitBody)
       : submitBody;
-    const { response: submit, payload: submitPayload } = normalizedProvider === "wetoken"
+    const { response: submit, payload: submitPayload, endpoint: submitEndpoint } = normalizedProvider === "wetoken"
       ? await submitWeTokenVideoTask(apiKey, providerSubmitBody)
       : await submitVideoTask(apiKey, providerSubmitBody);
     if (!submit.ok) {
@@ -170,6 +194,7 @@ module.exports = async function handler(req, res) {
         upstream: submitPayload,
         request: {
           provider: normalizedProvider,
+          wetokenEndpoint: normalizedProvider === "wetoken" ? submitEndpoint : undefined,
           model: providerSubmitBody.model,
           mode: submitBody.mode,
           duration: submitBody.duration,
@@ -203,6 +228,7 @@ module.exports = async function handler(req, res) {
       status: "submitted",
       model: providerSubmitBody.model,
       provider: normalizedProvider,
+      wetokenEndpoint: normalizedProvider === "wetoken" ? submitEndpoint : undefined,
       firstFrame: Boolean(cleanFirstFrame),
       imageCount: cleanImages.length,
       apimartChannel: String(apimartChannel || "b").toLowerCase() === "a" ? "a" : "b",
@@ -211,6 +237,10 @@ module.exports = async function handler(req, res) {
     res.status(500).json({
       error: "Video generation failed",
       message: error instanceof Error ? error.message : String(error),
+      request: {
+        provider: normalizedProvider,
+        wetokenEndpoint: normalizedProvider === "wetoken" ? getWeTokenTaskUrl() : undefined,
+      },
     });
   }
 };
@@ -266,10 +296,11 @@ async function getTask(apiKey, taskId) {
   return payload;
 }
 
-async function getWeTokenTask(apiKey, taskId) {
-  const response = await fetch(`${getWeTokenTaskUrl()}/${encodeURIComponent(taskId)}`, {
+async function getWeTokenTask(apiKey, taskId, endpoint = getWeTokenTaskUrl()) {
+  const url = `${getWeTokenTaskUrl(endpoint)}/${encodeURIComponent(taskId)}`;
+  const response = await fetchWithNetworkMessage(url, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  }, "WeToken poll");
   const payload = await readJson(response);
   if (!response.ok) throw new Error(JSON.stringify(payload));
   return payload;
@@ -301,16 +332,46 @@ async function submitVideoTask(apiKey, submitBody) {
 }
 
 async function submitWeTokenVideoTask(apiKey, submitBody) {
-  const response = await fetch(getWeTokenTaskUrl(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(submitBody),
-  });
-  const payload = await readJson(response);
-  return { response, payload };
+  const attempts = [];
+  for (const endpoint of getWeTokenTaskUrls()) {
+    try {
+      const response = await fetchWithNetworkMessage(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(submitBody),
+      }, "WeToken submit");
+      const payload = await readJson(response);
+      return { response, payload, endpoint };
+    } catch (error) {
+      attempts.push({
+        endpoint,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const summary = attempts.map((item, index) => `#${index + 1} ${item.endpoint}: ${item.message}`).join(" | ");
+  throw new Error(`WeToken submit network failed after ${attempts.length} endpoint(s): ${summary}`);
+}
+
+async function fetchWithNetworkMessage(url, options, label = "upstream fetch") {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    const cause = error?.cause;
+    const details = [
+      `${label} failed`,
+      `endpoint: ${url}`,
+      error instanceof Error && error.message ? `message: ${error.message}` : "",
+      cause?.code ? `code: ${cause.code}` : "",
+      cause?.errno ? `errno: ${cause.errno}` : "",
+      cause?.syscall ? `syscall: ${cause.syscall}` : "",
+      cause?.hostname ? `host: ${cause.hostname}` : "",
+    ].filter(Boolean);
+    throw new Error(details.join(", "));
+  }
 }
 
 function buildWeTokenSubmitBody(submitBody) {
