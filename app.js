@@ -1866,6 +1866,10 @@ function createNode({
   videoGenerateAudio,
   videoReturnLastFrame,
   videoWebSearch,
+  videoExtractFps,
+  videoExtractMaxFrames,
+  videoExtractStart,
+  videoExtractEnd,
   videoFirstFrameUrl,
   videoLastFrameUrl,
   videoReferenceAudioUrl,
@@ -1914,6 +1918,10 @@ function createNode({
   if (videoGenerateAudio !== undefined) node.dataset.videoGenerateAudio = String(videoGenerateAudio);
   if (videoReturnLastFrame !== undefined) node.dataset.videoReturnLastFrame = String(videoReturnLastFrame);
   if (videoWebSearch !== undefined) node.dataset.videoWebSearch = String(videoWebSearch);
+  if (videoExtractFps) node.dataset.videoExtractFps = videoExtractFps;
+  if (videoExtractMaxFrames) node.dataset.videoExtractMaxFrames = videoExtractMaxFrames;
+  if (videoExtractStart) node.dataset.videoExtractStart = videoExtractStart;
+  if (videoExtractEnd) node.dataset.videoExtractEnd = videoExtractEnd;
   if (videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = videoFirstFrameUrl;
   if (videoLastFrameUrl) node.dataset.videoLastFrameUrl = videoLastFrameUrl;
   if (videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = videoReferenceAudioUrl;
@@ -2669,6 +2677,31 @@ function renderVideoSettingsPanel(node) {
       ${renderVideoAssetPicker("referenceVideo", "参考视频", "video/*", node.dataset.referenceVideoUrl)}
       ${renderVideoAssetPicker("referenceAudio", "参考音频", "audio/*", node.dataset.videoReferenceAudioUrl)}
     </div>
+    <div class="video-frame-tool">
+      <div class="video-frame-tool-head">
+        <strong>逐帧提取</strong>
+        <button type="button" data-video-frame-extract>提取为图片节点</button>
+      </div>
+      <div class="video-frame-tool-grid">
+        <label>
+          <span>每秒帧数</span>
+          <input data-video-frame-setting="fps" type="number" min="0.1" max="24" step="0.1" value="${escapeHtml(node.dataset.videoExtractFps || "1")}">
+        </label>
+        <label>
+          <span>最多帧数</span>
+          <input data-video-frame-setting="maxFrames" type="number" min="1" max="120" step="1" value="${escapeHtml(node.dataset.videoExtractMaxFrames || "24")}">
+        </label>
+        <label>
+          <span>起始秒</span>
+          <input data-video-frame-setting="start" type="number" min="0" step="0.1" placeholder="0" value="${escapeHtml(node.dataset.videoExtractStart || "")}">
+        </label>
+        <label>
+          <span>结束秒</span>
+          <input data-video-frame-setting="end" type="number" min="0" step="0.1" placeholder="视频结尾" value="${escapeHtml(node.dataset.videoExtractEnd || "")}">
+        </label>
+      </div>
+      <small data-video-frame-status>${node.dataset.generatedVideoUrl ? "使用当前生成视频本地抽帧，不上传云端。" : "生成视频完成后可抽帧。"}</small>
+    </div>
   `;
   imageConfigPanel.insertBefore(panel, imagePromptInput.nextSibling);
   panel.querySelector('[data-video-setting="videoProvider"]').value = normalizeVideoProvider(node.dataset.videoProvider);
@@ -2683,6 +2716,15 @@ function renderVideoSettingsPanel(node) {
     node.dataset.videoModel = normalizeVideoModelValue(node.dataset.videoModel, node.dataset.videoProvider);
     setVideoModelOptions(node.dataset.videoProvider, node.dataset.videoModel);
     saveCurrentProject();
+  });
+  panel.querySelectorAll("[data-video-frame-setting]").forEach((input) => {
+    input.addEventListener("change", () => {
+      persistVideoFrameSettingsFromPanel(node);
+      saveCurrentProject();
+    });
+  });
+  panel.querySelector("[data-video-frame-extract]")?.addEventListener("click", () => {
+    extractCurrentVideoFramesToNodes(node);
   });
 }
 
@@ -2718,6 +2760,21 @@ function persistVideoSettingsFromPanel(node) {
   syncVideoOptionsSummary(node);
 }
 
+function persistVideoFrameSettingsFromPanel(node) {
+  if (!node) return;
+  const panel = imageConfigPanel.querySelector(".video-settings-panel");
+  if (!panel) return;
+  panel.querySelectorAll("[data-video-frame-setting]").forEach((input) => {
+    const key = input.dataset.videoFrameSetting;
+    if (!key) return;
+    const value = input.value.trim();
+    if (key === "fps") node.dataset.videoExtractFps = value;
+    if (key === "maxFrames") node.dataset.videoExtractMaxFrames = value;
+    if (key === "start") node.dataset.videoExtractStart = value;
+    if (key === "end") node.dataset.videoExtractEnd = value;
+  });
+}
+
 function syncVideoOptionsSummary(node) {
   if (!openImageOptions || !node) return;
   const modeLabel = videoModeLabels[normalizeVideoModeValue(node.dataset.videoMode)] || "图生视频";
@@ -2734,6 +2791,166 @@ function syncVideoOptionsSummary(node) {
     node.dataset.videoResolution || "1080p",
     flags.length ? flags.join("+") : "参数面板",
   ].join(" / ");
+}
+
+async function extractCurrentVideoFramesToNodes(node) {
+  if (!node || node.dataset.type !== "video") return;
+  persistVideoFrameSettingsFromPanel(node);
+  const status = ensureNodeStatus(node);
+  const panelStatus = imageConfigPanel.querySelector("[data-video-frame-status]");
+  const setStatus = (message) => {
+    status.textContent = message;
+    if (panelStatus) panelStatus.textContent = message;
+  };
+
+  const videoUrl = node.dataset.generatedVideoUrl || parseJsonArray(node.dataset.generatedVideoUrls)[0] || "";
+  if (!videoUrl) {
+    setStatus("请先生成视频，再逐帧提取。");
+    return;
+  }
+
+  const fps = clampNumber(Number(node.dataset.videoExtractFps || 1), 0.1, 24, 1);
+  const maxFrames = Math.round(clampNumber(Number(node.dataset.videoExtractMaxFrames || 24), 1, 120, 24));
+  const start = Math.max(0, Number(node.dataset.videoExtractStart || 0) || 0);
+  const requestedEnd = Number(node.dataset.videoExtractEnd || 0) || 0;
+
+  try {
+    node.classList.add("running");
+    setStatus("正在读取视频...");
+    const frames = await extractVideoFrames(videoUrl, {
+      fps,
+      maxFrames,
+      start,
+      end: requestedEnd > start ? requestedEnd : null,
+      onProgress: (done, total) => setStatus(`正在抽帧 ${done}/${total}...`),
+    });
+    if (!frames.length) {
+      setStatus("没有提取到可用帧。");
+      return;
+    }
+    createFrameImageNodes(node, frames);
+    setStatus(`已提取 ${frames.length} 张 PNG 单帧。`);
+    saveCurrentProject();
+  } catch (error) {
+    setStatus(`抽帧失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    node.classList.remove("running");
+  }
+}
+
+function clampNumber(value, min, max, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+async function extractVideoFrames(videoUrl, options = {}) {
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = videoUrl;
+  await waitForVideoMetadata(video);
+
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  if (!duration) throw new Error("无法读取视频时长。");
+  const start = Math.min(Math.max(0, options.start || 0), Math.max(0, duration - 0.05));
+  const end = Math.min(options.end || duration, duration);
+  if (end <= start) throw new Error("抽帧结束时间必须大于起始时间。");
+
+  const step = 1 / clampNumber(Number(options.fps || 1), 0.1, 24, 1);
+  const maxFrames = Math.round(clampNumber(Number(options.maxFrames || 24), 1, 120, 24));
+  const times = [];
+  for (let time = start; time <= end + 0.0001 && times.length < maxFrames; time += step) {
+    times.push(Math.min(time, Math.max(0, duration - 0.01)));
+  }
+
+  const canvas = document.createElement("canvas");
+  const width = video.videoWidth || 1;
+  const height = video.videoHeight || 1;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const frames = [];
+
+  for (let index = 0; index < times.length; index += 1) {
+    await seekVideo(video, times[index]);
+    context.drawImage(video, 0, 0, width, height);
+    frames.push({
+      time: times[index],
+      imageUrl: canvas.toDataURL("image/png"),
+      width,
+      height,
+    });
+    options.onProgress?.(index + 1, times.length);
+  }
+
+  video.removeAttribute("src");
+  video.load();
+  return frames;
+}
+
+function waitForVideoMetadata(video) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("error", onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("视频无法加载，可能是链接失效或跨域限制。"));
+    };
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    video.load();
+  });
+}
+
+function seekVideo(video, time) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+    };
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("视频定位失败。"));
+    };
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    video.currentTime = time;
+  });
+}
+
+function createFrameImageNodes(sourceNode, frames) {
+  const originX = Number(sourceNode.dataset.x || 0);
+  const originY = Number(sourceNode.dataset.y || 0);
+  const sourceTitle = sourceNode.querySelector(".node-title strong")?.textContent || "视频";
+  frames.forEach((frame, index) => {
+    const title = `${sourceTitle}_单帧_${String(index + 1).padStart(3, "0")}`;
+    const frameNode = createNode({
+      id: createNodeId(),
+      type: "image",
+      title,
+      content: `从视频节点提取的第 ${index + 1} 帧，时间 ${frame.time.toFixed(2)} 秒。`,
+      x: originX + 360 + (index % 4) * 250,
+      y: originY + Math.floor(index / 4) * 280,
+      imageDataUrl: frame.imageUrl,
+      fileName: `${safeAsciiFileName(title, "video-frame")}.png`,
+      imageRole: "general",
+    });
+    frameNode.dataset.imageNaturalWidth = String(frame.width || "");
+    frameNode.dataset.imageNaturalHeight = String(frame.height || "");
+    renderNodeImagePreview(frameNode);
+  });
 }
 
 function persistImageConfigOptions() {
@@ -3652,6 +3869,10 @@ function duplicateNode(node) {
     videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
     videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
     videoWebSearch: node.dataset.videoWebSearch === "true",
+    videoExtractFps: node.dataset.videoExtractFps || "",
+    videoExtractMaxFrames: node.dataset.videoExtractMaxFrames || "",
+    videoExtractStart: node.dataset.videoExtractStart || "",
+    videoExtractEnd: node.dataset.videoExtractEnd || "",
     videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
     videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
     videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
@@ -5922,6 +6143,10 @@ function serializeNodes(nodes) {
       videoGenerateAudio: node.dataset.videoGenerateAudio === "true",
       videoReturnLastFrame: node.dataset.videoReturnLastFrame === "true",
       videoWebSearch: node.dataset.videoWebSearch === "true",
+      videoExtractFps: node.dataset.videoExtractFps || "",
+      videoExtractMaxFrames: node.dataset.videoExtractMaxFrames || "",
+      videoExtractStart: node.dataset.videoExtractStart || "",
+      videoExtractEnd: node.dataset.videoExtractEnd || "",
       videoFirstFrameUrl: node.dataset.videoFirstFrameUrl || "",
       videoLastFrameUrl: node.dataset.videoLastFrameUrl || "",
       videoReferenceAudioUrl: node.dataset.videoReferenceAudioUrl || "",
@@ -6062,6 +6287,10 @@ function restoreCanvasData(data) {
     node.dataset.videoGenerateAudio = String(Boolean(saved.videoGenerateAudio));
     node.dataset.videoReturnLastFrame = String(Boolean(saved.videoReturnLastFrame));
     node.dataset.videoWebSearch = String(Boolean(saved.videoWebSearch));
+    node.dataset.videoExtractFps = saved.videoExtractFps || "";
+    node.dataset.videoExtractMaxFrames = saved.videoExtractMaxFrames || "";
+    node.dataset.videoExtractStart = saved.videoExtractStart || "";
+    node.dataset.videoExtractEnd = saved.videoExtractEnd || "";
     if (saved.videoFirstFrameUrl) node.dataset.videoFirstFrameUrl = saved.videoFirstFrameUrl;
     if (saved.videoLastFrameUrl) node.dataset.videoLastFrameUrl = saved.videoLastFrameUrl;
     if (saved.videoReferenceAudioUrl) node.dataset.videoReferenceAudioUrl = saved.videoReferenceAudioUrl;
