@@ -84,8 +84,8 @@ const videoProviderLabels = {
   wetoken: "WeToken",
 };
 const videoProviderOptions = [
-  ["apimart", "ApiMart"],
   ["wetoken", "WeToken"],
+  ["apimart", "ApiMart"],
 ];
 const apiMartVideoModelOptions = [
   ["doubao-seedance-2.0", "Seedance2"],
@@ -2104,10 +2104,10 @@ function normalizeVideoModeValue(value) {
 
 function normalizeVideoProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
-  return videoProviderLabels[provider] ? provider : "apimart";
+  return videoProviderLabels[provider] ? provider : "wetoken";
 }
 
-function normalizeVideoModelValue(value, provider = "apimart") {
+function normalizeVideoModelValue(value, provider = "wetoken") {
   const model = String(value || "").trim();
   const normalizedProvider = normalizeVideoProvider(provider);
   if (normalizedProvider === "wetoken") return "doubao-seedance-2-0-260128";
