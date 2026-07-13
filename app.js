@@ -155,6 +155,7 @@ let canvasDragDepth = 0;
 let exportImageSelection = new Set();
 const imageGenerationControllers = new Map();
 const selectedNodes = new Set();
+const localVideoObjectUrls = new Map();
 let conversationMemories = [];
 let pendingDeletedProjectNames = [];
 let imageOptions = {
@@ -736,11 +737,12 @@ addLocalReference?.addEventListener("change", async () => {
     configNode.dataset.referenceImageDataInlineUrl = nextInline[0] || "";
   } else if (configNode && file.type.startsWith("video/")) {
     configNode.dataset.referenceFileName = file.name;
-    const url = await uploadMediaFile(file);
+    const url = await createLocalVideoReference(file);
     const current = parseJsonArray(configNode.dataset.referenceVideoUrls);
     const next = uniqueValues([...current, url]);
     configNode.dataset.referenceVideoUrls = JSON.stringify(next);
     configNode.dataset.referenceVideoUrl = next[0] || "";
+    configNode.dataset.referenceVideoLocalOnly = "true";
   }
   referencePicker.classList.remove("show");
   referencePicker.setAttribute("aria-hidden", "true");
@@ -753,10 +755,10 @@ async function handleVideoAssetUpload(input) {
   if (!file) return;
   const slot = input.dataset.videoAsset;
   const label = input.closest(".video-asset-picker")?.querySelector("small");
-  if (label) label.textContent = "上传中...";
+  if (label) label.textContent = file.type.startsWith("video/") ? "加载本地引用..." : "上传中...";
 
   try {
-    const url = file.type.startsWith("image/") ? await uploadImageFile(file) : await uploadMediaFile(file);
+    const url = file.type.startsWith("image/") ? await uploadImageFile(file) : await createLocalVideoReference(file);
     if (slot === "firstFrame") {
       configNode.dataset.videoFirstFrameUrl = url;
       configNode.dataset.referenceImageUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceImageUrls)]));
@@ -766,11 +768,12 @@ async function handleVideoAssetUpload(input) {
     } else if (slot === "referenceVideo") {
       configNode.dataset.referenceVideoUrl = url;
       configNode.dataset.referenceVideoUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.referenceVideoUrls)]));
+      configNode.dataset.referenceVideoLocalOnly = "true";
     } else if (slot === "referenceAudio") {
       configNode.dataset.videoReferenceAudioUrl = url;
       configNode.dataset.videoReferenceAudioUrls = JSON.stringify(uniqueValues([url, ...parseJsonArray(configNode.dataset.videoReferenceAudioUrls)]));
     }
-    if (label) label.textContent = file.name;
+    if (label) label.textContent = file.type.startsWith("video/") ? `${file.name}（本地）` : file.name;
     renderConfigInputThumbnails(configNode);
     saveCurrentProject();
   } catch (error) {
@@ -3761,6 +3764,10 @@ function isRemoteImageUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function isLocalVideoReference(value) {
+  return typeof value === "string" && /^(blob:|data:video\/)/i.test(value);
+}
+
 function isDataImageUrl(value) {
   return typeof value === "string" && /^data:image\//i.test(value);
 }
@@ -4113,10 +4120,16 @@ async function runVideoGeneration(node) {
     ...getNodeVideoSources(node),
     ...connectedNodes.flatMap(getNodeVideoSources),
   ].filter(isRemoteImageUrl));
+  const hasLocalVideoReferences = uniqueValues([
+    ...getNodeVideoSources(node),
+    ...connectedNodes.flatMap(getNodeVideoSources),
+  ]).some(isLocalVideoReference);
 
   node.classList.add("running");
   const videoProvider = normalizeVideoProvider(node.dataset.videoProvider);
-  status.textContent = `正在提交 ${videoProviderLabels[videoProvider]} 视频任务...`;
+  status.textContent = hasLocalVideoReferences && !videoUrls.length
+    ? `检测到本地参考视频：当前仅用于本地预览，不会上传到 Vercel 或提交给 ${videoProviderLabels[videoProvider]} 上游。正在提交视频任务...`
+    : `正在提交 ${videoProviderLabels[videoProvider]} 视频任务...`;
   if (preview && !preview.innerHTML.trim()) {
     preview.innerHTML = '<div class="generated-placeholder">生成中</div>';
   }
@@ -5258,6 +5271,9 @@ async function uploadImageFile(file) {
 }
 
 async function uploadMediaFile(file) {
+  if (file?.type?.startsWith("video/")) {
+    return createLocalVideoReference(file);
+  }
   const imageDataUrl = await fileToDataUrl(file);
   const response = await fetch("/api/upload-image", {
     method: "POST",
@@ -5280,6 +5296,14 @@ async function uploadMediaFile(file) {
     throw new Error("上传接口没有返回图片 URL");
   }
   return result.url;
+}
+
+async function createLocalVideoReference(file) {
+  if (!file || !file.type?.startsWith("video/")) throw new Error("不是有效的视频文件");
+  const url = URL.createObjectURL(file);
+  const key = `local-video:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  localVideoObjectUrls.set(key, url);
+  return url;
 }
 
 function isBlobStorageQuotaError(message) {
@@ -5656,17 +5680,18 @@ function uploadFilesToVideoNode(node, files) {
 
   const preview = node.querySelector(".upload-preview");
   const status = ensureNodeStatus(node);
-  status.textContent = "正在上传视频...";
+  status.textContent = "正在加载本地视频引用...";
   if (preview) {
     preview.innerHTML = `<video src="${URL.createObjectURL(file)}" muted controls playsinline></video>`;
   }
 
-  uploadMediaFile(file)
-    .then((uploadedUrl) => {
-      node.dataset.videoUrls = JSON.stringify([uploadedUrl]);
-      node.dataset.videoDataUrl = uploadedUrl;
+  createLocalVideoReference(file)
+    .then((localUrl) => {
+      node.dataset.videoUrls = JSON.stringify([localUrl]);
+      node.dataset.videoDataUrl = localUrl;
+      node.dataset.referenceVideoLocalOnly = "true";
       renderNodeVideoPreview(node);
-      status.textContent = "视频已上传并保存。";
+      status.textContent = "视频已作为本地引用使用，不会上传到 Vercel。";
       saveCurrentProject();
     })
     .catch((error) => {
