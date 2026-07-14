@@ -1306,14 +1306,29 @@ function normalizeSize(size, model = "") {
   if (match) {
     const sourceWidth = Number(match[1]);
     const sourceHeight = Number(match[2]);
-    const maxEdge = Math.max(sourceWidth, sourceHeight);
+    const clamped = clampSizeAspectRatio(sourceWidth, sourceHeight);
+    const maxEdge = Math.max(clamped.width, clamped.height);
     const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-    const width = Math.min(3840, roundUpToMultiple(sourceWidth * scale, 16));
-    const height = Math.min(3840, roundUpToMultiple(sourceHeight * scale, 16));
+    const width = Math.min(3840, roundUpToMultiple(clamped.width * scale, 16));
+    const height = Math.min(3840, roundUpToMultiple(clamped.height * scale, 16));
     return `${width}x${height}`;
   }
   if (["1024x1024", "1536x864", "864x1536", "auto"].includes(value)) return value;
   return "";
+}
+
+function clampSizeAspectRatio(width, height, maxRatio = 3) {
+  let nextWidth = Number(width);
+  let nextHeight = Number(height);
+  if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) {
+    return { width: 0, height: 0 };
+  }
+  if (nextWidth / nextHeight > maxRatio) {
+    nextWidth = nextHeight * maxRatio;
+  } else if (nextHeight / nextWidth > maxRatio) {
+    nextHeight = nextWidth * maxRatio;
+  }
+  return { width: nextWidth, height: nextHeight };
 }
 
 function roundUpToMultiple(value, multiple) {
