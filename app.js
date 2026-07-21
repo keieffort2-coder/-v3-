@@ -43,6 +43,7 @@ const resetCanvasView = document.querySelector("#resetCanvasView");
 const zoomCanvasOut = document.querySelector("#zoomCanvasOut");
 const zoomCanvasIn = document.querySelector("#zoomCanvasIn");
 const canvasZoomLabel = document.querySelector("#canvasZoomLabel");
+const homeAnnouncementModal = document.querySelector("#homeAnnouncementModal");
 let memoryComposer = document.querySelector("#memoryComposer");
 let memoryInput = document.querySelector("#memoryInput");
 let memoryType = document.querySelector("#memoryType");
@@ -1117,7 +1118,26 @@ function showPage(name) {
   pages.forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.page === name));
   applyWorkspaceSidebarsState();
+  if (name === "home") showHomeAnnouncement();
 }
+
+function showHomeAnnouncement() {
+  if (!homeAnnouncementModal) return;
+  homeAnnouncementModal.classList.add("show");
+  homeAnnouncementModal.setAttribute("aria-hidden", "false");
+}
+
+function closeHomeAnnouncement() {
+  if (!homeAnnouncementModal) return;
+  homeAnnouncementModal.classList.remove("show");
+  homeAnnouncementModal.setAttribute("aria-hidden", "true");
+}
+
+homeAnnouncementModal?.addEventListener("click", (event) => {
+  if (event.target === homeAnnouncementModal || event.target.closest("[data-announcement-close]")) {
+    closeHomeAnnouncement();
+  }
+});
 
 function upsertProject(name) {
   if (!projectGrid.querySelector(`[data-project="${cssEscape(name)}"]`)) {
@@ -5101,11 +5121,26 @@ function sizeFromDimensions(width, height, model = "") {
 function normalizeGenerationSize(width, height, model = "") {
   if (!width || !height) return "";
   if (isRhartImageModel(model)) return closestRhartAspectRatio(width, height);
-  const maxEdge = Math.max(width, height);
+  const clamped = clampImageSizeAspectRatio(width, height);
+  const maxEdge = Math.max(clamped.width, clamped.height);
   const scale = maxEdge > 3840 ? 3840 / maxEdge : 1;
-  const nextWidth = Math.min(3840, roundUpToMultiple(width * scale, 16));
-  const nextHeight = Math.min(3840, roundUpToMultiple(height * scale, 16));
+  const nextWidth = Math.min(3840, roundUpToMultiple(clamped.width * scale, 16));
+  const nextHeight = Math.min(3840, roundUpToMultiple(clamped.height * scale, 16));
   return `${nextWidth}x${nextHeight}`;
+}
+
+function clampImageSizeAspectRatio(width, height, maxRatio = 3) {
+  let nextWidth = Number(width);
+  let nextHeight = Number(height);
+  if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) {
+    return { width: 0, height: 0 };
+  }
+  if (nextWidth / nextHeight > maxRatio) {
+    nextWidth = nextHeight * maxRatio;
+  } else if (nextHeight / nextWidth > maxRatio) {
+    nextHeight = nextWidth * maxRatio;
+  }
+  return { width: nextWidth, height: nextHeight };
 }
 
 function closestRhartAspectRatio(width, height) {
