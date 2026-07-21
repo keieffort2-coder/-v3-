@@ -474,6 +474,55 @@
       <button class="image-viewer-nav next" type="button" data-image-step="1">›</button>
     </div>
 
+    <div class="home-announcement-modal" id="homeAnnouncementModal" aria-hidden="true">
+      <div class="home-announcement-panel" role="dialog" aria-modal="true" aria-labelledby="homeAnnouncementTitle">
+        <header>
+          <div>
+            <span class="kicker">UPDATE NOTICE</span>
+            <strong id="homeAnnouncementTitle">AIVideoBox 使用公告与功能更新</strong>
+          </div>
+          <button type="button" data-announcement-close>关闭</button>
+        </header>
+        <div class="home-announcement-body">
+          <section>
+            <h3>本次重点</h3>
+            <ul>
+              <li>图片节点支持多渠道生图：ApiMart、AIHubMix、RHarT、RayinAI 多 API 子渠道。</li>
+              <li>结构+风格模式已强化：结构图负责构图、透视、主体位置；风格图负责色彩、光照、笔触和材质。</li>
+              <li>视频节点支持图生视频、文生视频、视频参考转换，并可设置首帧、尾帧、参考视频和参考音频。</li>
+              <li>生成历史支持查看与优选，优选图会作为后续质量方向参考。</li>
+            </ul>
+          </section>
+          <section>
+            <h3>图片节点操作</h3>
+            <ol>
+              <li>上传结构图，节点角色选择“渲染结构图”。</li>
+              <li>上传风格图，节点角色选择“风格参考图”。</li>
+              <li>把参考图节点连接到输出图片节点。</li>
+              <li>打开输出节点设置，选择“结构+风格”，填写提示词后提交。</li>
+            </ol>
+          </section>
+          <section>
+            <h3>视频节点操作</h3>
+            <ol>
+              <li>选择图生视频、文生视频或视频参考转换。</li>
+              <li>连接图片/视频参考，或在设置中上传首帧、尾帧、参考视频、参考音频。</li>
+              <li>设置时长、比例、分辨率、随机种子等参数。</li>
+              <li>提交生成后可预览视频，也可使用逐帧提取保存 PNG。</li>
+            </ol>
+          </section>
+          <section class="announcement-warning">
+            <h3>使用提醒</h3>
+            <p>若生成失败提示额度不足、上游超时或比例超限，请先切换渠道/模型或调整参考图比例后再试。页面每次进入首页都会显示此公告，方便查看最新说明。</p>
+          </section>
+        </div>
+        <footer>
+          <span>公告会在每次进入首页时弹出。</span>
+          <button type="button" data-announcement-close>我知道了</button>
+        </footer>
+      </div>
+    </div>
+
     <script src="./app.js"></script>
   </body>
 </html>
