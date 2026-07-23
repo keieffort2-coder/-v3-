@@ -1543,7 +1543,8 @@ async function submitRayinImageTask(apiKey, submitBody) {
   }
   let last = { ok: false, status: 0, payload: { error: "RayinAI request was not attempted" } };
 
-  for (const attempt of attempts) {
+  for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+    const attempt = attempts[attemptIndex];
     const baseHeaders = {
       Authorization: `Bearer ${apiKey}`,
       Accept: "*/*",
@@ -1584,7 +1585,7 @@ async function submitRayinImageTask(apiKey, submitBody) {
     last = { ok: false, status: response.status, payload };
     if (response.ok) return last;
     const retryableRayinMessage = isRetryableRayinMessage(formatUpstreamError(payload));
-    const hasNextRayinAttempt = attempts.indexOf(attempt) < attempts.length - 1;
+    const hasNextRayinAttempt = attemptIndex < attempts.length - 1;
     const canTryNextRayinModel = hasNextRayinAttempt && [400, 404, 422].includes(response.status);
     const canFallbackToNextRayinEndpoint = hasNextRayinAttempt && ([502, 503, 504, 524].includes(response.status) || retryableRayinMessage);
     if (!canTryNextRayinModel && !canFallbackToNextRayinEndpoint && ![404, 405, 429, 502, 503, 504, 524].includes(response.status) && !retryableRayinMessage) return last;
@@ -1687,7 +1688,7 @@ function getRayinAttemptInputRoles(body) {
 }
 
 function isRetryableRayinMessage(message) {
-  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|temporarily unavailable|bad gateway|gateway timeout|timeout occurred|a timeout occurred|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用/i.test(String(message || ""));
+  return /RayinAI 上游暂时不可用|上游图片生成服务内部错误|No available compatible accounts|compatible accounts|temporarily unavailable|bad gateway|gateway timeout|timeout occurred|a timeout occurred|rate limit|too many requests|model.*capacity|capacity|overloaded|模型.*满载|模型.*繁忙|暂时不可用|无可用.*账号|没有可用.*账号/i.test(String(message || ""));
 }
 
 function normalizeRayinImageBody(body) {
