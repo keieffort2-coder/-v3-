@@ -169,6 +169,8 @@ let isRestoring = false;
 let workspaceSidebarsHidden = localStorage.getItem(WORKSPACE_SIDE_STATE_KEY) === "true";
 const projectDataCache = new Map();
 let pendingDimensionSaveTimer = null;
+let pendingConnectionFrame = 0;
+let pendingDragFrame = 0;
 
 connectorSvg?.setAttribute("viewBox", "0 0 5000 5000");
 ensureMemoryUi();
@@ -949,6 +951,8 @@ canvas?.addEventListener("mousedown", (event) => {
     offsetY: (event.clientY - rect.top) / viewport.scale,
     startX: event.clientX,
     startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
     origins: new Map((selectedNodes.size ? [...selectedNodes] : [node]).map((item) => [
       item,
       {
@@ -1003,13 +1007,9 @@ document.addEventListener("mousemove", (event) => {
   }
 
   if (!dragState) return;
-  const dx = (event.clientX - dragState.startX) / viewport.scale;
-  const dy = (event.clientY - dragState.startY) / viewport.scale;
-  dragState.nodes.forEach((node) => {
-    const origin = dragState.origins.get(node);
-    moveNode(node, origin.x + dx, origin.y + dy);
-  });
-  updateConnections();
+  dragState.currentX = event.clientX;
+  dragState.currentY = event.clientY;
+  scheduleDragFrame();
 });
 
 document.addEventListener("mouseup", (event) => {
@@ -1023,7 +1023,10 @@ document.addEventListener("mouseup", (event) => {
   if (pendingCanvasDrag && !pendingCanvasDrag.mode) selectNode(null);
   pendingCanvasDrag = null;
   if (!finishedSelection && selectionBoxState) finishSelectionBox(event);
-  if (dragState) saveCurrentProject();
+  if (dragState) {
+    flushDragFrame();
+    saveCurrentProject();
+  }
   dragState = null;
   panState = null;
   canvas?.classList.remove("panning");
@@ -2495,10 +2498,18 @@ function refreshConnectionsAfterImages(scope) {
   });
 }
 
+function scheduleConnectionUpdate() {
+  if (pendingConnectionFrame) return;
+  pendingConnectionFrame = requestAnimationFrame(() => {
+    pendingConnectionFrame = 0;
+    updateConnections();
+  });
+}
+
 function refreshConnectionsSoon() {
-  requestAnimationFrame(updateConnections);
-  setTimeout(updateConnections, 60);
-  setTimeout(updateConnections, 180);
+  scheduleConnectionUpdate();
+  setTimeout(scheduleConnectionUpdate, 60);
+  setTimeout(scheduleConnectionUpdate, 180);
 }
 
 function ensureCustomButton(node, type) {
@@ -5787,6 +5798,26 @@ function moveNode(node, x, y) {
   node.style.top = `${nextY}px`;
 }
 
+function scheduleDragFrame() {
+  if (pendingDragFrame) return;
+  pendingDragFrame = requestAnimationFrame(() => {
+    pendingDragFrame = 0;
+    flushDragFrame();
+  });
+}
+
+function flushDragFrame() {
+  if (!dragState) return;
+  const dx = (dragState.currentX - dragState.startX) / viewport.scale;
+  const dy = (dragState.currentY - dragState.startY) / viewport.scale;
+  dragState.nodes.forEach((node) => {
+    const origin = dragState.origins.get(node);
+    if (!origin) return;
+    moveNode(node, origin.x + dx, origin.y + dy);
+  });
+  scheduleConnectionUpdate();
+}
+
 function startSelectionBoxFromPoint(clientX, clientY) {
   const rect = canvasContent.getBoundingClientRect();
   const start = {
@@ -5817,7 +5848,7 @@ function updateSelectionBox(event) {
   });
 
   const selected = [...canvasContent.querySelectorAll(".node")].filter((node) => rectsOverlap(getNodeWorldRect(node), { left, top, right: left + width, bottom: top + height }));
-  selectNodes(selected);
+  selectNodesIfChanged(selected);
 }
 
 function finishSelectionBox() {
@@ -6434,9 +6465,25 @@ function clearSelectedNodes() {
 }
 
 function selectNodes(nodes) {
-  clearSelectedNodes();
-  nodes.forEach(addSelectedNode);
-  if (!nodes.length) selectedNode = null;
+  const next = new Set(nodes.filter(Boolean));
+  selectedNodes.forEach((node) => {
+    if (!next.has(node)) {
+      node.classList.remove("selected");
+      selectedNodes.delete(node);
+    }
+  });
+  next.forEach((node) => {
+    if (!selectedNodes.has(node)) {
+      selectedNodes.add(node);
+      node.classList.add("selected");
+    }
+  });
+  selectedNode = nodes.at(-1) || null;
+}
+
+function selectNodesIfChanged(nodes) {
+  if (nodes.length === selectedNodes.size && nodes.every((node) => selectedNodes.has(node))) return;
+  selectNodes(nodes);
 }
 
 function zoomCanvas(factor, clientX, clientY) {
